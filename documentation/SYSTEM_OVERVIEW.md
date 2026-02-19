@@ -29,19 +29,19 @@ To ensure consistency and performance, the system follows these rules:
 - **State Management**: PostgreSQL (Relational Data), JWT (Session Management).
 ### 6. Progress & Audit Report
 
-#### ✅ Implemented Core Features
-- **Hardened 3-Factor Authentication**: Email/Pass + National ID Hash + Wallet Signature + Biometric Face Matching.
-- **Layered Rate Limiting**: IP-based and Wallet-based defense with progressive backoff.
-- **Global Uniqueness**: Enforced `file_hash` uniqueness to prevent replay attacks.
-- **Database Integrity**: Strict `CHECK` constraints on RBAC and data transparency.
+#### ✅ Implemented Core Features (Phase X Hardened)
+- **Gated Integrity Model**: Database state for "Approved" is now purely derived from on-chain Proof of Notarization (blockchain_receipts).
+- **Server Hash Authority**: Server-side SHA-256 computation using `multer`/`crypto` to eliminate client-side hash forgery.
+- **Semantic DB Triggers**: Mathematically enforced linkage between DB rows and EVM event logs.
+- **Atomic NTKR Pipeline**: Transaction-safe token deduction and document registration.
+- **Automated Reconciliation**: Background worker decodes EVM logs for deterministic status finalization.
 
-#### 🛡️ Engineering Risk Register
+#### 🛡️ Engineering Risk Register (Final Audit)
 
 | Risk ID | Component | Description | Status |
 | :--- | :--- | :--- | :--- |
 | R-001 | Database | Duplicate UNIQUE constraints on legacy columns. | **FIXED** |
-| R-002 | Auth | Brute-force / Credential Stuffing. | **MITIGATED**|
-| R-003 | Auth | Signature Replay Attacks. | **FIXED** |
-| R-004 | Storage | Duplicate Document Notarization. | **FIXED** |
-| R-005 | Frontend | Event Listener Leaks / Race Conditions. | **FIXED** |
-| R-006 | Network | Secret Exposure in .env files. | **RESIDUAL** |
+| R-006 | DB/API | Temporal Trust Window (DB Forgery). | **ELIMINATED** (Gated Integrity) |
+| R-007 | API | Client-side Hash Injection. | **PATCHED** (Server Authority) |
+| R-008 | Database | Manual Admin Status Override. | **BLOCKED** (DB Triggers/Role Gate) |
+| R-009 | DB/FILES | Hash Mismatch Post-Upload. | **PREVENTED** (Immutability Gate) |

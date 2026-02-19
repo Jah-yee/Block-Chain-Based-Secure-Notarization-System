@@ -11,6 +11,10 @@ interface INotaryRegistry {
     function isNotary(address _notary) external view returns (bool);
 }
 
+interface INTKToken {
+    function burnForAction(address notary) external;
+}
+
 /**
  * @title DocumentRegistry
  * @notice Central source of truth for BBSNS notarizations.
@@ -19,6 +23,8 @@ interface INotaryRegistry {
  */
 contract DocumentRegistry is Ownable, EIP712, ReentrancyGuard, Pausable {
     using ECDSA for bytes32;
+
+    INTKToken public ntkToken;
 
     enum Status { PENDING, APPROVED, REJECTED }
 
@@ -44,11 +50,12 @@ contract DocumentRegistry is Ownable, EIP712, ReentrancyGuard, Pausable {
     event GovernanceVoteRecorded(uint256 indexed proposalId, address indexed voter, string decision, string signature, uint256 timestamp);
     event UserBan(address indexed user, bytes32 reasonHash, address indexed bannedBy);
 
-    constructor(address _owner, address _notaryRegistry) 
+    constructor(address _owner, address _notaryRegistry, address _ntkToken) 
         Ownable(_owner) 
         EIP712("BBSNS_Protocol", "1") 
     {
         notaryRegistry = INotaryRegistry(_notaryRegistry);
+        ntkToken = INTKToken(_ntkToken);
     }
 
     /**
@@ -86,6 +93,10 @@ contract DocumentRegistry is Ownable, EIP712, ReentrancyGuard, Pausable {
         
         // 3. Verify Authorization
         require(notaryRegistry.isNotary(recoveredNotary), "DocumentRegistry: Signer is not an authorized Notary");
+
+        // 4. Enforce NTK Burn (Cryptographic fuel check)
+        // This will revert if the notary has insufficient NTK balance
+        ntkToken.burnForAction(recoveredNotary);
 
         // Professional Refinement: Timestamp window validation (e.g., 24h)
         require(block.timestamp <= timestamp + 1 days, "DocumentRegistry: Signature expired");

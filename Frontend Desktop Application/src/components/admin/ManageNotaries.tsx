@@ -26,8 +26,16 @@ export function ManageNotaries() {
   // Load Real Data
   const loadApplications = async () => {
     try {
-      const data = await api.getNotaryApplications();
-      setApplications(data);
+      const [pendingApps, activeNotaries] = await Promise.all([
+        api.getNotaryApplications(),
+        api.getNotaries()
+      ]);
+
+      // Normalize data
+      const normalizedPending = pendingApps.map((app: any) => ({ ...app, status: 'pending' }));
+      const normalizedActive = activeNotaries.map((n: any) => ({ ...n, status: 'approved' }));
+
+      setApplications([...normalizedPending, ...normalizedActive]);
     } catch (err: any) {
       console.error("Failed to load applications", err);
       toast.error(err.message || "Failed to load applications");
@@ -40,9 +48,9 @@ export function ManageNotaries() {
 
   const filteredApplications = applications.filter((app) => {
     const matchesSearch =
-      app.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      app.license_number.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === "all" || app.status.toLowerCase() === filterStatus;
+      (app.name || app.full_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (app.license_number || "").toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filterStatus === "all" || (app.status || "pending").toLowerCase() === filterStatus;
     // For now the API only returns pending, but filtering is good practice
     return matchesSearch && matchesFilter;
   });
@@ -74,7 +82,8 @@ export function ManageNotaries() {
     setViewDialog({ open: true, application: app });
   }
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string | undefined | null) => {
+    const safeStatus = status || "pending";
     const variants: Record<string, string> = {
       approved: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
       rejected: "bg-rose-500/10 text-rose-500 border-rose-500/20",
@@ -83,8 +92,8 @@ export function ManageNotaries() {
       kyc_verified: "bg-purple-500/10 text-purple-500 border-purple-500/20",
     };
     return (
-      <Badge className={`${variants[status.toLowerCase()] || variants.pending} border`}>
-        {status}
+      <Badge className={`${variants[safeStatus.toLowerCase()] || variants.pending} border`}>
+        {safeStatus}
       </Badge>
     );
   };
@@ -147,7 +156,7 @@ export function ManageNotaries() {
                 </TableRow>
               ) : filteredApplications.map((app) => (
                 <TableRow key={app.id} className="border-border hover:bg-muted/50">
-                  <TableCell className="text-foreground font-medium">{app.full_name}</TableCell>
+                  <TableCell className="text-foreground font-medium">{app.name || app.full_name}</TableCell>
                   <TableCell className="text-muted-foreground font-mono text-sm">{app.license_number}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{app.email}</TableCell>
                   <TableCell>{getStatusBadge(app.status)}</TableCell>
@@ -163,7 +172,7 @@ export function ManageNotaries() {
                         View
                       </Button>
 
-                      {(app.status === "pending" || app.status === "applied" || app.status.toLowerCase() === "kyc_verified") && (
+                      {((app.status || "pending") === "pending" || (app.status || "pending") === "applied" || (app.status || "pending").toLowerCase() === "kyc_verified") && (
                         <>
                           <Button
                             size="sm"
@@ -200,7 +209,7 @@ export function ManageNotaries() {
             <DialogTitle>Confirm {confirmDialog.action === "approve" ? "Approval" : "Rejection"}</DialogTitle>
             <DialogDescription className="text-muted-foreground">
               Are you sure you want to {confirmDialog.action} the application for {" "}
-              <span className="text-primary">{confirmDialog.application?.full_name}</span>?
+              <span className="text-primary">{confirmDialog.application?.name || confirmDialog.application?.full_name}</span>?
               {confirmDialog.action === "approve" && " This will create a verified Notary account and enable access."}
             </DialogDescription>
           </DialogHeader>
@@ -231,16 +240,19 @@ export function ManageNotaries() {
         <DialogContent className="bg-card border-border text-foreground">
           <DialogHeader>
             <DialogTitle>Application Details</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Review full profile and verification data for this notary.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
               <h4 className="text-sm font-medium text-muted-foreground">Applicant Name</h4>
-              <p className="text-foreground">{viewDialog.application?.full_name}</p>
+              <p className="text-foreground">{viewDialog.application?.name || viewDialog.application?.full_name}</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h4 className="text-sm font-medium text-muted-foreground">License Number</h4>
-                <p className="font-mono text-primary">{viewDialog.application?.license_number}</p>
+                <p className="font-mono text-primary">{viewDialog.application?.license_number || "Not provided"}</p>
               </div>
               <div>
                 <h4 className="text-sm font-medium text-muted-foreground">Nationality</h4>
@@ -250,7 +262,7 @@ export function ManageNotaries() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h4 className="text-sm font-medium text-muted-foreground">Phone</h4>
-                <p className="text-foreground">{viewDialog.application?.phone}</p>
+                <p className="text-foreground">{viewDialog.application?.phone || "Not provided"}</p>
               </div>
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-muted-foreground">Verification Status</h4>

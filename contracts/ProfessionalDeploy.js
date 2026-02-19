@@ -58,7 +58,7 @@ async function main() {
 
         // 3. Deploy Registries
         const { addr: notaryRegistryAddr } = await deploy("NotaryRegistry", "NotaryRegistry", multiSigAddr);
-        const { addr: docRegistryAddr } = await deploy("DocumentRegistry", "DocumentRegistry", multiSigAddr, notaryRegistryAddr);
+        const { addr: docRegistryAddr } = await deploy("DocumentRegistry", "DocumentRegistry", multiSigAddr, notaryRegistryAddr, ntkAddr);
 
         // 4. Consolidate Authority (Tokens -> MultiSig)
         console.log(`\n🔒 Consolidating token authority to MultiSig...`);
@@ -73,26 +73,47 @@ async function main() {
         console.log(`   - NTKR: Revoking Admin from Deployer...`);
         await (await ntkr.revokeRole(DEFAULT_ADMIN_ROLE, wallet.address)).wait();
 
-        // 5. Update .env
-        let envContent = fs.readFileSync(ENV_PATH, "utf-8");
-        const update = (key, val) => {
-            const regex = new RegExp(`^${key}=.*`, 'm');
-            if (regex.test(envContent)) {
-                envContent = envContent.replace(regex, `${key}=${val}`);
-            } else {
-                envContent += `\n${key}=${val}`;
+        // 5. Update Backend .env
+        const updateEnvFile = (filePath, updates) => {
+            if (!fs.existsSync(filePath)) {
+                console.warn(`⚠️  File not found: ${filePath}`);
+                return;
             }
+            let content = fs.readFileSync(filePath, "utf-8");
+            for (const [key, val] of Object.entries(updates)) {
+                const regex = new RegExp(`^${key}=.*`, 'm');
+                if (regex.test(content)) {
+                    content = content.replace(regex, `${key}=${val}`);
+                } else {
+                    content += `\n${key}=${val}`;
+                }
+            }
+            fs.writeFileSync(filePath, content);
+            console.log(`✅ Updated ${filePath}`);
         };
 
-        update("NTK_CONTRACT_ADDRESS", ntkAddr);
-        update("NTKR_CONTRACT_ADDRESS", ntkrAddr);
-        update("MULTISIG_CONTRACT_ADDRESS", multiSigAddr);
-        update("NOTARY_REGISTRY_ADDRESS", notaryRegistryAddr);
-        update("DOCUMENT_REGISTRY_ADDRESS", docRegistryAddr);
+        const backendUpdates = {
+            "NTK_CONTRACT_ADDRESS": ntkAddr,
+            "NTKR_CONTRACT_ADDRESS": ntkrAddr,
+            "MULTISIG_CONTRACT_ADDRESS": multiSigAddr,
+            "NOTARY_REGISTRY_ADDRESS": notaryRegistryAddr,
+            "DOCUMENT_REGISTRY_ADDRESS": docRegistryAddr
+        };
 
-        fs.writeFileSync(ENV_PATH, envContent);
-        console.log(`\n🔧 .env updated with complete professional stack.`);
-        console.log(`\n🎉 PROFESSIONAL STACK FULLY DEPLOYED & HARDENED!`);
+        updateEnvFile(ENV_PATH, backendUpdates);
+
+        // 6. Update Frontend .env.local
+        const FRONTEND_ENV_PATH = path.join(__dirname, "../Web-App/.env.local");
+        const frontendUpdates = {
+            "NEXT_PUBLIC_NTK_CONTRACT_ADDRESS": ntkAddr,
+            "NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS": ntkrAddr,
+            "NEXT_PUBLIC_MULTISIG_ADDRESS": multiSigAddr,
+            "NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS": docRegistryAddr
+        };
+
+        updateEnvFile(FRONTEND_ENV_PATH, frontendUpdates);
+
+        console.log(`\n🎉 PROFESSIONAL STACK FULLY DEPLOYED & SYNCED!`);
         console.log(`-----------------------------------------`);
         console.log(`NTK:             ${ntkAddr}`);
         console.log(`NTKR:            ${ntkrAddr}`);

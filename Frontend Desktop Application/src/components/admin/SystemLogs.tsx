@@ -44,11 +44,11 @@ export function SystemLogs() {
 
   const filteredLogs = logs.filter((log) => {
     if (filterType === "all") return true;
-    return log.action.toLowerCase().includes(filterType.toLowerCase());
+    return (log.action?.toLowerCase() || "").includes(filterType.toLowerCase());
   }).filter((log) =>
-    log.actor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (log.tx_hash && log.tx_hash.toLowerCase().includes(searchTerm.toLowerCase()))
+    (log.actor?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+    (log.details?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+    (log.tx_hash?.toLowerCase() || "").includes(searchTerm.toLowerCase())
   );
 
   const getStatusBadge = (status: string) => {
@@ -215,6 +215,9 @@ export function SystemLogs() {
               <div>
                 <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-2">Transaction Proof</p>
                 <DialogTitle className="text-3xl font-black">{selectedLog?.action.replace(/_/g, ' ')}</DialogTitle>
+                <DialogDescription className="text-muted-foreground text-[10px] uppercase font-bold tracking-widest mt-1">
+                  Technical audit details for system event #{selectedLog?.id}
+                </DialogDescription>
               </div>
               {selectedLog && getStatusBadge(selectedLog.status)}
             </div>

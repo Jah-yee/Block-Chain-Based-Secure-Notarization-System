@@ -120,6 +120,10 @@ const api = {
     return this.request('/api/notaries/applications');
   },
 
+  async getNotaries() {
+    return this.request('/api/notaries');
+  },
+
   async approveNotaryApplication(id) {
     return this.request(`/api/notaries/applications/${id}/approve`, { method: 'POST' });
   },
