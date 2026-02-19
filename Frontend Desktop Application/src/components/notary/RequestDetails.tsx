@@ -99,7 +99,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 }
             }
 
-            const DOCUMENT_REGISTRY_ADDRESS = "0xEA5EaDcCA97c101dB88821A1bF92677603e5e588";
+            const DOCUMENT_REGISTRY_ADDRESS = "0x52A83224F03aFE983C7672A9f0A04FE423766402";
             const timestamp = Math.floor(Date.now() / 1000);
 
             const domain = {
