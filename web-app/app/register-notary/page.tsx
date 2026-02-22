@@ -46,7 +46,7 @@ const LivenessCheck = dynamic(
 )
 
 export default function RegisterNotaryPage() {
-    const [step, setStep] = useState(1) // 1: Form, 2: Verification
+    const [step, setStep] = useState(1) // 1: Form, 2: Biometric, 3: Wallet Sign
     const [applicationId, setApplicationId] = useState<number | null>(null)
     const [isLivenessDone, setIsLivenessDone] = useState(false)
     const [isWalletSigned, setIsWalletSigned] = useState(false)
@@ -74,7 +74,11 @@ export default function RegisterNotaryPage() {
     const { toast } = useToast()
 
     const handleInputChange = (field: string, value: string) => {
-        setFormData((prev) => ({ ...prev, [field]: value }))
+        let filteredValue = value;
+        if (field === "phone") filteredValue = value.replace(/[^\d+]/g, "");
+        else if (field === "name") filteredValue = value.replace(/[^a-zA-Z\s]/g, "");
+        else if (field === "nationalId" || field === "license") filteredValue = value.replace(/[^a-zA-Z0-9]/g, "");
+        setFormData((prev) => ({ ...prev, [field]: filteredValue }));
     }
 
     const handleSubmitPhase1 = async () => {
@@ -88,11 +92,7 @@ export default function RegisterNotaryPage() {
         }
 
         if (!wallet) {
-            toast({
-                title: "Wallet Link Required",
-                description: "Please connect MetaMask to link your professional identity.",
-                variant: "destructive"
-            });
+            toast({ title: "Wallet Link Required", description: "Please connect MetaMask to link your professional identity.", variant: "destructive" });
             return;
         }
 
@@ -129,20 +129,10 @@ export default function RegisterNotaryPage() {
             if (!res.ok) throw new Error(data.error || "Submission failed");
 
             setApplicationId(data.id);
+            toast({ title: "Profile Secured", description: "Phase 1 complete. Proceeding to Biometric Verification." });
+            setStep(2); // Auto-transition
         } catch (e: any) {
-            if (e.message.includes("pending")) {
-                toast({
-                    title: "Application in Progress",
-                    description: `${e.message} Use the same wallet to finish Phase 2.`,
-                    action: (
-                        <Button variant="outline" size="sm" onClick={() => setStep(2)}>
-                            Resume Verification
-                        </Button>
-                    )
-                });
-            } else {
-                toast({ title: "Submission Failed", description: e.message, variant: "destructive" });
-            }
+            toast({ title: "Submission Failed", description: e.message, variant: "destructive" });
         } finally {
             setIsLoading(false);
         }
@@ -173,18 +163,12 @@ export default function RegisterNotaryPage() {
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/notaries/applications/${applicationId}/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    signature,
-                    faceDescriptor
-                })
+                body: JSON.stringify({ signature, faceDescriptor })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Verification failed on server.");
 
-            toast({
-                title: "KYC Verified & Locked",
-                description: "Your application is now under administrative review.",
-            });
+            toast({ title: "KYC Verified & Locked", description: "Your application is now under administrative review." });
             router.push("/");
         } catch (err: any) {
             toast({ title: "Verification Error", description: err.message, variant: "destructive" });
@@ -201,71 +185,71 @@ export default function RegisterNotaryPage() {
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
 
-            <div className="relative z-10 container max-w-5xl mx-auto py-12 px-4">
+            <div className="relative z-10 container max-w-6xl mx-auto py-12 px-4">
                 {/* Navigation */}
                 <motion.button
-                    onClick={() => router.back()}
-                    className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-8 group"
+                    onClick={() => step > 1 ? setStep(step - 1) : router.back()}
+                    className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-10 group"
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                 >
                     <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-                    Back to Home
+                    {step > 1 ? `Back to Step ${step - 1}` : "Back to Home"}
                 </motion.button>
 
-                <div className="grid lg:grid-cols-12 gap-12 items-start">
+                <div className="grid lg:grid-cols-12 gap-16 items-start">
                     {/* Left Side: Info & Steps */}
                     <motion.div
-                        className="lg:col-span-5 space-y-8"
+                        className="lg:col-span-5 space-y-10"
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.1 }}
                     >
                         <div>
-                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-wider mb-4">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-wider mb-6">
                                 <Shield size={14} /> Official Registration
                             </div>
-                            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-4 bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                                Apply to become a <br />
-                                <span className="text-primary">Verified Notary</span>
+                            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-6 bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+                                Become a <br />
+                                <span className="text-primary text-glow">Verified Notary</span>
                             </h1>
-                            <p className="text-slate-400 text-lg leading-relaxed">
-                                Join our decentralized network of trusted notaries. Our automated system ensures high security through multi-factor authentication and blockchain binding.
+                            <p className="text-slate-400 text-lg leading-relaxed max-w-md">
+                                Join our decentralized network of trusted professionals. Our automated registration ensures zero-trust security through multi-factor authentication.
                             </p>
                         </div>
 
-                        <div className="space-y-6">
+                        <div className="space-y-8">
                             {[
-                                { step: 1, title: "Intent & Information", desc: "Submit your professional credentials and identity info.", icon: FileText },
-                                { step: 2, title: "Biometric & Wallet Binding", desc: "Perform liveness check and sign with your wallet.", icon: UserCheck },
-                                { step: 3, title: "Review & Activation", desc: "Administrator reviews your application for final activation.", icon: Lock },
+                                { s: 1, title: "Intent & Info", desc: "Submit your professional credentials.", icon: FileText },
+                                { s: 2, title: "Biometric Signal", desc: "Neural liveness verification.", icon: Camera },
+                                { s: 3, title: "Wallet Binding", desc: "Cryptographic identity locking.", icon: Wallet },
                             ].map((item) => (
-                                <div key={item.step} className="flex gap-4 group">
+                                <div key={item.s} className="flex gap-5 group">
                                     <div className={cn(
-                                        "w-10 h-10 rounded-xl flex items-center justify-center border transition-all duration-500",
-                                        step >= item.step
-                                            ? "bg-primary border-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]"
-                                            : "bg-slate-900 border-slate-800 text-slate-500"
+                                        "w-12 h-12 rounded-2xl flex items-center justify-center border transition-all duration-500",
+                                        step === item.s
+                                            ? "bg-primary border-primary text-white shadow-[0_0_25px_rgba(59,130,246,0.4)]"
+                                            : (step > item.s ? "bg-emerald-500 border-emerald-500 text-white" : "bg-slate-900/50 border-slate-800 text-slate-500")
                                     )}>
-                                        <item.icon size={20} />
+                                        {step > item.s ? <Check size={22} /> : <item.icon size={22} />}
                                     </div>
-                                    <div>
+                                    <div className="space-y-1">
                                         <h3 className={cn(
-                                            "font-bold transition-colors",
-                                            step >= item.step ? "text-white" : "text-slate-500"
+                                            "font-bold text-lg transition-colors",
+                                            step >= item.s ? "text-white" : "text-slate-500"
                                         )}>{item.title}</h3>
-                                        <p className="text-sm text-slate-500">{item.desc}</p>
+                                        <p className="text-sm text-slate-500 leading-relaxed">{item.desc}</p>
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="p-6 rounded-2xl bg-blue-500/5 border border-blue-500/10 space-y-3">
+                        <div className="p-8 rounded-3xl bg-blue-500/5 border border-blue-500/10 space-y-4">
                             <h4 className="font-bold flex items-center gap-2 text-blue-400">
-                                <Lock size={16} /> Privacy & Zero-Trust
+                                <Lock size={18} /> Privacy & Zero-Trust
                             </h4>
-                            <p className="text-xs text-slate-400 leading-relaxed">
-                                We follow a strict zero-trust policy. Your biometric data is processed instantly and deleted after verification. Unapproved applications are permanently purged from our servers to ensure your privacy.
+                            <p className="text-xs text-slate-400 leading-relaxed font-medium">
+                                We follow a strict zero-trust policy. Your biometric data is processed instantly and never stored in plain text. Unapproved applications are automatically purged to ensure permanent privacy.
                             </p>
                         </div>
                     </motion.div>
@@ -273,263 +257,171 @@ export default function RegisterNotaryPage() {
                     {/* Right Side: Form Content */}
                     <motion.div
                         className="lg:col-span-7"
-                        initial={{ opacity: 0, scale: 0.95 }}
+                        initial={{ opacity: 0, scale: 0.98 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: 0.2 }}
                     >
-                        <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800 p-8 rounded-[2rem] shadow-2xl relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-8 opacity-10">
-                                <Shield size={120} />
+                        <div className="bg-slate-900/40 backdrop-blur-2xl border border-slate-800/60 p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden min-h-[650px] flex flex-col">
+                            <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
+                                <Shield size={160} />
                             </div>
 
                             <AnimatePresence mode="wait">
                                 {step === 1 ? (
-                                    <motion.div
-                                        key="step1"
-                                        initial={{ opacity: 0, x: 20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0, x: -20 }}
-                                        className="space-y-6"
-                                    >
-                                        <div className="grid md:grid-cols-2 gap-6">
-                                            <div className="space-y-2">
-                                                <Label className="text-slate-300">Full Legal Name</Label>
-                                                <Input
-                                                    placeholder="As shown on ID"
-                                                    className="bg-slate-950 border-slate-800 h-12 focus:ring-primary"
-                                                    value={formData.name}
-                                                    onChange={(e) => handleInputChange("name", e.target.value)}
-                                                />
+                                    <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8 flex-1">
+                                        <div className="grid md:grid-cols-2 gap-8">
+                                            <div className="space-y-3">
+                                                <Label className="text-slate-300 font-semibold ml-1">Full Legal Name</Label>
+                                                <Input placeholder="As shown on ID" className="bg-slate-950/50 border-slate-800 h-14 text-lg focus:ring-primary" value={formData.name} onChange={(e) => handleInputChange("name", e.target.value)} />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label className="text-slate-300">Official Email</Label>
-                                                <Input
-                                                    type="email"
-                                                    placeholder="email@example.com"
-                                                    className="bg-slate-950 border-slate-800 h-12"
-                                                    value={formData.email}
-                                                    onChange={(e) => handleInputChange("email", e.target.value)}
-                                                />
+                                            <div className="space-y-3">
+                                                <Label className="text-slate-300 font-semibold ml-1">Official Email</Label>
+                                                <Input type="email" placeholder="email@example.com" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} />
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label className="text-slate-300">Nationality</Label>
+                                        <div className="space-y-3">
+                                            <Label className="text-slate-300 font-semibold ml-1">Nationality</Label>
                                             <Popover open={openNationality} onOpenChange={setOpenNationality}>
                                                 <PopoverTrigger asChild>
-                                                    <Button
-                                                        variant="outline"
-                                                        className="w-full justify-between h-12 px-4 bg-slate-950 border-slate-800 hover:bg-slate-900"
-                                                    >
-                                                        <span className="flex items-center gap-2 truncate">
-                                                            <span className="text-xl leading-none">{selectedNationality.flag}</span>
-                                                            <span className="font-medium text-slate-300">{selectedNationality.name}</span>
+                                                    <Button variant="outline" className="w-full justify-between h-14 px-5 bg-slate-950/50 border-slate-800 hover:bg-slate-900/50">
+                                                        <span className="flex items-center gap-3">
+                                                            <span className="text-2xl">{selectedNationality.flag}</span>
+                                                            <span className="text-lg font-medium text-slate-200">{selectedNationality.name}</span>
                                                         </span>
-                                                        <Globe className="h-4 w-4 opacity-50 text-primary" />
+                                                        <Globe className="h-5 w-5 opacity-40 text-primary" />
                                                     </Button>
                                                 </PopoverTrigger>
-                                                <PopoverContent className="w-[350px] p-0 bg-slate-950 border-slate-800 shadow-2xl z-[100]" align="start">
-                                                    <Command shouldFilter={true}>
-                                                        <CommandInput placeholder="Search country..." className="h-12 border-none focus:ring-0 text-white" />
-                                                        <CommandList className="max-h-[300px] scrollbar-thin scrollbar-thumb-slate-800">
-                                                            <CommandEmpty>No results found.</CommandEmpty>
-                                                            <CommandGroup heading="Countries">
-                                                                {countries.map((c) => (
-                                                                    <CommandItem
-                                                                        key={c.code}
-                                                                        value={`${c.name} ${c.code}`}
-                                                                        onSelect={() => { setSelectedNationality(c); setOpenNationality(false); }}
-                                                                        className="hover:bg-slate-900 text-slate-300"
-                                                                    >
-                                                                        <span className="mr-3 text-xl">{c.flag}</span> {c.name}
-                                                                    </CommandItem>
-                                                                ))}
-                                                            </CommandGroup>
+                                                <PopoverContent className="w-[400px] p-0 bg-slate-950 border-slate-800 shadow-2xl z-[100]">
+                                                    <Command shouldFilter>
+                                                        <CommandInput placeholder="Search countries..." className="h-14" />
+                                                        <CommandList className="max-h-[300px]">
+                                                            {countries.map((c) => (
+                                                                <CommandItem key={c.code} value={c.name} onSelect={() => { setSelectedNationality(c); setOpenNationality(false); }} className="h-12">
+                                                                    <span className="text-xl mr-3">{c.flag}</span> {c.name}
+                                                                </CommandItem>
+                                                            ))}
                                                         </CommandList>
                                                     </Command>
                                                 </PopoverContent>
                                             </Popover>
                                         </div>
 
-                                        <div className="grid md:grid-cols-2 gap-6">
-                                            <div className="space-y-2">
-                                                <Label className="text-slate-300">National ID Number</Label>
-                                                <Input
-                                                    placeholder="ID Card / Passport No."
-                                                    className="bg-slate-950 border-slate-800 h-12"
-                                                    value={formData.nationalId}
-                                                    onChange={(e) => handleInputChange("nationalId", e.target.value)}
-                                                />
+                                        <div className="grid md:grid-cols-2 gap-8">
+                                            <div className="space-y-3">
+                                                <Label className="text-slate-300 font-semibold ml-1">National ID Number</Label>
+                                                <Input placeholder="ID Card / Passport No." className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.nationalId} onChange={(e) => handleInputChange("nationalId", e.target.value)} />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label className="text-slate-300">Login Password</Label>
-                                                <Input
-                                                    type="password"
-                                                    placeholder="Choose a strong password"
-                                                    className="bg-slate-950 border-slate-800 h-12"
-                                                    value={formData.password}
-                                                    onChange={(e) => handleInputChange("password", e.target.value)}
-                                                />
+                                            <div className="space-y-3">
+                                                <Label className="text-slate-300 font-semibold ml-1">Login Password</Label>
+                                                <Input type="password" placeholder="••••••••" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.password} onChange={(e) => handleInputChange("password", e.target.value)} />
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label className="text-slate-300">Mobile Number</Label>
-                                            <div className="flex gap-2">
+                                        <div className="space-y-3">
+                                            <Label className="text-slate-300 font-semibold ml-1">Mobile Number</Label>
+                                            <div className="flex gap-3">
                                                 <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" className="w-[100px] h-12 px-3 bg-slate-950 border-slate-800">
-                                                            <span className="flex items-center gap-1 font-bold text-primary">{selectedCountry.dial_code}</span>
+                                                        <Button variant="outline" className="h-14 px-4 bg-slate-950/50 border-slate-800 font-bold text-primary text-lg">
+                                                            {selectedCountry.dial_code}
                                                         </Button>
                                                     </PopoverTrigger>
-                                                    <PopoverContent className="w-[300px] p-0 bg-slate-950 border-slate-800 z-[100]">
-                                                        <Command shouldFilter={true}>
-                                                            <CommandInput placeholder="Search codes..." className="h-12" />
-                                                            <CommandList className="max-h-[250px]">
-                                                                {countries.map((c) => (
-                                                                    <CommandItem
-                                                                        key={`dial-${c.code}`}
-                                                                        value={`${c.name} ${c.dial_code}`}
-                                                                        onSelect={() => { setSelectedCountry(c); setOpenCombobox(false); }}
-                                                                        className="hover:bg-slate-900"
-                                                                    >
-                                                                        <span className="mr-2">{c.flag}</span> {c.name} ({c.dial_code})
-                                                                    </CommandItem>
-                                                                ))}
-                                                            </CommandList>
-                                                        </Command>
-                                                    </PopoverContent>
+                                                    <PopoverContent className="bg-slate-950 border-slate-800"><Command shouldFilter><CommandInput /><CommandList>{countries.map(c => (<CommandItem key={c.code} onSelect={() => { setSelectedCountry(c); setOpenCombobox(false); }}>{c.flag} {c.dial_code}</CommandItem>))}</CommandList></Command></PopoverContent>
                                                 </Popover>
-                                                <Input
-                                                    placeholder="000 000 000"
-                                                    className="flex-1 bg-slate-950 border-slate-800 h-12"
-                                                    value={formData.phone}
-                                                    onChange={(e) => handleInputChange("phone", e.target.value)}
-                                                />
+                                                <Input placeholder="123 456 789" className="flex-1 bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.phone} onChange={(e) => handleInputChange("phone", e.target.value)} />
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label className="text-slate-300">Notary License Number</Label>
-                                            <Input
-                                                placeholder="Issued official license code"
-                                                className="bg-slate-950 border-slate-800 h-12"
-                                                value={formData.license}
-                                                onChange={(e) => handleInputChange("license", e.target.value)}
-                                            />
+                                        <div className="space-y-3">
+                                            <Label className="text-slate-300 font-semibold ml-1">Notary License Number</Label>
+                                            <Input placeholder="Official License Code" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.license} onChange={(e) => handleInputChange("license", e.target.value)} />
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label className="text-slate-300">Professional Experience & Declaration of Intent</Label>
-                                            <Textarea
-                                                placeholder="State your professional background and your intent to act as a certified notary public within the system..."
-                                                className="bg-slate-950 border-slate-800 min-h-[120px] p-4 focus:ring-primary"
-                                                value={formData.experience}
-                                                onChange={(e) => handleInputChange("experience", e.target.value)}
-                                            />
+                                        <div className="space-y-3">
+                                            <Label className="text-slate-300 font-semibold ml-1">Professional Intent</Label>
+                                            <Textarea placeholder="Describe your background and intent..." className="bg-slate-950/50 border-slate-800 min-h-[120px] p-4 text-base focus:ring-primary" value={formData.experience} onChange={(e) => handleInputChange("experience", e.target.value)} />
                                         </div>
 
-                                        <Button
-                                            className="w-full h-14 text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-95 flex items-center justify-center gap-2 group"
-                                            onClick={handleSubmitPhase1}
-                                            disabled={isLoading}
-                                        >
-                                            {isLoading ? "Submitting Application..." : "Submit Application & Continue"}
-                                            <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-                                        </Button>
+                                        <div className="pt-4 mt-auto">
+                                            <Button className="w-full h-16 text-xl font-bold bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 group uppercase tracking-wide" onClick={handleSubmitPhase1} disabled={isLoading}>
+                                                {isLoading ? "Validating..." : "Submit & Continue"}
+                                                <ArrowRight className="ml-3 group-hover:translate-x-1 transition-transform" />
+                                            </Button>
+                                        </div>
                                     </motion.div>
                                 ) : (
-                                    <motion.div
-                                        key="step2"
-                                        initial={{ opacity: 0, x: 20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        exit={{ opacity: 0, x: -20 }}
-                                        className="space-y-10 py-4"
-                                    >
-                                        <div className="text-center space-y-2">
-                                            <h2 className="text-2xl font-bold">Identity & Wallet Security</h2>
-                                            <p className="text-slate-400">Finalize your application by proving your identity and linking your wallet.</p>
-                                        </div>
+                                    step === 2 ? (
+                                        <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10 text-center flex-1 flex flex-col justify-center py-6">
+                                            <div className="space-y-4">
+                                                <div className="mx-auto w-24 h-24 bg-primary/10 rounded-[2rem] flex items-center justify-center text-primary mb-2 shadow-inner">
+                                                    <Camera size={48} />
+                                                </div>
+                                                <h2 className="text-3xl font-bold tracking-tight">Biometric Liveness</h2>
+                                                <p className="text-slate-400 text-lg max-w-sm mx-auto">Center your face in the frame to confirm identity signal.</p>
+                                            </div>
 
-                                        <div className="space-y-6">
+                                            <div className="bg-slate-950/80 rounded-[2rem] overflow-hidden border border-slate-800 shadow-3xl max-w-md mx-auto w-full aspect-video flex items-center justify-center relative group">
+                                                <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                                                <LivenessCheck onComplete={(desc) => {
+                                                    setFaceDescriptor(desc);
+                                                    setIsLivenessDone(true);
+                                                    toast({ title: "Signal Valid", description: "Identity verified successfully." });
+                                                    setTimeout(() => setStep(3), 2000);
+                                                }} />
+                                            </div>
+
+                                            {isLivenessDone ? (
+                                                <div className="flex items-center gap-3 text-emerald-400 font-bold justify-center py-4 px-8 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 max-w-xs mx-auto animate-in fade-in zoom-in duration-500">
+                                                    <CheckCircle2 size={24} /> Neural Signal Locked
+                                                </div>
+                                            ) : (
+                                                <div className="h-16" /> /* Placeholder to prevent jump */
+                                            )}
+                                        </motion.div>
+                                    ) : (
+                                        <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-12 flex-1 flex flex-col justify-center">
+                                            <div className="text-center space-y-4">
+                                                <div className="mx-auto w-24 h-24 bg-primary/10 rounded-[2rem] flex items-center justify-center text-primary shadow-inner">
+                                                    <Wallet size={48} />
+                                                </div>
+                                                <h2 className="text-3xl font-bold tracking-tight">Cryptographic Binding</h2>
+                                                <p className="text-slate-400 text-lg">Lock your professional profile to your wallet address.</p>
+                                            </div>
+
                                             <div className={cn(
-                                                "p-6 rounded-[1.5rem] border transition-all duration-500",
-                                                isLivenessDone
-                                                    ? "bg-emerald-500/10 border-emerald-500/30"
-                                                    : "bg-slate-950/50 border-slate-800"
+                                                "p-8 rounded-3xl border transition-all duration-700 mx-auto w-full max-w-lg",
+                                                isWalletSigned ? "bg-emerald-500/10 border-emerald-500/30" : "bg-slate-950/50 border-slate-800"
                                             )}>
-                                                <div className="flex items-center justify-between gap-4 mb-4">
-                                                    <div className="flex items-center gap-4">
+                                                <div className="flex items-center justify-between gap-6">
+                                                    <div className="flex items-center gap-5">
                                                         <div className={cn(
-                                                            "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-                                                            isLivenessDone ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"
+                                                            "w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform",
+                                                            isWalletSigned ? "bg-emerald-500 text-white scale-110" : "bg-slate-800 text-slate-400"
                                                         )}>
-                                                            <Camera size={24} />
+                                                            <Lock size={28} />
                                                         </div>
-                                                        <div>
-                                                            <h4 className="font-bold">Face Liveness Verification</h4>
-                                                            <p className="text-xs text-slate-500 italic">Neural biometric scanning.</p>
+                                                        <div className="space-y-1">
+                                                            <h4 className="font-bold text-xl">Wallet Signature</h4>
+                                                            <p className="text-sm text-slate-500 font-mono tracking-tighter uppercase">ID_REF: {applicationId}</p>
                                                         </div>
                                                     </div>
+                                                    <Button onClick={handleSignWallet} disabled={isWalletSigned || isLoading} variant={isWalletSigned ? "secondary" : "default"} className="h-14 px-8 font-bold text-lg rounded-xl">
+                                                        {isWalletSigned ? "Signed ✓" : "Sign & Bind"}
+                                                    </Button>
                                                 </div>
-
-                                                {!isLivenessDone ? (
-                                                    <LivenessCheck onComplete={(desc) => {
-                                                        setFaceDescriptor(desc);
-                                                        setIsLivenessDone(true);
-                                                        toast({ title: "Biometric Success", description: "Face descriptor generated successfully." });
-                                                    }} />
-                                                ) : (
-                                                    <div className="flex items-center gap-2 text-emerald-400 font-bold justify-center py-4 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
-                                                        <CheckCircle2 size={20} /> Verified Biometric Signal
-                                                    </div>
-                                                )}
                                             </div>
 
-                                            {/* Wallet Sign Card */}
-                                            <div className={cn(
-                                                "p-6 rounded-[1.5rem] border transition-all duration-500 flex items-center justify-between gap-4",
-                                                isWalletSigned
-                                                    ? "bg-emerald-500/10 border-emerald-500/30"
-                                                    : "bg-slate-950/50 border-slate-800",
-                                                !isLivenessDone && "opacity-50 grayscale"
-                                            )}>
-                                                <div className="flex items-center gap-4">
-                                                    <div className={cn(
-                                                        "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-                                                        isWalletSigned ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"
-                                                    )}>
-                                                        <Wallet size={24} />
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-bold">Cryptographic Wallet Binding</h4>
-                                                        <p className="text-xs text-slate-500 truncate max-w-[200px]">Sign: APP-{applicationId || '000'}</p>
-                                                    </div>
-                                                </div>
-                                                <Button
-                                                    onClick={handleSignWallet}
-                                                    variant={isWalletSigned ? "secondary" : "default"}
-                                                    disabled={!isLivenessDone || isWalletSigned || isLoading}
-                                                    className="min-w-[120px]"
-                                                >
-                                                    {isWalletSigned ? "Bound 🖋️" : "Sign & Bind"}
+                                            <div className="space-y-5 pt-8 mt-auto">
+                                                <Button className="w-full h-16 text-2xl font-extrabold bg-blue-600 hover:bg-blue-500 shadow-2xl shadow-blue-900/40 rounded-2xl uppercase tracking-wider" disabled={!isWalletSigned || isLoading} onClick={handleFinalizeVerification}>
+                                                    {isLoading ? "Locking Profile..." : "Finalize Registration"}
                                                 </Button>
+                                                <p className="text-xs text-center text-slate-500 px-12 leading-relaxed font-medium">
+                                                    Once finalized, your data enters a secure review state. You will be cleared for on-chain operations within 24 hours.
+                                                </p>
                                             </div>
-                                        </div>
-
-                                        <div className="space-y-4">
-                                            <Button
-                                                className="w-full h-14 text-lg font-extrabold bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-900/40"
-                                                disabled={!isLivenessDone || !isWalletSigned || isLoading}
-                                                onClick={handleFinalizeVerification}
-                                            >
-                                                {isLoading ? "Processing Final Step..." : "Finalize & Lock Profile"}
-                                            </Button>
-                                            <p className="text-[10px] text-center text-slate-500 px-8 leading-relaxed">
-                                                By finalizing, your profile enters the <strong>LOCKED</strong> state. You will be notified via email once an administrator activates your account. Your identity data is strictly protected.
-                                            </p>
-                                        </div>
-                                    </motion.div>
+                                        </motion.div>
+                                    )
                                 )}
                             </AnimatePresence>
                         </div>
@@ -538,17 +430,14 @@ export default function RegisterNotaryPage() {
             </div>
 
             <style jsx global>{`
-        .glow-effect {
-          box-shadow: 0 0 60px 10px rgba(59, 130, 246, 0.3);
-        }
-        .scrollbar-thin::-webkit-scrollbar {
-          width: 6px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb {
-          background: #1e293b;
-          border-radius: 10px;
-        }
-      `}</style>
+                .text-glow {
+                    text-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+                }
+                .shadow-3xl {
+                    box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.5);
+                }
+            `}</style>
         </div>
-    )
+    );
 }
+

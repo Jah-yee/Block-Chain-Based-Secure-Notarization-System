@@ -75,13 +75,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
                 const provider = new ethers.BrowserProvider(window.ethereum);
                 const bnbBal = await provider.getBalance(connectedAccount);
 
+                let ntkrBal = "0";
+                let ntkBal = "0";
+                const ntkrAddr = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS;
+                const ntkAddr = process.env.NEXT_PUBLIC_NTK_CONTRACT_ADDRESS;
+                const abi = ["function balanceOf(address) view returns (uint256)"];
+
+                if (ntkrAddr) {
+                    const ntkrContract = new ethers.Contract(ntkrAddr, abi, provider);
+                    const bal = await ntkrContract.balanceOf(connectedAccount);
+                    ntkrBal = ethers.formatUnits(bal, 18);
+                }
+
+                if (ntkAddr) {
+                    const ntkContract = new ethers.Contract(ntkAddr, abi, provider);
+                    const bal = await ntkContract.balanceOf(connectedAccount);
+                    ntkBal = ethers.formatUnits(bal, 18);
+                }
+
                 // Update live state immediately
-                setLiveBalances(prev => ({
-                    ...prev,
+                setLiveBalances({
                     bnb: ethers.formatEther(bnbBal),
-                    isLive: true
-                }));
-                console.log("[WALLET] Live BNB Balance updated:", ethers.formatEther(bnbBal));
+                    ntkr: ntkrBal,
+                    ntk: ntkBal,
+                    isLive: true,
+                    chainId: Number((await provider.getNetwork()).chainId)
+                });
+                console.log("[WALLET] Live Balances updated:", ntkrBal, "NTKR");
             }
         } catch (err: any) {
             console.error("Balance refresh failed:", err);
@@ -91,7 +111,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const fetchProfile = async () => {
         try {
             const data = await apiClient.get('/auth/me');
-            setUser(data);
+            setUser(data.user); // Fixed: Extract nested user object
             await refreshBalances();
         } catch (err: any) {
             if (err.status !== 401) {
@@ -122,15 +142,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         // Define public routes that don't require authentication
-        const publicRoutes = ['/', '/login', '/signup', '/register-notary', '/auth/remote-login', '/governance/remote-sign'];
+        const publicRoutes = ['/', '/login', '/signup', '/register-notary', '/governance/remote-sign'];
         const isPublicRoute = publicRoutes.some(route =>
             window.location.pathname === route || window.location.pathname.startsWith(route + '/')
         );
 
-        // Only fetch profile if not on a public route
-        if (!isPublicRoute) {
-            fetchProfile();
-        }
+        // Fetch profile on all routes to see if session exists
+        fetchProfile();
 
         const handleUnauthorized = () => {
             setUser(null);
@@ -146,11 +164,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }, [])
 
     const fetchWalletInfo = React.useCallback(async () => {
-        if (typeof window === "undefined" || !window.ethereum) return;
+        // Double check provider existence
+        if (typeof window === "undefined") return;
+
+        // If Ethereum provider is not ready, don't crash, just return
+        if (!window.ethereum) {
+            console.log("[WALLET] Ethereum provider not found");
+            return;
+        }
 
         try {
             const { ethers } = await import("ethers");
-            const provider = new ethers.BrowserProvider(window.ethereum);
+            // Wrap provider creation in try-catch as it can fail if extension is dead
+            let provider;
+            try {
+                provider = new ethers.BrowserProvider(window.ethereum);
+            } catch (e) {
+                console.warn("Failed to create BrowserProvider", e);
+                return;
+            }
 
             const network = await provider.getNetwork();
             const currentChainId = Number(network.chainId);
@@ -169,41 +201,46 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             setLiveBalances(prev => ({ ...prev, isLive: true, chainId: currentChainId }));
 
             // Trigger balance refresh for the new account
-            const bnbBal = await provider.getBalance(account);
-
-            // Fetch Token Balances Live
-            let ntkrBal = "0";
-            let ntkBal = "0";
             try {
+                const bnbBal = await provider.getBalance(account);
+
+                // Fetch Token Balances Live
+                let ntkrBal = "0";
+                let ntkBal = "0";
                 const ntkrAddr = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS;
                 const ntkAddr = process.env.NEXT_PUBLIC_NTK_CONTRACT_ADDRESS;
                 const abi = ["function balanceOf(address) view returns (uint256)"];
 
                 if (ntkrAddr) {
-                    const ntkrContract = new ethers.Contract(ntkrAddr, abi, provider);
-                    const bal = await ntkrContract.balanceOf(account);
-                    ntkrBal = ethers.formatUnits(bal, 18);
+                    try {
+                        const ntkrContract = new ethers.Contract(ntkrAddr, abi, provider);
+                        const bal = await ntkrContract.balanceOf(account);
+                        ntkrBal = ethers.formatUnits(bal, 18);
+                    } catch (e) {
+                        console.warn("Failed to fetch NTKR balance", e);
+                    }
                 }
 
                 if (ntkAddr) {
-                    const ntkContract = new ethers.Contract(ntkAddr, abi, provider);
-                    const bal = await ntkContract.balanceOf(account);
-                    ntkBal = ethers.formatUnits(bal, 18);
+                    try {
+                        const ntkContract = new ethers.Contract(ntkAddr, abi, provider);
+                        const bal = await ntkContract.balanceOf(account);
+                        ntkBal = ethers.formatUnits(bal, 18);
+                    } catch (e) {
+                        console.warn("Failed to fetch NTK balance", e);
+                    }
                 }
+
+                setLiveBalances({
+                    bnb: ethers.formatEther(bnbBal),
+                    ntkr: ntkrBal,
+                    ntk: ntkBal,
+                    isLive: true,
+                    chainId: currentChainId
+                });
             } catch (err) {
-                console.warn("Failed to fetch token balances", err);
+                console.warn("Error fetching balances:", err);
             }
-
-            setLiveBalances({
-                bnb: ethers.formatEther(bnbBal),
-                ntkr: ntkrBal,
-                ntk: ntkBal,
-                isLive: true,
-                chainId: currentChainId
-            });
-
-            // DO NOT call refreshBalances() here - it creates an infinite loop
-            // Backend balances are already fetched on initial mount via fetchProfile()
         } catch (err) {
             console.error("Failed to fetch wallet info", err);
         }
@@ -222,7 +259,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     // Task B.5: Guarded listeners and robust cleanup
     useEffect(() => {
-        if (!user || typeof window === "undefined" || !window.ethereum) return;
+        if (typeof window === "undefined" || !window.ethereum) return;
 
         fetchWalletInfo();
 
@@ -230,13 +267,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         const handleAccountsChanged = () => fetchWalletInfo();
 
         const provider = window.ethereum;
-        provider.on('accountsChanged', handleAccountsChanged);
-        provider.on('chainChanged', handleChainChanged);
+        try {
+            provider.on('accountsChanged', handleAccountsChanged);
+            provider.on('chainChanged', handleChainChanged);
+        } catch (e) {
+            console.warn("Failed to attach Ethereum listeners", e);
+        }
 
         return () => {
-            if (provider?.removeListener) {
-                provider.removeListener('accountsChanged', handleAccountsChanged);
-                provider.removeListener('chainChanged', handleChainChanged);
+            try {
+                if (provider?.removeListener) {
+                    provider.removeListener('accountsChanged', handleAccountsChanged);
+                    provider.removeListener('chainChanged', handleChainChanged);
+                }
+            } catch (e) {
+                // Ignore cleanup errors
             }
         }
     }, [user, fetchWalletInfo])
