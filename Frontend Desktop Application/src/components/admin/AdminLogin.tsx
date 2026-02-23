@@ -76,8 +76,7 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
       setStatus("awaiting_browser");
 
       // 3. Open Browser for Signing
-      // 3. Open Browser for Signing
-      const webAppUrl = `http://localhost:3000/auth/remote-login?sessionId=${sessionId}`;
+      const webAppUrl = `http://localhost:3002/?sessionId=${sessionId}`;
 
       const electron = (window as any).electronAPI;
       console.log("Electron API Status:", electron);

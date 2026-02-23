@@ -18,20 +18,6 @@ export default function SignUpPage() {
         <Card>
           <CardContent className="pt-6">
             <SignUpForm />
-            <div className="mt-6 text-center space-y-2">
-              <p className="text-sm text-muted-foreground">
-                Already have an account?{" "}
-                <Link href="/login" className="text-primary hover:underline">
-                  Sign in
-                </Link>
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Are you a professional?{" "}
-                <Link href="/register-notary" className="text-emerald-500 hover:underline font-medium">
-                  Apply as a Notary
-                </Link>
-              </p>
-            </div>
           </CardContent>
         </Card>
       </div>

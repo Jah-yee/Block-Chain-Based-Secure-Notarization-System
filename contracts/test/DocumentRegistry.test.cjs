@@ -2,33 +2,44 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
-describe("DocumentRegistry (EIP-712)", function () {
-    let docRegistry, notaryRegistry;
-    let admin, notary, relayer, nonNotary;
+describe("DocumentRegistry Hardened Audit Refinements", function () {
+    let docRegistry, notaryRegistry, ntkToken;
+    let governance, notary, relayer, owner, unauthorized;
     let chainId;
 
     beforeEach(async function () {
-        [admin, notary, relayer, nonNotary] = await ethers.getSigners();
-        chainId = (await ethers.provider.getNetwork()).chainId;
+        [governance, notary, relayer, owner, unauthorized] = await ethers.getSigners();
+        chainId = Number((await ethers.provider.getNetwork()).chainId);
 
         // 1. Deploy NotaryRegistry
         const NotaryRegistry = await ethers.getContractFactory("NotaryRegistry");
-        notaryRegistry = await NotaryRegistry.deploy(admin.address);
+        notaryRegistry = await NotaryRegistry.deploy(governance.address);
         await notaryRegistry.waitForDeployment();
 
-        // 2. Authorize Notary
-        await notaryRegistry.connect(admin).addNotary(notary.address);
+        // 2. Setup Roles & Relayer
+        await notaryRegistry.connect(governance).assignOwner(notary.address);
+        await notaryRegistry.connect(governance).promoteToNotary(notary.address);
+        await notaryRegistry.connect(governance).updateRelayer(relayer.address);
 
-        // 3. Deploy DocumentRegistry
+        // 3. Deploy NTK Mock
+        const NTKToken = await ethers.getContractFactory("NTKToken");
+        ntkToken = await NTKToken.deploy(governance.address);
+        await ntkToken.waitForDeployment();
+
+        // 4. Deploy DocumentRegistry
         const DocumentRegistry = await ethers.getContractFactory("DocumentRegistry");
-        docRegistry = await DocumentRegistry.deploy(admin.address, await notaryRegistry.getAddress());
+        docRegistry = await DocumentRegistry.deploy(await notaryRegistry.getAddress(), await ntkToken.getAddress());
         await docRegistry.waitForDeployment();
+
+        // 5. Grant RELAYER_ROLE for NTK burning
+        const RELAYER_ROLE = await ntkToken.RELAYER_ROLE();
+        await ntkToken.connect(governance).grantRole(RELAYER_ROLE, await docRegistry.getAddress());
+
+        // 6. Mint NTK to notary
+        await ntkToken.connect(governance).mintDailyNTK(notary.address);
     });
 
-    /**
-     * Helper to generate EIP-712 signature for Notarize action
-     */
-    async function getNotarizeSignature(signer, docHash, status, timestamp) {
+    async function getNotarizeSignature(signer, docHash, ownerAddress, status, summaryHash, rejectionReasonHash, timestamp, nonce) {
         const domain = {
             name: "BBSNS_Protocol",
             version: "1",
@@ -39,99 +50,109 @@ describe("DocumentRegistry (EIP-712)", function () {
         const types = {
             Notarize: [
                 { name: "docHash", type: "bytes32" },
+                { name: "ownerAddress", type: "address" },
                 { name: "status", type: "uint8" },
-                { name: "timestamp", type: "uint256" }
+                { name: "summaryHash", type: "bytes32" },
+                { name: "rejectionReasonHash", type: "bytes32" },
+                { name: "timestamp", type: "uint256" },
+                { name: "nonce", type: "uint256" }
             ]
         };
 
         const value = {
-            docHash: docHash,
-            status: status,
-            timestamp: timestamp
+            docHash,
+            ownerAddress,
+            status,
+            summaryHash,
+            rejectionReasonHash,
+            timestamp,
+            nonce
         };
 
         return await signer.signTypedData(domain, types, value);
     }
 
-    describe("EIP-712 Notarization", function () {
-        const docHash = ethers.id("test-document-content");
-        const status = 1; // APPROVED
+    describe("Nonce-Based Replay Protection", function () {
+        const docHash1 = ethers.id("doc1");
+        const docHash2 = ethers.id("doc2");
+        const status = 1;
 
-        it("Should allow valid notarization via EIP-712 signature", async function () {
+        it("Should allow sequential notarizations with correct nonces", async function () {
             const timestamp = await time.latest();
-            const signature = await getNotarizeSignature(notary, docHash, status, timestamp);
 
-            // Relayer submits the action
-            await expect(docRegistry.connect(relayer).recordAction(docHash, status, timestamp, signature))
-                .to.emit(docRegistry, "DocumentRecorded")
-                .withArgs(docHash, notary.address, status, anyTimestamp());
+            // First action (nonce 0)
+            const sig0 = await getNotarizeSignature(notary, docHash1, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0);
+            await docRegistry.connect(relayer).recordAction(docHash1, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0, sig0);
+            expect(await docRegistry.nonces(notary.address)).to.equal(1);
 
-            const doc = await docRegistry.getDocument(docHash);
-            expect(doc.notary).to.equal(notary.address);
-            expect(doc.status).to.equal(status);
-            expect(doc.exists).to.be.true;
+            // Second action (nonce 1)
+            const sig1 = await getNotarizeSignature(notary, docHash2, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 1);
+            await docRegistry.connect(relayer).recordAction(docHash2, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 1, sig1);
+            expect(await docRegistry.nonces(notary.address)).to.equal(2);
         });
 
-        it("Should reject signature from non-authorized notary", async function () {
+        it("Should reject if nonce is incorrect", async function () {
             const timestamp = await time.latest();
-            const signature = await getNotarizeSignature(nonNotary, docHash, status, timestamp);
+            const sigWrongNonce = await getNotarizeSignature(notary, docHash1, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 1);
 
-            await expect(docRegistry.connect(relayer).recordAction(docHash, status, timestamp, signature))
-                .to.be.revertedWith("DocumentRegistry: Signer is not an authorized Notary");
+            await expect(docRegistry.connect(relayer).recordAction(docHash1, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 1, sigWrongNonce))
+                .to.be.revertedWith("DocumentRegistry: Invalid nonce");
+        });
+    });
+
+    describe("Timestamp Guards", function () {
+        const docHash = ethers.id("test-doc");
+        const status = 1;
+
+        it("Should reject future signatures (> 5m drift)", async function () {
+            const futureTime = (await time.latest()) + (10 * 60); // 10 minutes from now
+            const sig = await getNotarizeSignature(notary, docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, futureTime, 0);
+
+            await expect(docRegistry.connect(relayer).recordAction(docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, futureTime, 0, sig))
+                .to.be.revertedWith("DocumentRegistry: Future signature");
         });
 
-        it("Should prevent signature replay", async function () {
-            const timestamp = await time.latest();
-            const signature = await getNotarizeSignature(notary, docHash, status, timestamp);
+        it("Should reject expired signatures (> 24h old)", async function () {
+            const oldTime = (await time.latest()) - (25 * 3600); // 25 hours ago
+            const sig = await getNotarizeSignature(notary, docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, oldTime, 0);
 
-            await docRegistry.connect(relayer).recordAction(docHash, status, timestamp, signature);
-
-            // Try to use the SAME signature again for a different docHash (will fail digest check)
-            // Try to use the SAME signature for SAME docHash (will fail "!exists" check)
-            await expect(docRegistry.connect(relayer).recordAction(docHash, status, timestamp, signature))
-                .to.be.revertedWith("DocumentRegistry: Record already exists");
-
-            // Try to use the SAME signature to submit a different docHash (Digest change)
-            const docHash2 = ethers.id("different-doc");
-            await expect(docRegistry.connect(relayer).recordAction(docHash2, status, timestamp, signature))
-                .to.be.reverted; // Signature won't recover to the same notary for different data
-        });
-
-        it("Should reject expired signatures (24h window)", async function () {
-            const timestamp = (await time.latest()) - (24 * 3600 + 60); // 24h 1m ago
-            const signature = await getNotarizeSignature(notary, docHash, status, timestamp);
-
-            await expect(docRegistry.connect(relayer).recordAction(docHash, status, timestamp, signature))
+            await expect(docRegistry.connect(relayer).recordAction(docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, oldTime, 0, sig))
                 .to.be.revertedWith("DocumentRegistry: Signature expired");
         });
     });
 
-    describe("Circuit Breaker", function () {
-        it("Should prevent actions when paused", async function () {
-            await docRegistry.connect(admin).pause();
+    describe("Ban Enforcement", function () {
+        const docHash = ethers.id("test-doc");
+        const status = 1;
 
-            const docHash = ethers.id("paused-doc");
+        it("Should reject if Notary is banned", async function () {
+            await notaryRegistry.connect(governance).setBanStatus(notary.address, true);
             const timestamp = await time.latest();
-            const signature = await getNotarizeSignature(notary, docHash, 1, timestamp);
+            const sig = await getNotarizeSignature(notary, docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0);
 
-            await expect(docRegistry.connect(relayer).recordAction(docHash, 1, timestamp, signature))
-                .to.be.revertedWithCustomError(docRegistry, "EnforcedPause");
+            await expect(docRegistry.connect(relayer).recordAction(docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0, sig))
+                .to.be.revertedWith("DocumentRegistry: Notary is banned");
         });
 
-        it("Should allow actions after unpausing", async function () {
-            await docRegistry.connect(admin).pause();
-            await docRegistry.connect(admin).unpause();
-
-            const docHash = ethers.id("unpaused-doc");
+        it("Should reject if Owner is banned", async function () {
+            await notaryRegistry.connect(governance).setBanStatus(owner.address, true);
             const timestamp = await time.latest();
-            const signature = await getNotarizeSignature(notary, docHash, 1, timestamp);
+            const sig = await getNotarizeSignature(notary, docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0);
 
-            await expect(docRegistry.recordAction(docHash, 1, timestamp, signature))
-                .to.emit(docRegistry, "DocumentRecorded");
+            await expect(docRegistry.connect(relayer).recordAction(docHash, owner.address, status, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0, sig))
+                .to.be.revertedWith("DocumentRegistry: Document owner is banned");
+        });
+    });
+
+    describe("Self-Approval Check", function () {
+        it("Should reject if Notary recovers to OwnerAddress", async function () {
+            const docHash = ethers.id("self-approve");
+            const timestamp = await time.latest();
+            // Notary signs doc where THEY are the ownerAddress
+            const sig = await getNotarizeSignature(notary, docHash, notary.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0);
+
+            await expect(docRegistry.connect(relayer).recordAction(docHash, notary.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestamp, 0, sig))
+                .to.be.revertedWith("DocumentRegistry: Notary cannot approve own document");
         });
     });
 });
-
-function anyTimestamp() {
-    return (val) => val > 0;
-}

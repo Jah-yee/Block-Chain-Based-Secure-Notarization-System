@@ -15,7 +15,7 @@ import { useWalletSession } from "@/hooks/use-wallet-session"
 import { cn } from "@/lib/utils"
 
 export function UploadInterface() {
-  const { balances, isLoading: isSessionLoading, refreshBalances, user, connectedAccount } = useWalletSession()
+  const { balances, liveBalances, isLoading: isSessionLoading, refreshBalances, user, connectedAccount } = useWalletSession()
   const [dragActive, setDragActive] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [documentTitle, setDocumentTitle] = useState("")
@@ -122,7 +122,9 @@ export function UploadInterface() {
   }
 
   const requiredTokens = selectedCategory === 0 ? 1 : 5
-  const hasInsufficientTokens = Number(balances?.ntkr || 0) < requiredTokens
+  // Check against LIVE balance if available, otherwise fallback to cached backend balance
+  const currentNtkr = liveBalances.isLive ? Number(liveBalances.ntkr || 0) : Number(balances?.ntkr || 0)
+  const hasInsufficientTokens = currentNtkr < requiredTokens
 
   const walletMismatch = Boolean(connectedAccount && user?.wallet_address &&
     connectedAccount.toLowerCase() !== user.wallet_address.toLowerCase())

@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Eye, EyeOff, Wallet } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
-export function LoginForm() {
+export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -102,7 +102,11 @@ export function LoginForm() {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    let filteredValue = value;
+    if (field === "nationalId") {
+      filteredValue = value.replace(/[^a-zA-Z0-9]/g, "");
+    }
+    setFormData((prev) => ({ ...prev, [field]: filteredValue }))
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -127,9 +131,23 @@ export function LoginForm() {
     }
 
     setIsLoading(true)
-    setStatus("Requesting secure session...")
-
+    setStatus("Verifying account...")
     try {
+      const { exists } = await apiClient.post('/auth/pre-check', {
+        email: formData.email.toLowerCase().trim()
+      });
+
+      if (!exists) {
+        toast({
+          title: "Account Not Found",
+          description: "We couldn't find an account with that email. Please sign up to create one.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        setStatus("");
+        return;
+      }
+
       const { nonce, message_template } = await apiClient.post('/auth/nonce', {
         wallet_address: walletAddress,
         action: 'login'
@@ -157,8 +175,8 @@ export function LoginForm() {
       // Token is now set via HttpOnly cookie by the backend
       toast({ title: "Secure Login Successful", description: `Welcome back!` })
 
-      // Force reload to refresh WalletProvider state from /me
-      window.location.href = "/dashboard"
+      // Redirect to callbackUrl (e.g. remote-login page) or dashboard
+      window.location.href = callbackUrl || "/dashboard"
     } catch (err: any) {
       console.error("Login error:", err)
       toast({ title: "Auth Error", description: err.message || "Login failed.", variant: "destructive" })

@@ -59,17 +59,38 @@ async function deploy() {
     }
 
     try {
-        const treasury = wallet.address; // Use deployer as initial treasury
-        const relayer = wallet.address;  // Use deployer as initial relayer
+        // 1. Determine Authorities
+        // Relayer Address (The address from which on-chain promotions/approvals happen)
+        // From backend/.env, the system relayer address is derived from either the BNB_SYSTEM_PRIVATE_KEY or AWS KMS.
+        // For this re-deployment, we use the wallet that is currently deploying (which should match the BNB_SYSTEM_PRIVATE_KEY)
+        const relayer = wallet.address;
+        const treasury = wallet.address; // Use deployer as initial treasury for simplicity
 
-        // const ntkrAddress = await deployContract("NTKRToken", "NTKR", relayer, treasury);
-        // const ntkAddress = await deployContract("NTKToken", "NTK", relayer);
-        const registryAddress = await deployContract("DocumentRegistry", "DocumentRegistry");
+        console.log(`📡 Relayer/Governance Authority assigned to: ${relayer}`);
+
+        // 2. Deploy Sequence
+
+        // Step A: NotaryRegistry (The authority source)
+        // Constructor: address _multiSig
+        const notaryRegistryAddress = await deployContract("NotaryRegistry", "NotaryRegistry", relayer);
+
+        // Step B: NTK Token (Operational Fuel)
+        // Constructor: address initialRelayer
+        const ntkAddress = await deployContract("NTKToken", "NTK", relayer);
+
+        // Step C: NTKR Token (Reputation/Access)
+        // Constructor: address initialRelayer, address initialTreasury
+        const ntkrAddress = await deployContract("NTKRToken", "NTKR", relayer, treasury);
+
+        // Step D: DocumentRegistry (The record store)
+        // Constructor: address _notaryRegistry, address _ntkToken
+        const registryAddress = await deployContract("DocumentRegistry", "DocumentRegistry", notaryRegistryAddress, ntkAddress);
 
         const deployments = {
             network: "bnbTestnet",
-            ntkr: process.env.NTKR_CONTRACT_ADDRESS,
-            ntk: process.env.NTK_CONTRACT_ADDRESS,
+            notaryRegistry: notaryRegistryAddress,
+            ntkr: ntkrAddress,
+            ntk: ntkAddress,
             registry: registryAddress,
             timestamp: new Date().toISOString()
         };
@@ -89,14 +110,16 @@ async function deploy() {
             }
         };
 
-        updateEnv("NTKR_CONTRACT_ADDRESS", process.env.NTKR_CONTRACT_ADDRESS);
-        updateEnv("NTK_CONTRACT_ADDRESS", process.env.NTK_CONTRACT_ADDRESS);
+        updateEnv("NOTARY_REGISTRY_ADDRESS", notaryRegistryAddress);
+        updateEnv("NTKR_CONTRACT_ADDRESS", ntkrAddress);
+        updateEnv("NTK_CONTRACT_ADDRESS", ntkAddress);
         updateEnv("DOCUMENT_REGISTRY_ADDRESS", registryAddress);
 
         fs.writeFileSync(ENV_PATH, envContent);
         console.log(`🔧 .env updated at ${ENV_PATH}`);
 
         console.log("\n--- DEPLOYMENT SUCCESSFUL ---");
+        console.log(`✅ Relayer ${relayer} now has GOVERNANCE role on NotaryRegistry.`);
     } catch (error) {
         console.error("❌ Deployment failed:", error);
     }

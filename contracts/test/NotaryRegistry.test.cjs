@@ -1,61 +1,88 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("NotaryRegistry", function () {
+describe("NotaryRegistry Hardened Audit Refinements", function () {
     let notaryRegistry;
-    let multiSig, notary1, notary2, unauthorized;
+    let multiSig, user1, user2, unauthorized;
+
+    const Role = { NONE: 0, OWNER: 1, NOTARY: 2, ADMIN: 3 };
 
     beforeEach(async function () {
-        [multiSig, notary1, notary2, unauthorized] = await ethers.getSigners();
+        [multiSig, user1, user2, unauthorized] = await ethers.getSigners();
 
         const NotaryRegistry = await ethers.getContractFactory("NotaryRegistry");
         notaryRegistry = await NotaryRegistry.deploy(multiSig.address);
         await notaryRegistry.waitForDeployment();
     });
 
-    describe("Initialization", function () {
-        it("Should set the correct owner (MultiSig)", async function () {
-            expect(await notaryRegistry.owner()).to.equal(multiSig.address);
+    describe("Governance Safeguards", function () {
+        it("Should prevent setting zero address as relayer", async function () {
+            await expect(notaryRegistry.connect(multiSig).updateRelayer(ethers.ZeroAddress))
+                .to.be.revertedWith("NotaryRegistry: Invalid relayer");
+        });
+
+        it("Should prevent removing multiSig address as a role", async function () {
+            await expect(notaryRegistry.connect(multiSig).removeRole(multiSig.address))
+                .to.be.revertedWith("NotaryRegistry: Cannot remove governance");
         });
     });
 
-    describe("Access Control", function () {
-        it("Should allow owner to add notary", async function () {
-            await expect(notaryRegistry.connect(multiSig).addNotary(notary1.address))
-                .to.emit(notaryRegistry, "NotaryAdded")
-                .withArgs(notary1.address, anyTimestamp(), multiSig.address);
+    describe("Admin Continuity (adminCount)", function () {
+        it("Should track adminCount correctly", async function () {
+            await notaryRegistry.connect(multiSig).assignOwner(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToNotary(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToAdmin(user1.address);
+            expect(await notaryRegistry.adminCount()).to.equal(1);
 
-            expect(await notaryRegistry.isNotary(notary1.address)).to.be.true;
+            await notaryRegistry.connect(multiSig).assignOwner(user2.address);
+            await notaryRegistry.connect(multiSig).promoteToNotary(user2.address);
+            await notaryRegistry.connect(multiSig).promoteToAdmin(user2.address);
+            expect(await notaryRegistry.adminCount()).to.equal(2);
         });
 
-        it("Should prevent unauthorized from adding notary", async function () {
-            await expect(notaryRegistry.connect(unauthorized).addNotary(notary1.address))
-                .to.be.revertedWithCustomError(notaryRegistry, "OwnableUnauthorizedAccount");
+        it("Should prevent removing the last admin", async function () {
+            await notaryRegistry.connect(multiSig).assignOwner(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToNotary(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToAdmin(user1.address);
+
+            await expect(notaryRegistry.connect(multiSig).removeRole(user1.address))
+                .to.be.revertedWith("NotaryRegistry: Cannot remove last admin");
+        });
+
+        it("Should allow removing an admin if more than one exists", async function () {
+            await notaryRegistry.connect(multiSig).assignOwner(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToNotary(user1.address);
+            await notaryRegistry.connect(multiSig).promoteToAdmin(user1.address);
+
+            await notaryRegistry.connect(multiSig).assignOwner(user2.address);
+            await notaryRegistry.connect(multiSig).promoteToNotary(user2.address);
+            await notaryRegistry.connect(multiSig).promoteToAdmin(user2.address);
+
+            await notaryRegistry.connect(multiSig).removeRole(user1.address);
+            expect(await notaryRegistry.adminCount()).to.equal(1);
+            expect(await notaryRegistry.getUserRole(user1.address)).to.equal(Role.NONE);
         });
     });
 
-    describe("Notary Management & Audit", function () {
-        beforeEach(async function () {
-            await notaryRegistry.connect(multiSig).addNotary(notary1.address);
+    describe("Ban Logic", function () {
+        it("Should allow governance to set ban status", async function () {
+            await expect(notaryRegistry.connect(multiSig).setBanStatus(user1.address, true))
+                .to.emit(notaryRegistry, "UserBanned")
+                .withArgs(user1.address, true, anyTimestamp());
+            expect(await notaryRegistry.isBanned(user1.address)).to.be.true;
         });
 
-        it("Should store correct metadata", async function () {
-            const [active, addedAt, addedBy] = await notaryRegistry.getNotary(notary1.address);
-            expect(active).to.be.true;
-            expect(addedAt).to.be.gt(0);
-            expect(addedBy).to.equal(multiSig.address);
+        it("Should prevent promotion of banned users", async function () {
+            await notaryRegistry.connect(multiSig).setBanStatus(user1.address, true);
+            await expect(notaryRegistry.connect(multiSig).assignOwner(user1.address))
+                .to.be.revertedWith("NotaryRegistry: User is banned");
         });
 
-        it("Should allow removing notary", async function () {
-            await expect(notaryRegistry.connect(multiSig).removeNotary(notary1.address))
-                .to.emit(notaryRegistry, "NotaryRemoved");
-
-            expect(await notaryRegistry.isNotary(notary1.address)).to.be.false;
-        });
-
-        it("Should track total count properly", async function () {
-            await notaryRegistry.connect(multiSig).addNotary(notary2.address);
-            expect(await notaryRegistry.getNotaryCount()).to.equal(2);
+        it("Should prevent further promotion if banned after reaching a role", async function () {
+            await notaryRegistry.connect(multiSig).assignOwner(user1.address);
+            await notaryRegistry.connect(multiSig).setBanStatus(user1.address, true);
+            await expect(notaryRegistry.connect(multiSig).promoteToNotary(user1.address))
+                .to.be.revertedWith("NotaryRegistry: User is banned");
         });
     });
 });

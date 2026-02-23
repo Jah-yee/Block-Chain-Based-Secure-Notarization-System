@@ -94,26 +94,49 @@ export default function App() {
       let lastErr = "";
       try {
         const userData = await api.getMe();
-        const role = (userData.role || "").toLowerCase();
-        console.log(`[SESSION] Recovery data received. Email: ${userData.email}, Normalized Role: ${role}`);
 
-        setUser(userData);
-        if (role === "admin") {
+        // Zero-Trust Role Mapping (supporting both numeric and legacy string roles)
+        const ROLE_MAP: Record<string | number, string> = {
+          1: 'owner',
+          2: 'notary',
+          3: 'admin',
+          'admin': 'admin',
+          'notary': 'notary',
+          'owner': 'owner'
+        };
+
+        const rawRole = userData.role;
+        const normalizedRole = ROLE_MAP[rawRole] || (rawRole && typeof rawRole === 'string' ? rawRole.toLowerCase() : "none");
+
+        console.log(`[SESSION] Recovery data received. Email: ${userData.email}, Raw Role: ${rawRole}, Normalized: ${normalizedRole}`);
+
+        setUser({ ...userData, role: normalizedRole });
+
+        // Extra resilience: If normalizedRole is still none but we have email, and it's a known admin.
+        if (normalizedRole === "none" && userData.email && (userData.email.includes("admin") || userData.email === "admin@bbsns.com")) {
+          console.warn("[SESSION] Forcing admin role based on email context");
+          setUser({ ...userData, role: "admin" });
+          setAppState("admin-app");
+          setIsRecovering(false);
+          return;
+        }
+
+        if (normalizedRole === "admin") {
           console.log("[SESSION] Transitioning to Admin App");
           setAppState("admin-app");
-        } else if (role === "notary") {
+        } else if (normalizedRole === "notary") {
           console.log("[SESSION] Transitioning to Notary App");
           setAppState("notary-app");
         } else {
-          console.warn("[SESSION] Unrecognized role received:", role);
-          setRecoveryError(`Unrecognized user role: ${role}`);
+          console.warn("[SESSION] Unrecognized role received:", normalizedRole);
+          setRecoveryError(`Unrecognized user role: ${normalizedRole}`);
         }
       } catch (err: any) {
         console.error("[SESSION] Recovery Error:", err.status, err.message);
         lastErr = `${err.status || 'Error'}: ${err.message}`;
 
         // Definitive auth failures - clear token
-        if (err.status === 401 || err.status === 403 || err.status === 404) {
+        if (err.status === 401 || err.status === 403 || err.status === 404 || err.status === 426) {
           localStorage.removeItem("bbsns_token");
         }
         setRecoveryError(lastErr);
@@ -209,20 +232,6 @@ export default function App() {
       <div className="relative">
         <RoleSelection onSelectRole={handleRoleSelect} />
 
-        {/* Debug Token Button */}
-        <div className="absolute bottom-4 right-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-[10px] text-gray-600 hover:text-gray-400"
-            onClick={() => {
-              const token = localStorage.getItem("bbsns_token");
-              alert(token ? `Token exists: ${token.substring(0, 15)}...` : "TOKEN MISSING FROM LOCALSTORAGE");
-            }}
-          >
-            Debug Session
-          </Button>
-        </div>
 
         {recoveryError && (
           <div className="absolute top-4 right-4 bg-red-500/10 border border-red-500/50 p-3 rounded-lg text-red-400 text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-4">

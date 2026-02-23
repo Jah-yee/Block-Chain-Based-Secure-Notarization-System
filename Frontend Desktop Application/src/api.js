@@ -1,6 +1,16 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
+const ROLE_MAP = {
+  1: 'owner',
+  2: 'notary',
+  3: 'admin',
+  'admin': 'admin',
+  'notary': 'notary',
+  'owner': 'owner'
+};
+
 const api = {
+  baseUrl: API_URL,
   async request(endpoint, options = {}) {
     const token = localStorage.getItem('bbsns_token');
     const headers = {
@@ -34,11 +44,19 @@ const api = {
 
   async getMe() {
     const res = await this.request('/me');
-    return res.user;
+    const user = res.user;
+    if (user && user.role) {
+      user.role = ROLE_MAP[user.role] || (typeof user.role === 'string' ? user.role.toLowerCase() : "");
+    }
+    return user;
   },
 
   async getBalances() {
     return this.request('/api/tokens/balance');
+  },
+
+  async getOnChainBalance(address, type = 'ntk') {
+    return this.request(`/api/tokens/onchain/${type}/${address}`);
   },
 
   async getDocuments() {

@@ -11,6 +11,7 @@ import { ethers } from "ethers"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useEffect } from "react"
+import { apiClient } from "@/lib/api-client"
 
 const NTKR_ADDRESS = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
 const NTKR_ABI = [
@@ -62,33 +63,74 @@ export function TokenRequestInterface() {
       return;
     }
 
+    const pkg = tokenPackages.find(p => p.id === packageId);
+    const tokenAmount = pkg ? pkg.amount : 0;
+
     setSubmittingId(packageId);
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(NTKR_ADDRESS, NTKR_ABI, signer);
 
-      toast({ title: "Confirming", description: "Please confirm the transaction in MetaMask..." });
+      toast({
+        title: "Confirm Purchase",
+        description: `Please confirm in MetaMask to buy ${tokenAmount} NTKR for ${bnbValue} BNB.`
+      });
 
       const tx = await contract.buyPackage(packageId, {
         value: ethers.parseEther(bnbValue)
       });
 
+      toast({
+        title: "Transaction Sent",
+        description: "Waiting for confirmation...",
+      });
+
       await tx.wait();
 
-      toast({
-        title: "Package Purchased! 🚀",
-        description: `Tokens will appear in your wallet shortly.`,
-      });
+      // 4. Notify Backend of the Deposit to update internal balance
+      try {
+        toast({
+          title: "Syncing Balance",
+          description: "Updating your internal account...",
+        });
+
+        await apiClient.post("/tokens/deposit", {
+          transactionHash: tx.hash,
+          packageId: packageId
+        });
+
+        toast({
+          title: "Internal Balance Updated",
+          description: "Your document submission limit has been increased.",
+        });
+      } catch (depositErr: any) {
+        console.error("Deposit Notification Failed:", depositErr);
+        toast({
+          title: "Balance Refresh Delayed",
+          description: "Blockchain confirmed, but internal balance update pending. Please refresh in a moment.",
+          variant: "destructive"
+        });
+      }
 
       await refreshBalances();
     } catch (err: any) {
       console.error(err);
-      toast({
-        title: "Transaction Failed",
-        description: err.message || "Could not complete purchase",
-        variant: "destructive",
-      });
+
+      // Check for user rejection (MetaMask error code 4001 or Ethers ACTION_REJECTED)
+      if (err.code === 4001 || err.code === "ACTION_REJECTED" || err.info?.error?.code === 4001 || err.message?.includes("user rejected")) {
+        toast({
+          title: "Transaction Cancelled",
+          description: "You cancelled the purchase.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Transaction Failed",
+          description: err.message || "Could not complete purchase",
+          variant: "destructive",
+        });
+      }
     } finally {
       setSubmittingId(null);
     }
@@ -186,7 +228,7 @@ export function TokenRequestInterface() {
             {!connectedAccount ? (
               <Button
                 onClick={connectWallet}
-                className="w-full bg-primary/20 text-primary hover:bg-primary/30 border-primary/30"
+                className="w-full bg-primary/20 text-primary hover:bg-primary/25 border-primary/30"
                 variant="outline"
               >
                 Connect MetaMask for Live Stats
@@ -206,7 +248,7 @@ export function TokenRequestInterface() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 rounded-lg hover:bg-primary/20 hover:text-primary shrink-0"
+                    className="h-7 w-7 rounded-lg hover:bg-primary/15 hover:text-primary shrink-0"
                     onClick={handleRefresh}
                     disabled={isRefreshing || isProfileLoading}
                   >

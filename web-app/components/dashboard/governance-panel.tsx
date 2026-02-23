@@ -519,7 +519,7 @@ export function GovernancePanel() {
                                             <Button
                                                 size="sm"
                                                 variant={prop.my_vote === 'approve' ? "default" : "outline"}
-                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 border-none text-white font-bold"
+                                                className="flex-1 bg-emerald-600 hover:bg-emerald-600/90 border-none text-white font-bold transition-colors"
                                                 onClick={() => handleVote(prop.id, 'approve')}
                                                 disabled={isVoting !== null || prop.my_vote !== null}
                                             >

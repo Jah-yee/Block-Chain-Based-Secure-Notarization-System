@@ -606,6 +606,16 @@ video {
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Global Premium Hover Transitions */
+button, a, .hover-target {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-target:hover {
+  filter: brightness(1.05);
 }
 
 .container {

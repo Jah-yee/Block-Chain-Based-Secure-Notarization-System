@@ -4,10 +4,13 @@
     "type": "module",
     "devDependencies": {
         "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-        "dotenv": "^16.4.7",
+        "dotenv": "^16.6.1",
+        "ethers": "^6.16.0",
         "hardhat": "^2.22.17"
     },
     "dependencies": {
-        "@openzeppelin/contracts": "^5.4.0"
+        "@openzeppelin/contracts": "^5.4.0",
+        "docx": "^9.5.3",
+        "marked": "^17.0.3"
     }
 }

@@ -47,23 +47,7 @@ export default function DashboardLayoutShell({
     }
 
     if (error || !user) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-background p-4">
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="max-w-md w-full text-center space-y-6"
-                >
-                    <div className="p-6 bg-destructive/10 border border-destructive/20 rounded-2xl">
-                        <h2 className="text-2xl font-bold text-destructive mb-2">Access Issue</h2>
-                        <p className="text-muted-foreground">{error || "You are not authorized to view this page. Please sign in."}</p>
-                    </div>
-                    <Button onClick={() => window.location.href = "/login"} variant="outline" className="w-full">
-                        Return to Login
-                    </Button>
-                </motion.div>
-            </div>
-        )
+        return null // Redirecting to login via useEffect
     }
 
     return (

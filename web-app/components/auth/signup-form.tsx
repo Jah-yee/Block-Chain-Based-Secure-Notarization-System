@@ -202,7 +202,7 @@ const StepNationalId = ({
             fileInputRef.current?.click()
           }
         }}
-        className="rounded-lg border border-dashed p-6 text-center bg-card hover:bg-accent/40 transition-colors cursor-pointer"
+        className="rounded-lg border border-dashed p-6 text-center bg-card hover:bg-accent/20 transition-colors cursor-pointer"
         role="button"
         tabIndex={0}
         aria-label="Drop your ID document here or click to browse"
@@ -529,7 +529,19 @@ export function SignUpForm() {
   };
 
   const handleInputChange = (field: keyof FormDataState, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    let filteredValue = value;
+
+    if (typeof value === 'string') {
+      if (field === "fullName") {
+        // Only allow letters and spaces
+        filteredValue = value.replace(/[^a-zA-Z\s]/g, "");
+      } else if (field === "nationalIdText") {
+        // Only allow alphanumeric
+        filteredValue = value.replace(/[^a-zA-Z0-9]/g, "");
+      }
+    }
+
+    setFormData((prev) => ({ ...prev, [field]: filteredValue }))
   }
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -890,6 +902,19 @@ export function SignUpForm() {
             <CheckCircle2 className="h-4 w-4" />
           </Button>
         )}
+      </div>
+
+      <div className="mt-8 text-center space-y-3 pt-6 border-t border-border/40">
+        <p className="text-sm text-muted-foreground">
+          Already have an account?{" "}
+          <button
+            type="button"
+            onClick={() => router.push("/login")}
+            className="text-primary hover:underline font-medium"
+          >
+            Sign in
+          </button>
+        </p>
       </div>
     </div>
   )

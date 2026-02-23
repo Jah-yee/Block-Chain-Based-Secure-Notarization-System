@@ -32,6 +32,9 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
         videoRef.current.srcObject = stream
         setStatus("verifying")
         startVerification()
+      } else {
+        // If component unmounted during load, stop stream immediately
+        stream.getTracks().forEach(t => t.stop())
       }
     } catch (err: any) {
       console.error("Camera/Model Error:", err)
@@ -43,31 +46,44 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
   const startVerification = async () => {
     let count = 0
     const interval = setInterval(async () => {
-      if (!videoRef.current) return
+      // 1. Safety check: Component mounted and video ready?
+      if (!videoRef.current || !videoRef.current.srcObject) {
+        clearInterval(interval)
+        return
+      }
 
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor()
+      try {
+        const detection = await faceapi
+          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor()
 
-      if (detection) {
-        count += 20
-        setProgress(count)
-        if (count >= 100) {
-          clearInterval(interval)
-          setStatus("success")
-          // Convert Float32Array to regular array for JSON serialization
-          onComplete(Array.from(detection.descriptor))
+        if (detection) {
+          count += 20
+          setProgress(count)
 
-          // Stop stream
-          const stream = videoRef.current.srcObject as MediaStream
-          stream?.getTracks().forEach(t => t.stop())
+          if (count >= 100) {
+            clearInterval(interval)
+            setStatus("success")
+            onComplete(Array.from(detection.descriptor))
+
+            // 2. Safe cleanup: Ensure ref is still valid before accessing property
+            if (videoRef.current && videoRef.current.srcObject) {
+              const stream = videoRef.current.srcObject as MediaStream
+              stream.getTracks().forEach(t => t.stop())
+            }
+          }
+        } else {
+          count = Math.max(0, count - 10)
+          setProgress(count)
         }
-      } else {
-        count = Math.max(0, count - 10)
-        setProgress(count)
+      } catch (e) {
+        // Suppress errors during unmount/detection
       }
     }, 500)
+
+    // Cleanup interval on unmount
+    return () => clearInterval(interval)
   }
 
   return (

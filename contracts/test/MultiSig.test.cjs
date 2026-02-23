@@ -42,14 +42,14 @@ describe("BBSNSMultiSig", function () {
         const data = "0x1234";
 
         it("Should fail if to address is zero", async function () {
-            await expect(multiSig.connect(signer1).submitTransaction(ethers.ZeroAddress, value, data))
+            await expect(multiSig.connect(signer1).submitTransaction(ethers.ZeroAddress, value, data, ethers.ZeroHash))
                 .to.be.revertedWith("MultiSig: Invalid target address");
         });
 
         it("Should allow signer to submit transaction", async function () {
-            await expect(multiSig.connect(signer1).submitTransaction(to, value, data))
+            await expect(multiSig.connect(signer1).submitTransaction(to, value, data, ethers.ZeroHash))
                 .to.emit(multiSig, "TransactionSubmitted")
-                .withArgs(0, signer1.address, to, value, data);
+                .withArgs(0, signer1.address, to, value, data, ethers.ZeroHash);
 
             const tx = await multiSig.getTransaction(0);
             expect(tx.to).to.equal(to);
@@ -57,7 +57,7 @@ describe("BBSNSMultiSig", function () {
         });
 
         it("Should allow other signers to confirm", async function () {
-            await multiSig.connect(signer1).submitTransaction(to, value, data); // tx 0
+            await multiSig.connect(signer1).submitTransaction(to, value, data, ethers.ZeroHash); // tx 0
 
             await expect(multiSig.connect(signer2).confirmTransaction(0))
                 .to.emit(multiSig, "TransactionConfirmed")
@@ -68,13 +68,13 @@ describe("BBSNSMultiSig", function () {
         });
 
         it("Should prevent double confirmation", async function () {
-            await multiSig.connect(signer1).submitTransaction(to, value, data);
+            await multiSig.connect(signer1).submitTransaction(to, value, data, ethers.ZeroHash);
             await expect(multiSig.connect(signer1).confirmTransaction(0))
                 .to.be.revertedWith("MultiSig: Transaction already confirmed");
         });
 
         it("Should allow revoking confirmation", async function () {
-            await multiSig.connect(signer1).submitTransaction(to, value, data);
+            await multiSig.connect(signer1).submitTransaction(to, value, data, ethers.ZeroHash);
             await multiSig.connect(signer2).confirmTransaction(0);
 
             await expect(multiSig.connect(signer2).revokeConfirmation(0))
@@ -92,7 +92,7 @@ describe("BBSNSMultiSig", function () {
         const data = "0x";
 
         beforeEach(async function () {
-            await multiSig.connect(signer1).submitTransaction(to, value, data); // tx 0
+            await multiSig.connect(signer1).submitTransaction(to, value, data, ethers.ZeroHash); // tx 0
             await multiSig.connect(signer2).confirmTransaction(0);
             await multiSig.connect(signer3).confirmTransaction(0);
         });
@@ -119,7 +119,7 @@ describe("BBSNSMultiSig", function () {
 
             // But now we remove signer5 (requires a separate MultiSig action: tx 1)
             const removeData = multiSig.interface.encodeFunctionData("removeSigner", [signer5.address]);
-            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, removeData); // tx 1 (auto-confirmed by signer1)
+            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, removeData, ethers.ZeroHash); // tx 1 (auto-confirmed by signer1)
             await multiSig.connect(signer2).confirmTransaction(1);
             await multiSig.connect(signer3).confirmTransaction(1);
 
@@ -151,7 +151,7 @@ describe("BBSNSMultiSig", function () {
             const initialVersion = await multiSig.signerVersion();
             const data = multiSig.interface.encodeFunctionData("addSigner", [nonSigner.address]);
 
-            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, data); // tx 0
+            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, data, ethers.ZeroHash); // tx 0
             await multiSig.connect(signer2).confirmTransaction(0);
             await multiSig.connect(signer3).confirmTransaction(0);
 
@@ -165,7 +165,7 @@ describe("BBSNSMultiSig", function () {
         it("Should prevent removing signer if it would break threshold", async function () {
             // First change threshold to 5
             const dataThreshold = multiSig.interface.encodeFunctionData("changeThreshold", [5]);
-            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, dataThreshold); // tx 0
+            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, dataThreshold, ethers.ZeroHash); // tx 0
             await multiSig.connect(signer2).confirmTransaction(0);
             await multiSig.connect(signer3).confirmTransaction(0);
             await time.increase(TIMELOCK);
@@ -173,7 +173,7 @@ describe("BBSNSMultiSig", function () {
 
             // Now try to remove signer5 (signers would become 4, which is < threshold 5)
             const dataRemove = multiSig.interface.encodeFunctionData("removeSigner", [signer5.address]);
-            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, dataRemove); // tx 1
+            await multiSig.connect(signer1).submitTransaction(await multiSig.getAddress(), 0, dataRemove, ethers.ZeroHash); // tx 1
             await multiSig.connect(signer2).confirmTransaction(1);
             await multiSig.connect(signer3).confirmTransaction(1);
             await multiSig.connect(signer4).confirmTransaction(1);
@@ -198,7 +198,7 @@ describe("BBSNSMultiSig", function () {
             const value = ethers.parseEther("1.0");
             const initialBalance = await ethers.provider.getBalance(to);
 
-            await multiSig.connect(signer1).submitTransaction(to, value, "0x"); // tx 0
+            await multiSig.connect(signer1).submitTransaction(to, value, "0x", ethers.ZeroHash); // tx 0
             await multiSig.connect(signer2).confirmTransaction(0);
             await multiSig.connect(signer3).confirmTransaction(0);
 

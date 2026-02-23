@@ -68,9 +68,38 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
     };
   }, [authStatus, sessionId, onLogin]);
 
-  const handleStep1Next = () => {
-    if (userId && password) {
+  const handleStep1Next = async () => {
+    if (!userId || !password) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${api.baseUrl}/auth/pre-check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: userId.toLowerCase().trim() }),
+      });
+
+      if (!res.ok) throw new Error("Server verification failed");
+
+      const { exists, role } = await res.json();
+
+      if (!exists) {
+        setError("Account does not exist. Please check your credentials.");
+        return;
+      }
+
+      if (role !== 'notary' && role !== 'admin') {
+        setError("Unauthorized: This account is not a Notary or Admin.");
+        return;
+      }
+
       setStep(2);
+    } catch (err: any) {
+      setError(err.message || "Failed to verify account existence.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -104,7 +133,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       setSessionId(sessionId);
       setAuthStatus("awaiting_browser");
 
-      const webAppUrl = `http://localhost:3000/auth/remote-login?sessionId=${sessionId}`;
+      const webAppUrl = `http://localhost:3002/?sessionId=${sessionId}`;
       if (window.electronAPI) {
         // @ts-ignore
         window.electronAPI.openExternal(webAppUrl);
@@ -153,6 +182,13 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
             ))}
           </div>
 
+          {error && (
+            <Alert variant="destructive" className="mb-6 bg-red-50 dark:bg-destructive/10 border-red-200 dark:border-destructive/50">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-xs text-red-800 dark:text-red-400">{error}</AlertDescription>
+            </Alert>
+          )}
+
           {/* Step 1: User Credentials */}
           {step === 1 && (
             <div className="space-y-6">
@@ -169,9 +205,10 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
                   <Label htmlFor="userId" className="text-muted-foreground">User ID</Label>
                   <Input
                     id="userId"
+                    type="email"
                     value={userId}
                     onChange={(e) => setUserId(e.target.value)}
-                    placeholder="Enter your user ID"
+                    placeholder="Enter your registered email"
                     className="bg-background border-input text-foreground mt-2 h-11"
                   />
                 </div>
@@ -217,7 +254,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
                   <Input
                     id="nationalId"
                     value={nationalId}
-                    onChange={(e) => setNationalId(e.target.value)}
+                    onChange={(e) => setNationalId(e.target.value.replace(/[^a-zA-Z0-9]/g, ""))}
                     placeholder="Enter your national ID"
                     className="bg-background border-input text-foreground mt-2 h-11"
                   />
@@ -296,13 +333,6 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
                   Back
                 </Button>
               </div>
-
-              {error && (
-                <Alert variant="destructive" className="bg-red-50 dark:bg-destructive/10 border-red-200 dark:border-destructive/50">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription className="text-xs text-red-800 dark:text-red-400">{error}</AlertDescription>
-                </Alert>
-              )}
             </div>
           )}
         </div>

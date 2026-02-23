@@ -63,7 +63,7 @@ export function Sidebar({ open, onOpenChange, collapsed = false, onCollapseChang
               variant={isActive ? "secondary" : "ghost"}
               className={cn(
                 "w-full justify-start transition-all duration-200",
-                isActive && "bg-primary/10 text-primary hover:bg-primary/20",
+                isActive && "bg-primary/10 text-primary hover:bg-primary/15",
                 !isActive && "text-muted-foreground hover:text-foreground",
                 collapsed && !isMobile && "p-2 justify-center"
               )}
@@ -79,7 +79,39 @@ export function Sidebar({ open, onOpenChange, collapsed = false, onCollapseChang
         })}
       </nav>
 
-      <div className="p-4 border-t border-border mt-auto">
+      <div className="p-4 border-t border-border mt-auto space-y-2">
+        <Button
+          variant="ghost"
+          className={cn(
+            "w-full justify-start text-primary hover:text-primary hover:bg-primary/10",
+            collapsed && !isMobile && "justify-center p-2"
+          )}
+          onClick={async () => {
+            if (!window.ethereum) return;
+            try {
+              await window.ethereum.request({
+                method: 'wallet_watchAsset',
+                params: {
+                  type: 'ERC20',
+                  options: {
+                    address: process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS || "",
+                    symbol: 'NTKR',
+                    decimals: 18,
+                  },
+                },
+              });
+              toast({ title: "Token Added", description: "NTKR has been added to your wallet." });
+            } catch (error) {
+              console.error(error);
+              toast({ title: "Error", description: "Failed to add token to wallet.", variant: "destructive" });
+            }
+          }}
+          title={collapsed && !isMobile ? "Add NTKR to Wallet" : undefined}
+        >
+          <Coins className={cn("h-4 w-4 shrink-0", (!collapsed || isMobile) && "mr-3")} />
+          {(!collapsed || isMobile) && <span>Add NTKR to Wallet</span>}
+        </Button>
+
         <Button
           variant="ghost"
           className={cn(

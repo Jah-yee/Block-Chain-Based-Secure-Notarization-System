@@ -102,6 +102,14 @@ const PROPOSAL_PRESETS = [
         description: "Modify the number of signatures required to execute Multi-Sig transactions."
     },
     {
+        id: "remove_notary",
+        label: "Remove Notary",
+        icon: UserMinus,
+        type: "remove_notary",
+        title: "Revoke Notary Certification",
+        description: "Formally remove a notary from the registry. This will revoke their on-chain signing rights and system role."
+    },
+    {
         id: "custom",
         label: "Custom Proposal",
         icon: Plus,
@@ -191,6 +199,8 @@ export function Governance({ role, user }: GovernanceProps) {
     const [isVoting, setIsVoting] = useState<number | null>(null)
     const [selectedProposalId, setSelectedProposalId] = useState<number | null>(null)
     const [currentTime, setCurrentTime] = useState(Math.floor(Date.now() / 1000))
+    const [allNotaries, setAllNotaries] = useState<any[]>([])
+    const [targetNotaries, setTargetNotaries] = useState<number[]>([])
 
     const selectedProposal = proposals.find(p => p.id === selectedProposalId)
 
@@ -251,6 +261,10 @@ export function Governance({ role, user }: GovernanceProps) {
         fetchProposals()
         fetchSystemSettings()
 
+        if (role === 'admin') {
+            api.getNotaries().then(setAllNotaries).catch(console.error)
+        }
+
         const timer = setInterval(() => {
             setCurrentTime(Math.floor(Date.now() / 1000))
         }, 1000)
@@ -280,7 +294,10 @@ export function Governance({ role, user }: GovernanceProps) {
         setIsCreating(true)
         try {
             // 1. Create DB Proposal
-            const proposal = await api.createProposal(formData)
+            const proposal = await api.createProposal({
+                ...formData,
+                target_notaries: targetNotaries
+            })
             toast.success("Proposal drafted! Initializing on-chain submission...")
 
             // 2. Prepare On-Chain Data
@@ -709,6 +726,34 @@ export function Governance({ role, user }: GovernanceProps) {
                                     {formData.participation_scope === 'all' && "Both roles can participate."}
                                 </p>
                             </div>
+
+                            {formData.participation_scope !== 'admin' && (
+                                <div className="space-y-2">
+                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex justify-between">
+                                        Target Specific Notaries
+                                        <span className="text-[9px] lowercase italic">(leave empty for all)</span>
+                                    </label>
+                                    <div className="flex flex-wrap gap-2 p-3 bg-muted/30 border border-border rounded-xl min-h-[44px]">
+                                        {allNotaries.map((notary) => (
+                                            <Badge
+                                                key={notary.id}
+                                                variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
+                                                className={`cursor-pointer transition-all ${targetNotaries.includes(notary.id) ? "bg-primary text-primary-foreground" : "hover:border-primary/50 text-muted-foreground"}`}
+                                                onClick={() => {
+                                                    setTargetNotaries(prev =>
+                                                        prev.includes(notary.id)
+                                                            ? prev.filter(id => id !== notary.id)
+                                                            : [...prev, notary.id]
+                                                    )
+                                                }}
+                                            >
+                                                {notary.name || notary.email}
+                                            </Badge>
+                                        ))}
+                                        {allNotaries.length === 0 && <span className="text-[10px] text-muted-foreground italic">No notaries found.</span>}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="space-y-2">
                                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Voting Duration</label>

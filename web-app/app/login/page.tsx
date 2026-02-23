@@ -1,9 +1,16 @@
+import { Suspense } from "react"
 import { LoginForm } from "@/components/auth/login-form"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import Link from "next/link"
+import { Card, CardContent } from "@/components/ui/card"
 import { Shield } from "lucide-react"
 
-export default function LoginPage() {
+// Must be async Server Component to read searchParams
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams: { callbackUrl?: string }
+}) {
+  const callbackUrl = searchParams?.callbackUrl
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted/20 p-4">
       <div className="w-full max-w-md">
@@ -12,12 +19,18 @@ export default function LoginPage() {
             <Shield className="h-12 w-12 text-primary" />
           </div>
           <h1 className="text-3xl font-bold text-foreground">Welcome Back</h1>
-          <p className="text-muted-foreground mt-2">Sign in to access your account</p>
+          <p className="text-muted-foreground mt-2">
+            {callbackUrl
+              ? "Sign in to authorize your desktop session"
+              : "Sign in to access your account"}
+          </p>
         </div>
 
         <Card>
           <CardContent className="pt-6">
-            <LoginForm />
+            <Suspense fallback={null}>
+              <LoginForm callbackUrl={callbackUrl} />
+            </Suspense>
           </CardContent>
         </Card>
       </div>

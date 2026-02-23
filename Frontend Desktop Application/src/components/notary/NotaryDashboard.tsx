@@ -1,4 +1,4 @@
-import { FileText, CheckCircle, XCircle, Eye, RefreshCw, Loader2 } from "lucide-react";
+import { FileText, CheckCircle, XCircle, Eye, RefreshCw, Loader2, Coins, Plus, Gavel } from "lucide-react";
 import { toast } from "sonner";
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
@@ -25,16 +25,29 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     const [requests, setRequests] = useState<Document[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
+    const [ntkBalance, setNtkBalance] = useState<string>("0.0");
+    const [userWallet, setUserWallet] = useState<string>("");
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         setError("");
         try {
-            const data = await api.getDocuments();
-            setRequests(data);
+            const [docs, user] = await Promise.all([
+                api.getDocuments(),
+                api.getMe()
+            ]);
+
+            setRequests(docs);
+            setUserWallet(user.wallet_address);
+
+            // Fetch live NTK balance
+            if (user.wallet_address) {
+                const balRes = await api.getOnChainBalance(user.wallet_address, 'ntk');
+                setNtkBalance(balRes.balance);
+            }
         } catch (err: any) {
             console.error(err);
-            const msg = err.message || "Failed to load requests.";
+            const msg = err.message || "Failed to load dashboard data.";
             setError(msg);
             toast.error(msg);
         } finally {
@@ -45,6 +58,31 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    const handleAddTokenToWallet = async () => {
+        if (!window.ethereum) {
+            toast.error("MetaMask not found.");
+            return;
+        }
+        try {
+            // NTK Address (Standardizing on the ENV set)
+            const NTK_ADDRESS = "0x505388A24BA31F64A46dC10a7923EA4892c0B0C7";
+            await window.ethereum.request({
+                method: 'wallet_watchAsset',
+                params: {
+                    type: 'ERC20',
+                    options: {
+                        address: NTK_ADDRESS,
+                        symbol: 'NTK',
+                        decimals: 18,
+                    },
+                },
+            });
+            toast.success("NTK Token added to wallet.");
+        } catch (error) {
+            console.error(error);
+        }
+    };
 
     const stats = [
         {
@@ -65,6 +103,17 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
             icon: XCircle,
             color: "red",
         },
+        {
+            label: "NTK Balance",
+            value: ntkBalance,
+            icon: Coins,
+            color: "primary",
+            action: {
+                label: "Add to Wallet",
+                icon: Plus,
+                onClick: handleAddTokenToWallet
+            }
+        }
     ];
 
     const getStatusBadge = (status: string) => {
@@ -136,9 +185,20 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                     className="bg-card/50 border-border rounded-xl p-6 hover:shadow-lg hover:shadow-primary/10 transition-all"
                                 >
                                     <div className="flex items-start justify-between mb-4">
-                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${colorMap[stat.color as keyof typeof colorMap]}`}>
+                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${stat.color === 'primary' ? 'bg-primary/10 text-primary border-primary/20' : colorMap[stat.color as keyof typeof colorMap]}`}>
                                             <Icon size={24} />
                                         </div>
+                                        {stat.action && (
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8 px-2 text-primary hover:bg-primary/10"
+                                                onClick={stat.action.onClick}
+                                            >
+                                                <stat.action.icon size={14} className="mr-1" />
+                                                {stat.action.label}
+                                            </Button>
+                                        )}
                                     </div>
                                     <h2 className="text-foreground mb-1">{stat.value}</h2>
                                     <p className="text-sm text-muted-foreground">{stat.label}</p>

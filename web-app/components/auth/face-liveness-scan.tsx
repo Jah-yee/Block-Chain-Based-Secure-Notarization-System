@@ -497,28 +497,37 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
                 )}
 
                 {error && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 p-6 text-center backdrop-blur-sm">
-                        <AlertCircle className="h-10 w-10 text-destructive mb-3" />
-                        <p className="text-sm font-medium text-destructive mb-2">{error}</p>
+                    <div className="absolute inset-0 flex flex-col items-center justify-start bg-background/95 p-4 text-center backdrop-blur-sm overflow-y-auto z-20">
+                        <div className="flex flex-col items-center py-6 w-full max-w-sm">
+                            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+                                <AlertCircle className="h-6 w-6 text-destructive" />
+                            </div>
+                            <h4 className="text-sm font-bold text-destructive mb-1">Scanner Interrupted</h4>
+                            <p className="text-xs text-muted-foreground px-4 mb-4 leading-relaxed">{error}</p>
+                        </div>
 
                         {error.includes("Camera permission denied") && (
-                            <div className="mt-3 p-4 bg-muted/50 rounded-lg border border-border max-w-md text-left">
-                                <p className="text-xs font-semibold mb-2">📹 How to enable camera:</p>
-                                <ol className="text-xs space-y-1 text-muted-foreground list-decimal list-inside">
-                                    <li>Look for a camera icon 🎥 in your browser's address bar</li>
-                                    <li>Click it and select "Allow" or "Always allow"</li>
-                                    <li>If no icon appears, click the lock 🔒 icon → Site settings → Camera → Allow</li>
-                                    <li>Refresh the page after changing permissions</li>
-                                </ol>
-                                <p className="text-xs text-muted-foreground mt-3 italic">
-                                    💡 Your form data is automatically saved and will be restored after you grant permission!
-                                </p>
+                            <div className="mt-2 w-full max-w-sm">
+                                <details className="group rounded-lg border border-border bg-muted/40 overflow-hidden">
+                                    <summary className="px-4 py-2 text-[11px] font-semibold cursor-pointer list-none flex items-center justify-between hover:bg-muted/30 transition-colors">
+                                        <span className="flex items-center gap-2">
+                                            <Camera className="h-3 w-3" /> How to enable camera
+                                        </span>
+                                        <RefreshCw className="h-3 w-3 transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-4 pb-3 space-y-2 border-t border-border/20 pt-2 text-left">
+                                        <ol className="text-[10px] space-y-1 text-muted-foreground list-decimal list-inside leading-normal">
+                                            <li>Look for camera icon 🎥 in address bar</li>
+                                            <li>Select "Allow" or "Always allow"</li>
+                                            <li>Or click lock 🔒 icon → Site settings → Camera</li>
+                                        </ol>
+                                        <p className="text-[9px] text-muted-foreground italic mt-2 opacity-70">
+                                            💡 Form data is saved; refresh after allowing.
+                                        </p>
+                                    </div>
+                                </details>
                             </div>
                         )}
-
-                        <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2 mt-4">
-                            <RefreshCw className="h-4 w-4" /> Try Again
-                        </Button>
                     </div>
                 )}
 
@@ -538,21 +547,23 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
             </div>
 
             <div className="space-y-3">
-                <div className={`p-3 rounded-lg border transition-all ${isCameraActive ? "bg-primary/5 border-primary/20" : "bg-muted/30 border-transparent"}`}>
-                    <p className="text-sm font-medium text-center">
-                        {status}
-                    </p>
-                </div>
+                {(!error && !isVerifying) && (
+                    <div className={`p-3 rounded-lg border transition-all ${isCameraActive ? "bg-primary/5 border-primary/20" : "bg-muted/30 border-transparent"}`}>
+                        <p className="text-sm font-medium text-center">
+                            {status}
+                        </p>
+                    </div>
+                )}
 
                 <div className="flex flex-col gap-2">
-                    {!isCameraActive && !isVerifying && !error && (
+                    {!isCameraActive && !isVerifying && (
                         <Button
                             type="button"
-                            onClick={startCamera}
+                            onClick={handleRetry}
                             disabled={!isModelLoaded}
-                            className="w-full h-11 text-base font-semibold shadow-lg shadow-primary/20"
+                            className="w-full h-11 text-base font-bold shadow-lg shadow-primary/30 animate-in fade-in zoom-in duration-300"
                         >
-                            Connect to Secure Scanner
+                            <Camera className="h-5 w-5 mr-2" /> {error ? "Retry Scanner" : "Start Scanner"}
                         </Button>
                     )}
 
@@ -586,6 +597,6 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
                     </p>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }

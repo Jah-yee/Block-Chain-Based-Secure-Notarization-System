@@ -86,7 +86,7 @@ export function DocumentsTable() {
         </TableHeader>
         <TableBody>
           {documents.map((doc) => (
-            <TableRow key={doc.id} className="group transition-colors hover:bg-muted/50">
+            <TableRow key={doc.id} className="group transition-colors hover:bg-muted/20">
               <TableCell className="font-medium">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
