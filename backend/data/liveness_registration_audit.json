@@ -1,0 +1,58 @@
+[
+  {
+    "userID": 6,
+    "email": "Owner@bbsns.com",
+    "fingerprint": "37e26b83544fbb0782e426dc24feabc198b64079aa92be7f04a5af8eb336f56f",
+    "timestamp": "2026-01-15T08:51:38.231Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 7,
+    "email": "owner@bbsns.com",
+    "fingerprint": "7789559f7f944ed37ae7c384bbc256baf96fcbbf8157edffe05eac4afe095692",
+    "timestamp": "2026-01-15T09:32:25.598Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 6,
+    "email": "owner@bbsns.com",
+    "fingerprint": "08d98a4888818fe60dd29f3d0f2536959b84e15fd38a6f1b611a64594a28a78c",
+    "timestamp": "2026-01-25T15:36:55.836Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 7,
+    "email": "owner@bbsns.com",
+    "fingerprint": "3b59f1e8fa97971892602a5b725a91617a9810039b490dd7ab7974e72feb2f34",
+    "timestamp": "2026-01-26T05:41:23.016Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 8,
+    "email": "owner@bbsns.com",
+    "fingerprint": "d01dccf1bbd890b0bc150eeb52ec154d6dd73e3bccfe71153935713d75a8c318",
+    "timestamp": "2026-01-26T06:34:58.057Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 2,
+    "email": "owner@bbsns.com",
+    "fingerprint": "e03276391468628e514605a7dd8fd2cb0c9e02cf753c3d08d94149ade635449c",
+    "timestamp": "2026-02-05T09:10:53.222Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 3,
+    "email": "admin@bbsns.com",
+    "fingerprint": "15733275b3c4cec6558d79097d84050ab46bed75349594f68dd621d26fb69666",
+    "timestamp": "2026-02-05T19:25:44.740Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  },
+  {
+    "userID": 4,
+    "email": "admin@bbsns.com",
+    "fingerprint": "3d2899b85a70a172f12092ecaed6d889824f4497a252436781c879fd322c21ec",
+    "timestamp": "2026-02-05T20:02:14.523Z",
+    "action": "REGISTRATION_KYC_VERIFIED"
+  }
+]

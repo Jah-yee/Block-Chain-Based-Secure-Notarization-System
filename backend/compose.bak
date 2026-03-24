@@ -1,0 +1,16 @@
+services:
+  javascript-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"  # Expose the port defined in Dockerfile
+    restart: unless-stopped
+    init: true
+    # env_file: ./.env  # Uncomment if .env file exists
+    # Add depends_on here if you add external services
+    # networks: [appnet]  # Uncomment if you add more services needing communication
+
+# No external services (database, cache, etc.) detected in README, source code, or environment files.
+# No volumes section included as there are no persistent data requirements for this service.
+# If you add external services, define networks and volumes as needed.

@@ -1,0 +1,133 @@
+{
+  "info": {
+    "name": "BBSNS CRUD API",
+    "_postman_id": "bbsns-crud-api",
+    "description": "Postman collection for Users, Documents, Transactions CRUD APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"test@example.com\",\n  \"password_hash\": \"hashedpassword\"\n}"
+            },
+            "url": { "raw": "http://localhost:5000/users", "host": ["localhost"], "port": "5000", "path": ["users"] }
+          }
+        },
+        {
+          "name": "Get All Users",
+          "request": { "method": "GET", "url": "http://localhost:5000/users" }
+        },
+        {
+          "name": "Get User by ID",
+          "request": { "method": "GET", "url": "http://localhost:5000/users/1" }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"updateduser\",\n  \"email\": \"updated@example.com\",\n  \"password_hash\": \"newhash\"\n}"
+            },
+            "url": "http://localhost:5000/users/1"
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": { "method": "DELETE", "url": "http://localhost:5000/users/1" }
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "Create Document",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 1,\n  \"filename\": \"file.pdf\",\n  \"filepath\": \"/uploads/file.pdf\",\n  \"file_hash\": \"abc123\",\n  \"ntkr_sent\": 10,\n  \"status\": \"pending\",\n  \"notary_id\": 1,\n  \"approval_tx_hash\": null\n}"
+            },
+            "url": "http://localhost:5000/documents"
+          }
+        },
+        {
+          "name": "Get All Documents",
+          "request": { "method": "GET", "url": "http://localhost:5000/documents" }
+        },
+        {
+          "name": "Get Document by ID",
+          "request": { "method": "GET", "url": "http://localhost:5000/documents/1" }
+        },
+        {
+          "name": "Update Document",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"updated.pdf\",\n  \"filepath\": \"/uploads/updated.pdf\",\n  \"status\": \"approved\",\n  \"approval_tx_hash\": \"tx123\"\n}"
+            },
+            "url": "http://localhost:5000/documents/1"
+          }
+        },
+        {
+          "name": "Delete Document",
+          "request": { "method": "DELETE", "url": "http://localhost:5000/documents/1" }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "Create Transaction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": 1,\n  \"document_id\": 1,\n  \"tx_type\": \"approval\",\n  \"amount\": 50,\n  \"tx_hash\": \"0x123abc\",\n  \"status\": \"success\"\n}"
+            },
+            "url": "http://localhost:5000/transactions"
+          }
+        },
+        {
+          "name": "Get All Transactions",
+          "request": { "method": "GET", "url": "http://localhost:5000/transactions" }
+        },
+        {
+          "name": "Get Transaction by ID",
+          "request": { "method": "GET", "url": "http://localhost:5000/transactions/1" }
+        },
+        {
+          "name": "Update Transaction",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tx_type\": \"rejection\",\n  \"amount\": 25,\n  \"status\": \"failed\"\n}"
+            },
+            "url": "http://localhost:5000/transactions/1"
+          }
+        },
+        {
+          "name": "Delete Transaction",
+          "request": { "method": "DELETE", "url": "http://localhost:5000/transactions/1" }
+        }
+      ]
+    }
+  ]
+}

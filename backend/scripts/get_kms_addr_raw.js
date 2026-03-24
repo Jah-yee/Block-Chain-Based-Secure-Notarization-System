@@ -1,0 +1,11 @@
+const fs = require('fs');
+const { ethers } = require('ethers');
+const pemPath = 'C:\\Users\\Lenovo\\OneDrive\\Desktop\\Final_pro\\BBSNS\\documentation\\IAM\\Relayer Publickey-18f4f3b7-c83b-4a2e-9daf-b91692d5f95d.pem';
+const pemContent = fs.readFileSync(pemPath, 'utf-8');
+const base64 = pemContent.replace(/-----BEGIN PUBLIC KEY-----/, '').replace(/-----END PUBLIC KEY-----/, '').replace(/\s+/g, '');
+const derBuffer = Buffer.from(base64, 'base64');
+const uncompressedPubkey = derBuffer.subarray(23);
+const pubkeyBody = uncompressedPubkey.subarray(1);
+const hash = ethers.keccak256(pubkeyBody);
+const address = ethers.getAddress('0x' + hash.substring(hash.length - 40));
+process.stdout.write(address);

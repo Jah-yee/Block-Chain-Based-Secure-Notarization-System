@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  backend:
+    container_name: bbsns_backend
+    build: .
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+    environment:
+      - PORT=5000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=bbsns_user
+      - DB_PASSWORD=bbsns_pass
+      - DB_NAME=bbsns_db
+      - DATABASE_URL=postgres://bbsns_user:bbsns_pass@postgres:5432/bbsns_db
+    restart: unless-stopped
+
+  postgres:
+    container_name: bbsns_postgres
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: bbsns_user
+      POSTGRES_PASSWORD: bbsns_pass
+      POSTGRES_DB: bbsns_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: bbsns_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+
+volumes:
+  pgdata:
+  pgadmin_data:

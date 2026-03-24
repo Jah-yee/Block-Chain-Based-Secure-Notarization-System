@@ -1,0 +1,20 @@
+[
+  {
+    "id": 4,
+    "email": "admin@bbsns.com",
+    "wallet_address": "0x02252db03af7cd8c8d3ec6cfd3ae5f6dab69acd0",
+    "role": "admin"
+  },
+  {
+    "id": 20,
+    "email": "notary@bbsns.com",
+    "wallet_address": "0xa82a6fcbb2db5979a6fcca83c24317605580310e",
+    "role": "notary"
+  },
+  {
+    "id": 1,
+    "email": "owner@bbsns.com",
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "role": "user"
+  }
+]

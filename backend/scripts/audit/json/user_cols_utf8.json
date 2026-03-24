@@ -1,0 +1,123 @@
+﻿[dotenv@17.2.3] injecting env (3) from .env -- tip: ≡ƒæÑ sync secrets across teammates & machines: https://dotenvx.com/ops
+[
+  {
+    "column_name": "id",
+    "column_default": "nextval('users_id_seq'::regclass)",
+    "is_nullable": "NO",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "username",
+    "column_default": null,
+    "is_nullable": "NO",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "email",
+    "column_default": null,
+    "is_nullable": "NO",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "password_hash",
+    "column_default": null,
+    "is_nullable": "NO",
+    "data_type": "text"
+  },
+  {
+    "column_name": "wallet_address",
+    "column_default": null,
+    "is_nullable": "NO",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "national_id_hash",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "text"
+  },
+  {
+    "column_name": "consent_timestamp",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "role",
+    "column_default": "'user'::character varying",
+    "is_nullable": "NO",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "notary_pin_hash",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "text"
+  },
+  {
+    "column_name": "kyc_verified",
+    "column_default": "false",
+    "is_nullable": "NO",
+    "data_type": "boolean"
+  },
+  {
+    "column_name": "created_at",
+    "column_default": "CURRENT_TIMESTAMP",
+    "is_nullable": "YES",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "updated_at",
+    "column_default": "CURRENT_TIMESTAMP",
+    "is_nullable": "YES",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "is_deactivated",
+    "column_default": "false",
+    "is_nullable": "NO",
+    "data_type": "boolean"
+  },
+  {
+    "column_name": "deactivated_at",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "timestamp without time zone"
+  },
+  {
+    "column_name": "wallet_nonce",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "text"
+  },
+  {
+    "column_name": "liveness_status",
+    "column_default": "'pending'::kyc_status_enum",
+    "is_nullable": "NO",
+    "data_type": "USER-DEFINED"
+  },
+  {
+    "column_name": "name",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "face_descriptor",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "jsonb"
+  },
+  {
+    "column_name": "trusted_device_id",
+    "column_default": null,
+    "is_nullable": "YES",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "ntkr_balance",
+    "column_default": "0",
+    "is_nullable": "YES",
+    "data_type": "numeric"
+  }
+]

@@ -1,0 +1,169 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Updated color tokens to match sophisticated design brief */
+  --background: #ffffff; /* Clean white background */
+  --foreground: #475569; /* Professional slate text */
+  --card: #ecfeff; /* Subtle cyan card backgrounds */
+  --card-foreground: #164e63; /* Deep cyan card text */
+  --popover: #ffffff; /* White popover background */
+  --popover-foreground: #475569; /* Slate popover text */
+  --primary: #164e63; /* Deep cyan primary */
+  --primary-foreground: #ffffff; /* White text on primary */
+  --secondary: #6366f1; /* Indigo secondary accent */
+  --secondary-foreground: #ffffff; /* White text on secondary */
+  --muted: #f8fafc; /* Very light slate muted */
+  --muted-foreground: #374151; /* Medium slate muted text */
+  --accent: #d97706; /* Warm amber accent */
+  --accent-foreground: #ffffff; /* White text on accent */
+  --destructive: #ef4444; /* Red destructive */
+  --destructive-foreground: #ffffff; /* White text on destructive */
+  --border: #d1d5db; /* Light gray borders */
+  --input: #ecfeff; /* Subtle cyan input backgrounds */
+  --ring: rgba(22, 78, 99, 0.5); /* Deep cyan focus ring */
+  --chart-1: #6366f1;
+  --chart-2: #d97706;
+  --chart-3: #d1d5db;
+  --chart-4: #475569;
+  --chart-5: #164e63;
+  --radius: 0.5rem; /* Slightly more rounded corners */
+  --sidebar: #ecfeff; /* Subtle cyan sidebar */
+  --sidebar-foreground: #475569; /* Slate sidebar text */
+  --sidebar-primary: #164e63; /* Deep cyan sidebar primary */
+  --sidebar-primary-foreground: #ffffff; /* White text on sidebar primary */
+  --sidebar-accent: #6366f1; /* Indigo sidebar accent */
+  --sidebar-accent-foreground: #ffffff; /* White text on sidebar accent */
+  --sidebar-border: #d1d5db; /* Light gray sidebar borders */
+  --sidebar-ring: rgba(22, 78, 99, 0.5); /* Deep cyan sidebar focus ring */
+}
+
+.dark {
+  /* Enhanced dark theme with sophisticated color palette */
+  --background: #0f172a; /* Deep slate background */
+  --foreground: #f1f5f9; /* Light slate text */
+  --card: #1e293b; /* Dark slate cards */
+  --card-foreground: #f1f5f9; /* Light slate card text */
+  --popover: #1e293b; /* Dark slate popovers */
+  --popover-foreground: #f1f5f9; /* Light slate popover text */
+  --primary: #0891b2; /* Bright cyan primary */
+  --primary-foreground: #ffffff; /* White text on primary */
+  --secondary: #6366f1; /* Indigo secondary (consistent) */
+  --secondary-foreground: #ffffff; /* White text on secondary */
+  --muted: #334155; /* Medium slate muted */
+  --muted-foreground: #94a3b8; /* Light slate muted text */
+  --accent: #f59e0b; /* Bright amber accent */
+  --accent-foreground: #0f172a; /* Dark text on accent */
+  --destructive: #ef4444; /* Red destructive (consistent) */
+  --destructive-foreground: #ffffff; /* White text on destructive */
+  --border: #334155; /* Medium slate borders */
+  --input: #1e293b; /* Dark slate inputs */
+  --ring: rgba(8, 145, 178, 0.5); /* Bright cyan focus ring */
+  --chart-1: #6366f1;
+  --chart-2: #f59e0b;
+  --chart-3: #64748b;
+  --chart-4: #94a3b8;
+  --chart-5: #0891b2;
+  --sidebar: #1e293b; /* Dark slate sidebar */
+  --sidebar-foreground: #f1f5f9; /* Light slate sidebar text */
+  --sidebar-primary: #0891b2; /* Bright cyan sidebar primary */
+  --sidebar-primary-foreground: #ffffff; /* White text on sidebar primary */
+  --sidebar-accent: #6366f1; /* Indigo sidebar accent */
+  --sidebar-accent-foreground: #ffffff; /* White text on sidebar accent */
+  --sidebar-border: #334155; /* Medium slate sidebar borders */
+  --sidebar-ring: rgba(8, 145, 178, 0.5); /* Bright cyan sidebar focus ring */
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Added custom 3D animation keyframes */
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes tilt {
+    0% {
+      transform: perspective(1000px) rotateX(0deg) rotateY(0deg);
+    }
+    100% {
+      transform: perspective(1000px) rotateX(5deg) rotateY(5deg);
+    }
+  }
+
+  @keyframes glow {
+    0%,
+    100% {
+      box-shadow: 0 0 20px rgba(22, 78, 99, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(22, 78, 99, 0.5);
+    }
+  }
+
+  .float-animation {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .tilt-hover:hover {
+    animation: tilt 0.3s ease-out forwards;
+  }
+
+  .glow-effect {
+    animation: glow 2s ease-in-out infinite;
+  }
+}

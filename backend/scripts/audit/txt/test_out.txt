@@ -1,0 +1,1443 @@
+  console.log
+    [dotenv@17.2.3] injecting env (9) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    ✅ Connected to Postgres
+
+      at log (db.js:23:25)
+
+
+> backend@1.0.0 migrate
+> node-pg-migrate up
+
+[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20241004120041
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20241004120051
+Can't determine timestamp for 20241004120041
+Can't determine timestamp for 20241004120061
+Can't determine timestamp for 20241004120051
+Can't determine timestamp for 20241004120071
+Can't determine timestamp for 20241004120061
+Can't determine timestamp for 20241004120081
+Can't determine timestamp for 20241004120071
+Can't determine timestamp for 20241004120091
+Can't determine timestamp for 20241004120081
+Can't determine timestamp for 20241004120092
+Can't determine timestamp for 20241004120091
+Can't determine timestamp for 20241004120093
+Can't determine timestamp for 20241004120092
+Can't determine timestamp for 20241004120095
+Can't determine timestamp for 20241004120093
+Can't determine timestamp for 20241004120096
+Can't determine timestamp for 20241004120095
+Can't determine timestamp for 20260106174501
+Can't determine timestamp for 20241004120096
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260106174501
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120071
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120061
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20241004120061
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20241004120051
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20241004120051
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20241004120041
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20241004120041
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20241004120081
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20241004120095
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20260106174501
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20241004120091
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20241004120096
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20241004120091
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20241004120096
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20260211100003
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260211100003
+Can't determine timestamp for 20241004120092
+Can't determine timestamp for 20260211100003
+Can't determine timestamp for 20260106174501
+Can't determine timestamp for 20260211100003
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20260211100003
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20240220000000
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260116
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260115
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260122
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260117
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260124
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260125
+Can't determine timestamp for 20260205
+Can't determine timestamp for 20260211
+Can't determine timestamp for 20260219
+Can't determine timestamp for 20241004120001
+Can't determine timestamp for 20241004120011
+Can't determine timestamp for 20241004120031
+Can't determine timestamp for 20241004120081
+Can't determine timestamp for 20241004120021
+Can't determine timestamp for 20241004120071
+Can't determine timestamp for 20241004120041
+Can't determine timestamp for 20241004120061
+Can't determine timestamp for 20241004120092
+Can't determine timestamp for 20241004120091
+Can't determine timestamp for 20241004120051
+Can't determine timestamp for 20241004120095
+Can't determine timestamp for 20241004120093
+Can't determine timestamp for 20241004120096
+Can't determine timestamp for 20260205000001
+Can't determine timestamp for 20260106174501
+Can't determine timestamp for 20260211000002
+Can't determine timestamp for 20260211000001
+Can't determine timestamp for 20260211100003
+> Migrating files:
+> - 20260115_add_server_computed_flag
+> - 20260115_create_ntk_mint_audit
+> - 20260116_create_governance_tables
+> - 20260117_add_nationality_to_notary_apps
+> - 20260117_create_notary_applications
+> - 20260117_update_notary_apps_standalone
+> - 20260122_hygiene_hardening
+> - 20260124_create_auth_nonces
+> - 20260124_create_token_audit_logs
+> - 20260124_fix_notary_apps_status
+> - 20260125_add_device_id
+> - 20260125_fix_timestamps
+> - 20260205_remote_auth
+> - 20260211_add_document_metadata
+> - 20260211_fix_ntk_amount_overflow
+> - 20260219_create_token_deposits
+> - 20240220000000_create_system_logs
+> - 20241004120001_create_users
+> - 20241004120011_create_documents
+> - 20241004120021_create_ntkr_transactions
+> - 20241004120031_add_users_deactivated
+> - 20241004120041_update_schema_for_business_logic
+> - 20241004120051_fix_enum_and_column_additions
+> - 20241004120061_blockchain_logical_crud
+> - 20241004120071_alter_file_hash_to_varchar
+> - 20241004120081_create_wallet_nonces
+> - 20241004120091_add_name_and_wallet_required
+> - 20241004120092_add_note_to_ntkr_transactions
+> - 20241004120093_add_approval_to_tx_type_enum
+> - 20241004120095_update_amount_constraint_for_approval
+> - 20241004120096_add_liveness_fields_to_users
+> - 20260106174501_add_audit_trail_to_documents
+> - 20260205000001_rename_kyc_status_to_liveness_status
+> - 20260211000001_fix_is_deleted_column
+> - 20260211000002_update_proposal_types
+> - 20260211100003_add_summary_fingerprint
+### MIGRATION 20260115_add_server_computed_flag (UP) ###
+-- Migration: Add server_computed flag to track hash authority
+-- Purpose: Distinguish server-computed hashes from client-provided (untrusted) hashes
+-- Created: 2026-01-15
+
+-- Add server_computed column
+ALTER TABLE documents 
+ADD COLUMN IF NOT EXISTS server_computed BOOLEAN DEFAULT false;
+
+-- Add index for auditing and filtering
+CREATE INDEX IF NOT EXISTS idx_documents_server_computed ON documents(server_computed);
+
+-- Update existing records (mark as untrusted since they used client-provided hashes)
+UPDATE documents 
+SET server_computed = false 
+WHERE server_computed IS NULL;
+
+-- Add comment for documentation
+COMMENT ON COLUMN documents.server_computed IS 
+'TRUE if hash was computed by server from uploaded file bytes. FALSE if client-provided (UNTRUSTED). Only server-computed hashes should be used for notarization.';
+
+-- Future enforcement (uncomment when all documents use server hash):
+-- ALTER TABLE documents ADD CONSTRAINT enforce_server_hash CHECK (server_computed = true);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260115_add_server_computed_flag', NOW());
+
+
+### MIGRATION 20260115_create_ntk_mint_audit (UP) ###
+-- Migration: Create NTK Mint Audit Table
+-- Purpose: Track all NTK daily mint attempts for accountability and debugging
+-- Created: 2026-01-15
+
+CREATE TABLE IF NOT EXISTS ntk_mint_audit (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    wallet_address VARCHAR(42) NOT NULL,
+    tx_hash VARCHAR(66),
+    relayer_address VARCHAR(42) NOT NULL,
+    amount DECIMAL(20, 18) DEFAULT 100,
+    status VARCHAR(20) NOT NULL, -- 'SUCCESS' or 'FAILED'
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for efficient querying
+CREATE INDEX IF NOT EXISTS idx_ntk_mint_wallet ON ntk_mint_audit(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_ntk_mint_created ON ntk_mint_audit(created_at);
+CREATE INDEX IF NOT EXISTS idx_ntk_mint_status ON ntk_mint_audit(status);
+
+-- Comment for documentation
+COMMENT ON TABLE ntk_mint_audit IS 'Audit trail for NTK daily mint operations. Records every attempt, success or failure.';
+COMMENT ON COLUMN ntk_mint_audit.status IS 'SUCCESS: Mint succeeded on-chain. FAILED: Contract rejected (e.g., already minted today).';
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260115_create_ntk_mint_audit', NOW());
+
+
+### MIGRATION 20260116_create_governance_tables (UP) ###
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'proposal_type') THEN
+        CREATE TYPE proposal_type AS ENUM ('ban_user', 'unban_user', 'override_document', 'system_upgrade');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'proposal_status') THEN
+        CREATE TYPE proposal_status AS ENUM ('active', 'passed', 'rejected', 'executed');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vote_decision') THEN
+        CREATE TYPE vote_decision AS ENUM ('approve', 'reject');
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS governance_proposals (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    type proposal_type NOT NULL,
+    target_id VARCHAR(255), -- ID of user or document being targeted
+    proposer_id INTEGER REFERENCES users(id),
+    status proposal_status DEFAULT 'active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    executed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE IF NOT EXISTS governance_votes (
+    id SERIAL PRIMARY KEY,
+    proposal_id INTEGER REFERENCES governance_proposals(id) ON DELETE CASCADE,
+    voter_id INTEGER REFERENCES users(id),
+    decision vote_decision NOT NULL,
+    signature TEXT NOT NULL, -- EIP-191 verify signature of decision
+    voted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(proposal_id, voter_id) -- One vote per admin per proposal
+);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260116_create_governance_tables', NOW());
+
+
+### MIGRATION 20260117_add_nationality_to_notary_apps (UP) ###
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS nationality VARCHAR(100);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260117_add_nationality_to_notary_apps', NOW());
+
+
+### MIGRATION 20260117_create_notary_applications (UP) ###
+CREATE TABLE IF NOT EXISTS notary_applications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    full_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    license_number VARCHAR(100) NOT NULL,
+    experience TEXT,
+    status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id) -- One active application per user
+);
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_notary_applications_updated_at ON notary_applications;
+CREATE TRIGGER update_notary_applications_updated_at
+BEFORE UPDATE ON notary_applications
+FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260117_create_notary_applications', NOW());
+
+
+### MIGRATION 20260117_update_notary_apps_standalone (UP) ###
+-- Remove foreign key dependency as applicant is not yet a user
+ALTER TABLE notary_applications DROP CONSTRAINT IF EXISTS notary_applications_user_id_fkey;
+ALTER TABLE notary_applications DROP COLUMN IF EXISTS user_id;
+
+-- Add fields required for eventual user creation
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS wallet_address VARCHAR(42);
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS national_id_hash VARCHAR(255);
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS face_descriptor TEXT; -- Stored as JSON string
+ALTER TABLE notary_applications ADD COLUMN IF NOT EXISTS ipfs_cid VARCHAR(255); -- Optional doc proof
+
+-- Ensure uniqueness on applications to prevent spam
+ALTER TABLE notary_applications DROP CONSTRAINT IF EXISTS unique_app_wallet;
+ALTER TABLE notary_applications DROP CONSTRAINT IF EXISTS unique_app_email;
+ALTER TABLE notary_applications ADD CONSTRAINT unique_app_wallet UNIQUE (wallet_address);
+ALTER TABLE notary_applications ADD CONSTRAINT unique_app_email UNIQUE (email);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260117_update_notary_apps_standalone', NOW());
+
+
+### MIGRATION 20260122_hygiene_hardening (UP) ###
+-- ============================================
+-- HYGIENE & HARDENING CONSOLIDATED MIGRATION
+-- Date: 2026-01-22 (Hardened: 2026-02-05)
+-- ============================================
+
+-- 1. CLEANUP & CONSTRAINTS: Users Table
+ALTER TABLE users DROP CONSTRAINT IF EXISTS unique_email;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS unique_wallet;
+
+-- Add CHECK constraint for roles to ensure data integrity at the DB level
+ALTER TABLE users DROP CONSTRAINT IF EXISTS check_role_valid;
+ALTER TABLE users ADD CONSTRAINT check_role_valid CHECK (role IN ('user', 'notary', 'admin'));
+
+-- 2. INTEGRITY: Tighten Critical NOT NULL Constraints & Defaults
+UPDATE users SET role = 'user' WHERE role IS NULL;
+UPDATE users SET kyc_verified = false WHERE kyc_verified IS NULL;
+UPDATE users SET is_deactivated = false WHERE is_deactivated IS NULL;
+
+ALTER TABLE users 
+    ALTER COLUMN role SET NOT NULL,
+    ALTER COLUMN role SET DEFAULT 'user',
+    ALTER COLUMN kyc_verified SET NOT NULL,
+    ALTER COLUMN kyc_verified SET DEFAULT false,
+    ALTER COLUMN is_deactivated SET NOT NULL,
+    ALTER COLUMN is_deactivated SET DEFAULT false;
+
+-- Handle kyc_status or liveness_status rename defensively
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'kyc_status') THEN
+        UPDATE users SET kyc_status = 'pending' WHERE kyc_status IS NULL;
+        ALTER TABLE users ALTER COLUMN kyc_status SET NOT NULL;
+        ALTER TABLE users ALTER COLUMN kyc_status SET DEFAULT 'pending';
+    ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'liveness_status') THEN
+        UPDATE users SET liveness_status = 'pending' WHERE liveness_status IS NULL;
+        ALTER TABLE users ALTER COLUMN liveness_status SET NOT NULL;
+        ALTER TABLE users ALTER COLUMN liveness_status SET DEFAULT 'pending';
+    END IF;
+END $$;
+
+-- 3. UNIQUENESS: Disallow ANY duplicate file hashes globally (Deduplication)
+-- This enforces "Global Uniqueness" as per architectural requirements.
+DELETE FROM documents a USING documents b 
+WHERE a.id < b.id AND a.file_hash = b.file_hash;
+
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS unique_user_file_hash;
+ALTER TABLE documents DROP CONSTRAINT IF EXISTS unique_global_file_hash;
+ALTER TABLE documents ADD CONSTRAINT unique_global_file_hash UNIQUE (file_hash);
+
+-- 4. COMPLETION: Create missing Deletion Log table
+CREATE TABLE IF NOT EXISTS document_deletion_log (
+    id SERIAL PRIMARY KEY,
+    document_id INT NOT NULL,
+    deleted_by_wallet VARCHAR(100) NOT NULL,
+    reason TEXT,
+    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. AUDIT: Fix transactions status and amount constraints
+UPDATE ntkr_transactions SET status = 'pending' WHERE status IS NULL;
+ALTER TABLE ntkr_transactions 
+    ALTER COLUMN status SET NOT NULL,
+    ALTER COLUMN status SET DEFAULT 'pending';
+
+-- Prevent negative balances or invalid transaction amounts
+ALTER TABLE ntkr_transactions DROP CONSTRAINT IF EXISTS check_amount_positive;
+ALTER TABLE ntkr_transactions ADD CONSTRAINT check_amount_positive CHECK (amount >= 0);
+
+-- 6. AUDIT: Ensure tx_hash is unique when provided
+CREATE UNIQUE INDEX IF NOT EXISTS unique_tx_hash 
+ON ntkr_transactions(tx_hash) 
+WHERE tx_hash IS NOT NULL;
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260122_hygiene_hardening', NOW());
+
+
+### MIGRATION 20260124_create_auth_nonces (UP) ###
+-- Migration: Create auth_nonces table
+-- Purpose: Support multi-action nonce-based authentication with upsert capability
+-- Created: 2026-01-24
+
+CREATE TABLE IF NOT EXISTS auth_nonces (
+    id SERIAL PRIMARY KEY,
+    wallet_address VARCHAR(100) NOT NULL,
+    nonce VARCHAR(64) NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    issued_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP NOT NULL,
+    UNIQUE(wallet_address, action)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_nonces_wallet ON auth_nonces(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_auth_nonces_expiry ON auth_nonces(expires_at);
+
+COMMENT ON TABLE auth_nonces IS 'Security nonces for authentication actions (login, register, etc) with replay protection.';
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260124_create_auth_nonces', NOW());
+
+
+### MIGRATION 20260124_create_token_audit_logs (UP) ###
+-- Migration: Create Comprehensive Token Audit Table
+-- Purpose: Track all token operations (Mint, Burn, Buy) for transparency and compliance
+-- Created: 2026-01-24
+
+CREATE TABLE IF NOT EXISTS token_audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    wallet_address VARCHAR(42) NOT NULL,
+    action_type VARCHAR(50) NOT NULL, -- 'NTK_MINT', 'NTKR_MINT', 'NTKR_BURN', 'PACKAGE_BUY', 'DOC_ACTION_BURN'
+    amount DECIMAL(36, 18),
+    tx_hash VARCHAR(66),
+    relayer_address VARCHAR(42),
+    status VARCHAR(20) NOT NULL, -- 'SUCCESS', 'FAILED'
+    metadata JSONB, -- Additional data like packageId, category, etc.
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_audit_user ON token_audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_token_audit_wallet ON token_audit_logs(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_token_audit_action ON token_audit_logs(action_type);
+CREATE INDEX IF NOT EXISTS idx_token_audit_created ON token_audit_logs(created_at);
+
+COMMENT ON TABLE token_audit_logs IS 'Unified audit trail for all token-related operations across NTK and NTKR ecosystems.';
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260124_create_token_audit_logs', NOW());
+
+
+### MIGRATION 20260124_fix_notary_apps_status (UP) ###
+-- Migration: Update notary_applications status constraint
+-- Purpose: Allow 'APPLIED' and 'KYC_VERIFIED' states used in the backend
+-- Created: 2026-01-24
+
+ALTER TABLE notary_applications DROP CONSTRAINT IF EXISTS notary_applications_status_check;
+
+ALTER TABLE notary_applications 
+ADD CONSTRAINT notary_applications_status_check 
+CHECK (status IN ('pending', 'APPLIED', 'KYC_VERIFIED', 'approved', 'rejected'));
+
+-- Ensure current rows are valid (though they should be)
+UPDATE notary_applications SET status = 'APPLIED' WHERE status = 'pending';
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260124_fix_notary_apps_status', NOW());
+
+
+### MIGRATION 20260125_add_device_id (UP) ###
+-- Add Hardware Binding column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trusted_device_id VARCHAR(255);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260125_add_device_id', NOW());
+
+
+### MIGRATION 20260125_fix_timestamps (UP) ###
+-- Fix timezone issue
+ALTER TABLE auth_nonces 
+ALTER COLUMN issued_at TYPE TIMESTAMPTZ,
+ALTER COLUMN expires_at TYPE TIMESTAMPTZ;
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260125_fix_timestamps', NOW());
+
+
+### MIGRATION 20260205_remote_auth (UP) ###
+-- Migration: Create remote_auth_sessions table
+-- Description: Supports "Login via Browser" for the Desktop App
+
+CREATE TABLE IF NOT EXISTS remote_auth_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenge TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'authorized', 'expired', 'failed')),
+    wallet_address VARCHAR(42),
+    token TEXT,
+    device_id TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    authorized_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Index for cleanup and lookup
+CREATE INDEX idx_remote_auth_expires ON remote_auth_sessions(expires_at);
+CREATE INDEX idx_remote_auth_status ON remote_auth_sessions(status);
+;
+INSERT INTO "public"."pgmigrations" (name, run_on) VALUES ('20260205_remote_auth', NOW());
+
+
+Error executing:
+-- Migration: Create remote_auth_sessions table
+-- Description: Supports "Login via Browser" for the Desktop App
+
+CREATE TABLE IF NOT EXISTS remote_auth_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenge TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'authorized', 'expired', 'failed')),
+    wallet_address VARCHAR(42),
+    token TEXT,
+    device_id TEXT,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    authorized_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Index for cleanup and lookup
+CREATE INDEX idx_remote_auth_expires ON remote_auth_sessions(expires_at);
+CREATE INDEX idx_remote_auth_status ON remote_auth_sessions(status);
+;
+error: relation "idx_remote_auth_expires" already exists
+
+> Rolling back attempted migration ...
+error: relation "idx_remote_auth_expires" already exists
+    at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async Object.query (file:///C:/Users/Lenovo/OneDrive/Desktop/Final_pro/BBSNS/backend/node_modules/node-pg-migrate/dist/bundle/index.js:3499:14)
+    at async runner (file:///C:/Users/Lenovo/OneDrive/Desktop/Final_pro/BBSNS/backend/node_modules/node-pg-migrate/dist/bundle/index.js:3806:9) {
+  length: 105,
+  severity: 'ERROR',
+  code: '42P07',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'index.c',
+  line: '873',
+  routine: 'index_create'
+}
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+  console.error
+    Cleanup failed: error: relation "wallet_nonces" does not exist
+        at C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\pg\lib\client.js:624:17
+        at processTicksAndRejections (node:internal/process/task_queues:95:5)
+        at Object.<anonymous> (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\setup.js:49:5) {
+      length: 112,
+      severity: 'ERROR',
+      code: '42P01',
+      detail: undefined,
+      hint: undefined,
+      position: '13',
+      internalPosition: undefined,
+      internalQuery: undefined,
+      where: undefined,
+      schema: undefined,
+      table: undefined,
+      column: undefined,
+      dataType: undefined,
+      constraint: undefined,
+      file: 'parse_relation.c',
+      line: '1392',
+      routine: 'parserOpenTable'
+    }
+
+    [0m [90m 57 |[39m     [36mawait[39m client[33m.[39mquery([32m'ALTER SEQUENCE ntkr_transactions_id_seq RESTART WITH 1'[39m)[33m;[39m
+     [90m 58 |[39m   } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 59 |[39m     console[33m.[39merror([32m'Cleanup failed:'[39m[33m,[39m err)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 60 |[39m   } [36mfinally[39m {
+     [90m 61 |[39m     client[33m.[39mrelease()[33m;[39m
+     [90m 62 |[39m   }[0m
+
+      at Object.error (tests/setup.js:59:13)
+
+FAIL tests/users.test.js (41.581 s)
+  ● Users API › Register new user → 201 success
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register duplicate email → 409 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register duplicate wallet → 409 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register with missing fields → 400 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Password stored as hash (not plaintext)
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Create user with valid fields
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Fail to create user with duplicate email
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Non-admin cannot create user → 403 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register with invalid email → 400 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register with weak password → 400 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Register with invalid wallet → 400 error
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Fail to update wallet address (immutable)
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Role enforcement: user cannot change role
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Role enforcement: admin can change role
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+  ● Users API › Soft deactivate user
+
+    Command failed: npm run migrate
+
+    [0m [90m 40 |[39m
+     [90m 41 |[39m   [90m// Run migrations on the new database[39m
+    [31m[1m>[22m[39m[90m 42 |[39m   execSync([32m'npm run migrate'[39m[33m,[39m { stdio[33m:[39m [32m'inherit'[39m[33m,[39m env[33m:[39m { [33m...[39mprocess[33m.[39menv[33m,[39m [33mDATABASE_URL[39m[33m:[39m process[33m.[39menv[33m.[39m[33mDATABASE_URL[39m } })[33m;[39m
+     [90m    |[39m   [31m[1m^[22m[39m
+     [90m 43 |[39m })[33m;[39m
+     [90m 44 |[39m
+     [90m 45 |[39m [90m// Clean up after each test[39m[0m
+
+      at Object.execSync (tests/setup.js:42:3)
+
+
+  ● Test suite failed to run
+
+    thrown: "Exceeded timeout of 30000 ms for a hook.
+    Add a timeout value to this test to increase the timeout, if this is a long-running test. See https://jestjs.io/docs/api#testname-fn-timeout."
+
+    [0m [90m 64 |[39m
+     [90m 65 |[39m [90m// Close pools after all tests[39m
+    [31m[1m>[22m[39m[90m 66 |[39m afterAll([36masync[39m () [33m=>[39m {
+     [90m    |[39m [31m[1m^[22m[39m
+     [90m 67 |[39m   [36mawait[39m testPool[33m.[39mend()[33m;[39m
+     [90m 68 |[39m   [36mawait[39m dbPool[33m.[39mend()[33m;[39m
+     [90m 69 |[39m })[33m;[39m[0m
+
+      at Object.afterAll (tests/setup.js:66:1)
+
+Test Suites: 1 failed, 1 total
+Tests:       15 failed, 15 total
+Snapshots:   0 total
+Time:        41.818 s
+Ran all test suites matching tests/users.test.js.
+Jest did not exit one second after the test run has completed.
+
+'This usually means that there are asynchronous operations that weren't stopped in your tests. Consider running Jest with `--detectOpenHandles` to troubleshoot this issue.
+^C
