@@ -9,7 +9,9 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { ethers } = require('ethers');
-const { connectBNB } = require('../blockchain/connection');
+const { connectBNB } = require("../blockchain/connection.js");
+const { Logger, SIGNALS, ERROR_TYPES, ERROR_STAGES } = require("../services/logger.service");
+const logger = new Logger('API_DOCUMENTS');
 const reputationService = require('../services/reputation.service');
 const storageService = require('../services/storage.service');
 
@@ -686,7 +688,8 @@ async function handleDocumentPatch(req, res) {
       const statusInt = status === 'rejected' ? 2 : 1;
       const dbStatus = status === 'rejected' ? 'rejected' : 'submitted_to_blockchain';
 
-      // 🔐 ATOMIC CLAIM + LOCK + INTENT (Hardened Phase 3)
+      // 🔐 ATOMIC CLAIM + LOCK + INTENT (Hardened Phase 3 + Observability Phase 7)
+      const correlationId = req.correlationId;
       const claimRes = await client.query(
         `UPDATE documents SET
            idempotency_key = file_hash,
@@ -694,29 +697,41 @@ async function handleDocumentPatch(req, res) {
            processing_started_at = NOW(),
            notary_id = $1,
            document_summary = $2,
-           rejection_reason = $3
-         WHERE id = $4 
+           rejection_reason = $3,
+           correlation_id = $4,
+           status_updated_at = NOW()
+         WHERE id = $5 
            AND (idempotency_key IS NULL OR tx_status = 'failed' OR tx_status = 'initiated')
            AND chain_confirmed = false
          RETURNING *`,
-        [actor.id, document_summary, rejection_reason, id]
+        [actor.id, document_summary, rejection_reason, correlationId, id]
       );
 
       if (claimRes.rows.length === 0) {
         return res.status(403).json({ error: 'Document is already being processed or is confirmed.' });
       }
 
+      const previous_state = doc.submission_state;
       const claimedDoc = claimRes.rows[0];
+      logger.info('TASK_CLAIMED', { 
+        id, 
+        correlation_id: correlationId, 
+        previous_state, 
+        new_state: claimedDoc.submission_state 
+      });
 
       // 🔐 MANDATORY ON-CHAIN PRE-FLIGHT
+      const preFlightStart = Date.now();
       const { provider, contract } = await connectBNB();
-      console.log(`[NOTARIZATION] Pre-flight check for ${docHashBytes}...`);
+      logger.info('PRE_FLIGHT_CHECK', { id, correlation_id: correlationId, hash: docHashBytes });
       const onChainData = await contract.getDocument(docHashBytes);
+      const preFlightDuration = Date.now() - preFlightStart;
+      logger.info('PRE_FLIGHT_COMPLETED', { id, correlation_id: correlationId, duration_ms: preFlightDuration });
       
       if (onChainData.exists && Number(onChainData.status) > 0) {
-        console.log(`[NOTARIZATION] ✅ Document already notarized on-chain. Skipping TX.`);
+        logger.info('DUPLICATE_PREVENTED', { id, correlation_id: correlationId, reason: 'Already on-chain' });
         const finalRes = await client.query(
-          "UPDATE documents SET submission_state = $1, chain_confirmed = true, tx_status = 'confirmed' WHERE id = $2 RETURNING *",
+          "UPDATE documents SET submission_state = $1, chain_confirmed = true, tx_status = 'confirmed', status_updated_at = NOW() WHERE id = $2 RETURNING *",
           [onChainData.status === 1n ? 'submitted_to_blockchain' : 'rejected', id]
         );
         return res.json(sanitizeDocument(finalRes.rows[0]));
@@ -764,6 +779,7 @@ async function handleDocumentPatch(req, res) {
           return res.status(401).json({ error: 'Invalid signature or recovery failure.' });
         }
 
+        const txSendStart = Date.now();
         const txResult = await sendApprovalTx(
           docHashBytes,
           ownerAddress,
@@ -774,6 +790,16 @@ async function handleDocumentPatch(req, res) {
           rejectionHash,
           recoveredSigner
         );
+        const txSendDuration = Date.now() - txSendStart;
+
+        logger.info('TX_SENT', { 
+          id, 
+          correlation_id: correlationId, 
+          tx_hash: txResult.txHash,
+          previous_state: claimedDoc.submission_state,
+          new_state: 'submitted_to_blockchain', // Or dbStatus
+          duration_ms: txSendDuration
+        });
 
         // Update DB to 'pending' with tx_hash
         const updateRes = await client.query(
@@ -781,7 +807,8 @@ async function handleDocumentPatch(req, res) {
             submission_state = $1,
             tx_hash = $2,
             tx_status = 'pending',
-            updated_at = NOW()
+            updated_at = NOW(),
+            status_updated_at = NOW()
            WHERE id = $3 RETURNING *`,
           [dbStatus, txResult.txHash, id]
         );
@@ -799,8 +826,18 @@ async function handleDocumentPatch(req, res) {
 
         return res.json(sanitizeDocument(updateRes.rows[0]));
       } catch (txErr) {
-        console.error('Blockchain Tx Failed:', txErr);
-        await client.query("UPDATE documents SET tx_status = 'failed', updated_at = NOW() WHERE id = $1", [id]);
+        logger.error('TX_FAILED', { 
+          id, 
+          correlation_id: correlationId, 
+          error_type: ERROR_TYPES.RPC, 
+          error_stage: ERROR_STAGES.SEND,
+          previous_state: claimedDoc.submission_state,
+          new_state: 'failed'
+        }, txErr);
+        await client.query(
+          "UPDATE documents SET tx_status = 'failed', last_error = $1, updated_at = NOW(), status_updated_at = NOW() WHERE id = $2", 
+          [JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.SEND, message: txErr.message }), id]
+        );
         return res.status(502).json({ error: 'Blockchain alignment failed.', details: txErr.message });
       }
     }

@@ -3,10 +3,17 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const pool = require("./db/index.js");
 
+const correlationMiddleware = require('./middleware/correlation');
+
 const app = express();
+
+// --- PHASE 7: OBSERVABILITY (CORRELATION) ---
+app.use(correlationMiddleware);
 
 // Middleware
 app.use(express.json());
+
+// --- HARDENED CORS CONFIG (PHASE 4) ---
 app.use(cookieParser());
 const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(',');
 
