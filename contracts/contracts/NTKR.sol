@@ -40,6 +40,11 @@ contract NTKRToken is ERC20, AccessControl, Pausable {
     event PackagePurchased(address indexed user, uint256 packageId, uint256 amount);
     event TokensConsumed(address indexed user, Category category, uint256 amount);
     event TokensMinted(address indexed user, uint256 amount);
+    /// @notice Emitted when a user burns NTKR to pay for a document upload.
+    /// @param user    The token holder who signed this transaction.
+    /// @param amount  Exact amount burned (in wei, 18 decimals).
+    /// @param intentId The upload intent UUID encoded as bytes32 — used by backend to match this burn.
+    event BurnedForUpload(address indexed user, uint256 amount, bytes32 intentId);
 
     constructor(address initialRelayer, address initialTreasury) ERC20("Notarization Request Token", "NTKR") {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -126,6 +131,19 @@ contract NTKRToken is ERC20, AccessControl, Pausable {
         dailySubmissionCount[user]++;
         
         emit TokensConsumed(user, category, price);
+    }
+
+    /**
+     * @notice Called by the document owner to pay for an upload.
+     *         User MUST sign this transaction themselves — no relayer.
+     * @param amount   Amount of NTKR to burn (must match backend intent, in wei).
+     * @param intentId Upload intent UUID encoded as bytes32. Binds this burn to one upload.
+     */
+    function burnForUpload(uint256 amount, bytes32 intentId) external whenNotPaused {
+        require(amount > 0, "NTKR: amount must be positive");
+        require(balanceOf(msg.sender) >= amount, "NTKR: insufficient balance");
+        _burn(msg.sender, amount);
+        emit BurnedForUpload(msg.sender, amount, intentId);
     }
 
     function setTreasury(address _treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {

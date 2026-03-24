@@ -6,6 +6,7 @@ import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import api from "../../api";
+import { useConfig } from "../../contexts/ConfigAuthority";
 
 interface NotaryDashboardProps {
     onViewRequest: (requestId: string | number) => void;
@@ -22,6 +23,7 @@ interface Document {
 }
 
 export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboardProps) {
+    const { config } = useConfig();
     const [requests, setRequests] = useState<Document[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
@@ -65,8 +67,8 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
             return;
         }
         try {
-            // NTK Address (Standardizing on the ENV set)
-            const NTK_ADDRESS = "0x505388A24BA31F64A46dC10a7923EA4892c0B0C7";
+            // NTK Address (Using authoritative config)
+            const NTK_ADDRESS = config?.contracts.ntk || "";
             await window.ethereum.request({
                 method: 'wallet_watchAsset',
                 params: {

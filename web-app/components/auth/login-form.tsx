@@ -133,14 +133,26 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
     setIsLoading(true)
     setStatus("Verifying account...")
     try {
-      const { exists } = await apiClient.post('/auth/pre-check', {
-        email: formData.email.toLowerCase().trim()
+      const { exists, role } = await apiClient.post('/auth/pre-check', {
+        walletAddress: walletAddress.toLowerCase().trim()
       });
 
       if (!exists) {
         toast({
           title: "Account Not Found",
-          description: "We couldn't find an account with that email. Please sign up to create one.",
+          description: "We couldn't find an account linked to this wallet. Please sign up.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        setStatus("");
+        return;
+      }
+
+      // Phase 3F Fix: Block Admin/Notary from Web-App
+      if (role === 'admin' || role === 'notary') {
+        toast({
+          title: "Unauthorized Access",
+          description: "This portal is for Document Owners only. Please use the BBSNS Desktop Application for management roles.",
           variant: "destructive",
         });
         setIsLoading(false);
@@ -169,6 +181,7 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
         password: formData.password,
         walletAddress: walletAddress,
         signature: signature,
+        signature_nonce: nonce,
         nationalId: formData.nationalId,
       })
 
@@ -209,24 +222,26 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
 
       <div className="space-y-4">
         <Label className="text-xs font-semibold uppercase text-muted-foreground">2. Multi-Factor Auth</Label>
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} required />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
-          <div className="relative">
-            <Input id="password" type={showPassword ? "text" : "password"} value={formData.password} onChange={(e) => handleInputChange("password", e.target.value)} required />
-            <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowPassword(!showPassword)}>
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </Button>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} required />
           </div>
-        </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="nationalId">National ID Number</Label>
-          <Input id="nationalId" value={formData.nationalId} onChange={(e) => handleInputChange("nationalId", e.target.value)} placeholder="Required for 3rd factor" required />
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <div className="relative">
+              <Input id="password" type={showPassword ? "text" : "password"} value={formData.password} onChange={(e) => handleInputChange("password", e.target.value)} required />
+              <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowPassword(!showPassword)}>
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="nationalId">National ID Number</Label>
+            <Input id="nationalId" value={formData.nationalId} onChange={(e) => handleInputChange("nationalId", e.target.value)} placeholder="Required for 3rd factor" required />
+          </div>
         </div>
       </div>
 

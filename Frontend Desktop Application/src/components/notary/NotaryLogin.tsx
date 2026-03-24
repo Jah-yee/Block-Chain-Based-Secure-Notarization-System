@@ -127,9 +127,13 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
         body: JSON.stringify({ device_id }),
       });
 
-      if (!res.ok) throw new Error("Failed to initialize secure session");
+      const data = await res.json().catch(() => ({}));
 
-      const { sessionId } = await res.json();
+      if (!res.ok) {
+        throw new Error(`${res.status}: ${data.error || "Failed to initialize secure session"}`);
+      }
+
+      const { sessionId } = data;
       setSessionId(sessionId);
       setAuthStatus("awaiting_browser");
 
@@ -144,7 +148,12 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       toast.info("Browser opened. Please sign the challenge.");
 
     } catch (err: any) {
-      setError(err.message || "Failed to start login flow.");
+      console.error(err);
+      if (err.message.includes("403") || err.message.toLowerCase().includes("not activated")) {
+        setError("SYSTEM_NOT_ACTIVATED");
+      } else {
+        setError(err.message || "Failed to start login flow.");
+      }
       setAuthStatus("idle");
     } finally {
       setLoading(false);
@@ -182,7 +191,20 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
             ))}
           </div>
 
-          {error && (
+          {error === "SYSTEM_NOT_ACTIVATED" ? (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 mb-6">
+               <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
+                 <AlertCircle className="h-4 w-4" />
+                 <span>System Activation Required</span>
+               </div>
+               <p className="text-[10px] text-amber-400/80 leading-relaxed">
+                 The BBSNS protocol has not been activated on-chain yet. Please contact your Genesis Admin or use the initialization module to activate the network before trying to log in as a Notary.
+               </p>
+               <Button variant="outline" size="sm" onClick={() => setStep(1)} className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10 text-xs">
+                  Review Credentials
+               </Button>
+            </div>
+          ) : error && (
             <Alert variant="destructive" className="mb-6 bg-red-50 dark:bg-destructive/10 border-red-200 dark:border-destructive/50">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription className="text-xs text-red-800 dark:text-red-400">{error}</AlertDescription>

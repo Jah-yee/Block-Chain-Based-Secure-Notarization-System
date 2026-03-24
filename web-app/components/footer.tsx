@@ -31,6 +31,9 @@ export function Footer() {
               <Link href="#about" className="block text-sm text-muted-foreground hover:text-primary transition-colors">
                 About
               </Link>
+              <Link href="/tokens" className="block text-sm text-muted-foreground hover:text-primary transition-colors">
+                Official Smart Contracts
+              </Link>
               <Link href="/signup" className="block text-sm text-muted-foreground hover:text-primary transition-colors">
                 Get Started
               </Link>

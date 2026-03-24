@@ -110,6 +110,9 @@ export function NotaryVerify({ doc, onAction }: NotaryVerifyProps) {
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
                 <DialogTitle>Notary Decryption (Local Only)</DialogTitle>
+                <DialogDescription>
+                    Securely decrypt and verify the document using your unique notary private key. This process happens entirely in your browser's local memory.
+                </DialogDescription>
 
                 <div className="space-y-4">
                     <div className="p-4 bg-muted rounded text-sm">

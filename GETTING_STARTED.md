@@ -70,9 +70,9 @@ The desktop app is designed for Admins and Notaries to manage the system securel
 
 ## 4. Administrative Handshake
 To authorize the Desktop App to interact with the Backend via the system browser:
-1. Ensure the `Admin-Remote-Auth` service is running:
+1. Ensure the `Remote Auth` service is running:
    ```bash
-   cd Admin-Remote-Auth
+   cd "Frontend Desktop Application/Remote Auth"
    npx serve -l 3002 ./
    ```
 

@@ -1,281 +1,344 @@
-{
-  "_format": "hh-sol-artifact-1",
-  "contractName": "NotaryRegistry",
-  "sourceName": "contracts/NotaryRegistry.sol",
-  "abi": [
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "_multiSigOwner",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "nonpayable",
-      "type": "constructor"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "owner",
-          "type": "address"
-        }
-      ],
-      "name": "OwnableInvalidOwner",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "account",
-          "type": "address"
-        }
-      ],
-      "name": "OwnableUnauthorizedAccount",
-      "type": "error"
-    },
-    {
-      "anonymous": false,
-      "inputs": [
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "notary",
-          "type": "address"
-        },
-        {
-          "indexed": false,
-          "internalType": "uint256",
-          "name": "timestamp",
-          "type": "uint256"
-        },
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "addedBy",
-          "type": "address"
-        }
-      ],
-      "name": "NotaryAdded",
-      "type": "event"
-    },
-    {
-      "anonymous": false,
-      "inputs": [
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "notary",
-          "type": "address"
-        },
-        {
-          "indexed": false,
-          "internalType": "uint256",
-          "name": "timestamp",
-          "type": "uint256"
-        },
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "removedBy",
-          "type": "address"
-        }
-      ],
-      "name": "NotaryRemoved",
-      "type": "event"
-    },
-    {
-      "anonymous": false,
-      "inputs": [
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "previousOwner",
-          "type": "address"
-        },
-        {
-          "indexed": true,
-          "internalType": "address",
-          "name": "newOwner",
-          "type": "address"
-        }
-      ],
-      "name": "OwnershipTransferred",
-      "type": "event"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "_notary",
-          "type": "address"
-        }
-      ],
-      "name": "addNotary",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "_notary",
-          "type": "address"
-        }
-      ],
-      "name": "getNotary",
-      "outputs": [
-        {
-          "internalType": "bool",
-          "name": "active",
-          "type": "bool"
-        },
-        {
-          "internalType": "uint256",
-          "name": "addedAt",
-          "type": "uint256"
-        },
-        {
-          "internalType": "address",
-          "name": "addedBy",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "getNotaryCount",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "_notary",
-          "type": "address"
-        }
-      ],
-      "name": "isNotary",
-      "outputs": [
-        {
-          "internalType": "bool",
-          "name": "",
-          "type": "bool"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "",
-          "type": "address"
-        }
-      ],
-      "name": "notaries",
-      "outputs": [
-        {
-          "internalType": "bool",
-          "name": "active",
-          "type": "bool"
-        },
-        {
-          "internalType": "uint256",
-          "name": "addedAt",
-          "type": "uint256"
-        },
-        {
-          "internalType": "address",
-          "name": "addedBy",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "name": "notaryList",
-      "outputs": [
-        {
-          "internalType": "address",
-          "name": "",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "owner",
-      "outputs": [
-        {
-          "internalType": "address",
-          "name": "",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "_notary",
-          "type": "address"
-        }
-      ],
-      "name": "removeNotary",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "renounceOwnership",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "newOwner",
-          "type": "address"
-        }
-      ],
-      "name": "transferOwnership",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    }
-  ],
-  "bytecode": "0x60806040523480156200001157600080fd5b5060405162000ffe38038062000ffe8339818101604052810190620000379190620001f4565b80600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff1603620000ad5760006040517f1e4fbdf7000000000000000000000000000000000000000000000000000000008152600401620000a4919062000237565b60405180910390fd5b620000be81620000c660201b60201c565b505062000254565b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff169050816000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508173ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e060405160405180910390a35050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b6000620001bc826200018f565b9050919050565b620001ce81620001af565b8114620001da57600080fd5b50565b600081519050620001ee81620001c3565b92915050565b6000602082840312156200020d576200020c6200018a565b5b60006200021d84828501620001dd565b91505092915050565b6200023181620001af565b82525050565b60006020820190506200024e600083018462000226565b92915050565b610d9a80620002646000396000f3fe608060405234801561001057600080fd5b506004361061009d5760003560e01c80638da5cb5b116100665780638da5cb5b146101345780639e4805b614610152578063b2709a7e14610184578063f13eed97146101b4578063f2fde38b146101e45761009d565b8062e168f0146100a25780630588565f146100d4578063510c7b2f146100f0578063715018a61461010e57806386785a6f14610118575b600080fd5b6100bc60048036038101906100b79190610a72565b610200565b6040516100cb93929190610ae2565b60405180910390f35b6100ee60048036038101906100e99190610a72565b610257565b005b6100f8610510565b6040516101059190610b19565b60405180910390f35b61011661051d565b005b610132600480360381019061012d9190610a72565b610531565b005b61013c61068b565b6040516101499190610b34565b60405180910390f35b61016c60048036038101906101679190610a72565b6106b4565b60405161017b93929190610ae2565b60405180910390f35b61019e60048036038101906101999190610b7b565b61079e565b6040516101ab9190610b34565b60405180910390f35b6101ce60048036038101906101c99190610a72565b6107dd565b6040516101db9190610ba8565b60405180910390f35b6101fe60048036038101906101f99190610a72565b610836565b005b60016020528060005260406000206000915090508060000160009054906101000a900460ff16908060010154908060020160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16905083565b61025f6108bc565b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff16036102ce576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016102c590610c20565b60405180910390fd5b600160008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff161561035e576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161035590610cb2565b60405180910390fd5b60405180606001604052806001151581526020014281526020013373ffffffffffffffffffffffffffffffffffffffff16815250600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060008201518160000160006101000a81548160ff0219169083151502179055506020820151816001015560408201518160020160006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055509050506002819080600181540180825580915050600190039060005260206000200160009091909190916101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055503373ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f91aecdf59007f4911731a73fd2f428327cfc4418837ed8022e5e893336474988426040516105059190610b19565b60405180910390a350565b6000600280549050905090565b6105256108bc565b61052f6000610943565b565b6105396108bc565b600160008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff166105c8576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016105bf90610d44565b60405180910390fd5b6000600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160006101000a81548160ff0219169083151502179055503373ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f109199dcec44df60bab8fdfd401236a6238e9d8583773c6199cdef02415217e9426040516106809190610b19565b60405180910390a350565b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16905090565b600080600080600160008673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206040518060600160405290816000820160009054906101000a900460ff16151515158152602001600182015481526020016002820160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815250509050806000015181602001518260400151935093509350509193909250565b600281815481106107ae57600080fd5b906000526020600020016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff169050919050565b61083e6108bc565b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff16036108b05760006040517f1e4fbdf70000000000000000000000000000000000000000000000000000000081526004016108a79190610b34565b60405180910390fd5b6108b981610943565b50565b6108c4610a07565b73ffffffffffffffffffffffffffffffffffffffff166108e261068b565b73ffffffffffffffffffffffffffffffffffffffff161461094157610905610a07565b6040517f118cdaa70000000000000000000000000000000000000000000000000000000081526004016109389190610b34565b60405180910390fd5b565b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff169050816000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508173ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e060405160405180910390a35050565b600033905090565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b6000610a3f82610a14565b9050919050565b610a4f81610a34565b8114610a5a57600080fd5b50565b600081359050610a6c81610a46565b92915050565b600060208284031215610a8857610a87610a0f565b5b6000610a9684828501610a5d565b91505092915050565b60008115159050919050565b610ab481610a9f565b82525050565b6000819050919050565b610acd81610aba565b82525050565b610adc81610a34565b82525050565b6000606082019050610af76000830186610aab565b610b046020830185610ac4565b610b116040830184610ad3565b949350505050565b6000602082019050610b2e6000830184610ac4565b92915050565b6000602082019050610b496000830184610ad3565b92915050565b610b5881610aba565b8114610b6357600080fd5b50565b600081359050610b7581610b4f565b92915050565b600060208284031215610b9157610b90610a0f565b5b6000610b9f84828501610b66565b91505092915050565b6000602082019050610bbd6000830184610aab565b92915050565b600082825260208201905092915050565b7f4e6f7461727952656769737472793a20496e76616c6964206164647265737300600082015250565b6000610c0a601f83610bc3565b9150610c1582610bd4565b602082019050919050565b60006020820190508181036000830152610c3981610bfd565b9050919050565b7f4e6f7461727952656769737472793a204e6f7461727920616c7265616479206160008201527f6374697665000000000000000000000000000000000000000000000000000000602082015250565b6000610c9c602583610bc3565b9150610ca782610c40565b604082019050919050565b60006020820190508181036000830152610ccb81610c8f565b9050919050565b7f4e6f7461727952656769737472793a204e6f74617279206e6f7420616374697660008201527f6500000000000000000000000000000000000000000000000000000000000000602082015250565b6000610d2e602183610bc3565b9150610d3982610cd2565b604082019050919050565b60006020820190508181036000830152610d5d81610d21565b905091905056fea264697066735822122091dff60b95b5a0e7f61d6ca00d00c24b11c9888603e1ef3f037f8ccfc5dcd41164736f6c63430008140033",
-  "deployedBytecode": "0x608060405234801561001057600080fd5b506004361061009d5760003560e01c80638da5cb5b116100665780638da5cb5b146101345780639e4805b614610152578063b2709a7e14610184578063f13eed97146101b4578063f2fde38b146101e45761009d565b8062e168f0146100a25780630588565f146100d4578063510c7b2f146100f0578063715018a61461010e57806386785a6f14610118575b600080fd5b6100bc60048036038101906100b79190610a72565b610200565b6040516100cb93929190610ae2565b60405180910390f35b6100ee60048036038101906100e99190610a72565b610257565b005b6100f8610510565b6040516101059190610b19565b60405180910390f35b61011661051d565b005b610132600480360381019061012d9190610a72565b610531565b005b61013c61068b565b6040516101499190610b34565b60405180910390f35b61016c60048036038101906101679190610a72565b6106b4565b60405161017b93929190610ae2565b60405180910390f35b61019e60048036038101906101999190610b7b565b61079e565b6040516101ab9190610b34565b60405180910390f35b6101ce60048036038101906101c99190610a72565b6107dd565b6040516101db9190610ba8565b60405180910390f35b6101fe60048036038101906101f99190610a72565b610836565b005b60016020528060005260406000206000915090508060000160009054906101000a900460ff16908060010154908060020160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16905083565b61025f6108bc565b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff16036102ce576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016102c590610c20565b60405180910390fd5b600160008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff161561035e576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161035590610cb2565b60405180910390fd5b60405180606001604052806001151581526020014281526020013373ffffffffffffffffffffffffffffffffffffffff16815250600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060008201518160000160006101000a81548160ff0219169083151502179055506020820151816001015560408201518160020160006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055509050506002819080600181540180825580915050600190039060005260206000200160009091909190916101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055503373ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f91aecdf59007f4911731a73fd2f428327cfc4418837ed8022e5e893336474988426040516105059190610b19565b60405180910390a350565b6000600280549050905090565b6105256108bc565b61052f6000610943565b565b6105396108bc565b600160008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff166105c8576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016105bf90610d44565b60405180910390fd5b6000600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160006101000a81548160ff0219169083151502179055503373ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f109199dcec44df60bab8fdfd401236a6238e9d8583773c6199cdef02415217e9426040516106809190610b19565b60405180910390a350565b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16905090565b600080600080600160008673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206040518060600160405290816000820160009054906101000a900460ff16151515158152602001600182015481526020016002820160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815250509050806000015181602001518260400151935093509350509193909250565b600281815481106107ae57600080fd5b906000526020600020016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600160008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff169050919050565b61083e6108bc565b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff16036108b05760006040517f1e4fbdf70000000000000000000000000000000000000000000000000000000081526004016108a79190610b34565b60405180910390fd5b6108b981610943565b50565b6108c4610a07565b73ffffffffffffffffffffffffffffffffffffffff166108e261068b565b73ffffffffffffffffffffffffffffffffffffffff161461094157610905610a07565b6040517f118cdaa70000000000000000000000000000000000000000000000000000000081526004016109389190610b34565b60405180910390fd5b565b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff169050816000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508173ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e060405160405180910390a35050565b600033905090565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b6000610a3f82610a14565b9050919050565b610a4f81610a34565b8114610a5a57600080fd5b50565b600081359050610a6c81610a46565b92915050565b600060208284031215610a8857610a87610a0f565b5b6000610a9684828501610a5d565b91505092915050565b60008115159050919050565b610ab481610a9f565b82525050565b6000819050919050565b610acd81610aba565b82525050565b610adc81610a34565b82525050565b6000606082019050610af76000830186610aab565b610b046020830185610ac4565b610b116040830184610ad3565b949350505050565b6000602082019050610b2e6000830184610ac4565b92915050565b6000602082019050610b496000830184610ad3565b92915050565b610b5881610aba565b8114610b6357600080fd5b50565b600081359050610b7581610b4f565b92915050565b600060208284031215610b9157610b90610a0f565b5b6000610b9f84828501610b66565b91505092915050565b6000602082019050610bbd6000830184610aab565b92915050565b600082825260208201905092915050565b7f4e6f7461727952656769737472793a20496e76616c6964206164647265737300600082015250565b6000610c0a601f83610bc3565b9150610c1582610bd4565b602082019050919050565b60006020820190508181036000830152610c3981610bfd565b9050919050565b7f4e6f7461727952656769737472793a204e6f7461727920616c7265616479206160008201527f6374697665000000000000000000000000000000000000000000000000000000602082015250565b6000610c9c602583610bc3565b9150610ca782610c40565b604082019050919050565b60006020820190508181036000830152610ccb81610c8f565b9050919050565b7f4e6f7461727952656769737472793a204e6f74617279206e6f7420616374697660008201527f6500000000000000000000000000000000000000000000000000000000000000602082015250565b6000610d2e602183610bc3565b9150610d3982610cd2565b604082019050919050565b60006020820190508181036000830152610d5d81610d21565b905091905056fea264697066735822122091dff60b95b5a0e7f61d6ca00d00c24b11c9888603e1ef3f037f8ccfc5dcd41164736f6c63430008140033",
-  "linkReferences": {},
-  "deployedLinkReferences": {}
-}
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_multiSig",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newRelayer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "RelayerUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "enum NotaryRegistry.Role",
+        "name": "newRole",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "RolePromoted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "RoleRemoved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "status",
+        "type": "bool"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "UserBanned",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "adminCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "assignOwner",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "getUserRole",
+    "outputs": [
+      {
+        "internalType": "enum NotaryRegistry.Role",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "governanceLocked",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "isAdmin",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "isBanned",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "isNotary",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "multiSig",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "promoteToAdmin",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "promoteToNotary",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "relayer",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      }
+    ],
+    "name": "removeRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "roles",
+    "outputs": [
+      {
+        "internalType": "enum NotaryRegistry.Role",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_user",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "_status",
+        "type": "bool"
+      }
+    ],
+    "name": "setBanStatus",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newGov",
+        "type": "address"
+      }
+    ],
+    "name": "transferGovernance",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_newRelayer",
+        "type": "address"
+      }
+    ],
+    "name": "updateRelayer",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]

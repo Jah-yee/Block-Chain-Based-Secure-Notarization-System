@@ -69,9 +69,13 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
         body: JSON.stringify({ device_id }),
       });
 
-      if (!res.ok) throw new Error("Failed to initialize secure session");
+      const data = await res.json().catch(() => ({}));
 
-      const { sessionId } = await res.json();
+      if (!res.ok) {
+        throw new Error(`${res.status}: ${data.error || "Failed to initialize secure session"}`);
+      }
+      
+      const { sessionId } = data;
       setSessionId(sessionId);
       setStatus("awaiting_browser");
 
@@ -93,9 +97,12 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
 
     } catch (err: any) {
       console.error(err);
-      const msg = err.message || "Failed to start login flow.";
-      setError(msg);
-      toast.error(msg);
+      if (err.message.includes("403") || err.message.toLowerCase().includes("not activated")) {
+        setError("SYSTEM_NOT_ACTIVATED");
+      } else {
+        setError(err.message || "Failed to start login flow.");
+      }
+      toast.error("Process Halted");
       setStatus("idle");
     } finally {
       setConnecting(false);
@@ -129,7 +136,20 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
             <div className="space-y-6">
 
               {/* Error Message */}
-              {error && (
+              {error === "SYSTEM_NOT_ACTIVATED" ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3">
+                   <div className="flex items-center gap-2 text-amber-500">
+                     <AlertCircle className="h-5 w-5" />
+                     <span className="font-bold">System Setup Required</span>
+                   </div>
+                   <p className="text-xs text-amber-400/80 leading-relaxed">
+                     The BBSNS protocol has not been activated on-chain yet. Please contact the Genesis Admin or use the "Initialize System" module to activate the network before trying to log in.
+                   </p>
+                   <Button variant="outline" size="sm" onClick={onBack} className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10">
+                      Go Back
+                   </Button>
+                </div>
+              ) : error && (
                 <Alert variant="destructive" className="bg-red-500/10 border-red-500/50">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>

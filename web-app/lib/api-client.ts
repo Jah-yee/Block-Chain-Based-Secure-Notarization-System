@@ -44,7 +44,7 @@ async function apiRequest(endpoint: string, options: RequestOptions = {}) {
     try {
         const response = await fetch(url, config);
 
-        if (response.status === 401) {
+        if (response.status === 401 || response.status === 426) {
             const errorData = await response.json().catch(() => ({}));
             // Force logout on unauthorized
             if (typeof window !== 'undefined') {

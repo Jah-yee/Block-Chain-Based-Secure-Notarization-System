@@ -1,7 +1,8 @@
 {
   "network": "bnbTestnet",
-  "ntkr": "0xfa0B6490f5807496fC4C9ff516de81cCb7B8551C",
-  "ntk": "0xbB8bf3bbDa620416f856D50D2855fF1aC73552c2",
-  "registry": "0x8921a60d3EF6F6Ece190428FF0b56655Cb87099B",
-  "timestamp": "2026-02-13T04:32:54.074Z"
+  "notaryRegistry": "0x437A119Be71e2EA6c1fe669ddf4bA08a1f5E6a07",
+  "ntkr": "0xD59a331bC1e2439b686d75cffBdDE419a51eeFCE",
+  "ntk": "0x1889a4dB26dAAbBE612F65f98F81944b7996923B",
+  "registry": "0x34B08CAC11884D9Ef46C86a326e9551d7Fc82f03",
+  "timestamp": "2026-03-21T06:24:03.499Z"
 }

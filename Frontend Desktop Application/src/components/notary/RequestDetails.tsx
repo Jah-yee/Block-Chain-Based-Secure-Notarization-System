@@ -99,61 +99,36 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 }
             }
 
-            const DOCUMENT_REGISTRY_ADDRESS = "0x52A83224F03aFE983C7672A9f0A04FE423766402";
-            const timestamp = Math.floor(Date.now() / 1000);
-
-            const domain = {
-                name: "BBSNS_Protocol",
-                version: "1",
-                chainId: 97,
-                verifyingContract: DOCUMENT_REGISTRY_ADDRESS
-            };
-
-            const types = {
-                Notarize: [
-                    { name: 'docHash', type: 'bytes32' },
-                    { name: 'status', type: 'uint8' },
-                    { name: 'summaryHash', type: 'bytes32' },
-                    { name: 'rejectionReasonHash', type: 'bytes32' },
-                    { name: 'timestamp', type: 'uint256' }
-                ]
-            };
-
-            const statusInt = confirmDialog.action === "approve" ? 1 : 2;
-            const docHash = request.file_hash.startsWith('0x') ? request.file_hash : `0x${request.file_hash}`;
-
-            const summaryStr = confirmDialog.action === "approve" ? documentSummary : "";
-            const rejectionStr = confirmDialog.action === "reject" ? rejectionReason : "";
-
-            const summaryHash = ethers.keccak256(ethers.toUtf8Bytes(summaryStr));
-            const rejectionReasonHash = ethers.keccak256(ethers.toUtf8Bytes(rejectionStr));
-
-            const value = {
-                docHash: docHash,
-                status: statusInt,
-                summaryHash: summaryHash,
-                rejectionReasonHash: rejectionReasonHash,
-                timestamp: timestamp
-            };
-
-            console.log("Signing EIP-712 Data:", value);
-            const signature = await signer.signTypedData(domain, types, value);
-
+            // 🔐 PHASE 2: Fetch Deterministic Payload from Backend
             const status = confirmDialog.action === "approve" ? "approved" : "rejected";
-            const payload: any = {
+            const payloadData = await api.getSignaturePayload(
+              requestId, 
+              status, 
+              documentSummary, 
+              rejectionReason
+            );
+
+            console.log("Signing EIP-712 Payload from Backend:", payloadData.message);
+            const signature = await signer.signTypedData(
+              payloadData.domain, 
+              payloadData.types, 
+              payloadData.message
+            );
+
+            const finalPayload: any = {
                 status,
                 signature,
-                timestamp: timestamp.toString() // Send as string to backend
+                timestamp: payloadData.message.timestamp.toString()
             };
 
             if (status === "approved") {
-                payload.document_summary = documentSummary;
-                payload.notary_notes = documentSummary;
+                finalPayload.document_summary = documentSummary;
+                finalPayload.notary_notes = documentSummary;
             } else {
-                payload.rejection_reason = rejectionReason;
+                finalPayload.rejection_reason = rejectionReason;
             }
 
-            await api.updateDocument(requestId, payload);
+            await api.updateDocument(requestId, finalPayload);
 
             toast.success(`Request ${status} successfully.`);
             setConfirmDialog({ open: false, action: null });

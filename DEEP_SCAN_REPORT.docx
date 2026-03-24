@@ -1,0 +1,60 @@
+BBSNS CODEBASE DEEP SCAN REPORT
+================================
+
+DATE: 2026-02-23
+SUBJECT: Security, Logic, and Workflow Audit
+
+1. OVERVIEW
+-----------
+The BBSNS platform is a sophisticated Zero-Trust Notarization system. It employs a multi-layered security model involving EIP-712 signatures, on-chain role enforcement, and backend privileged-route auditing. However, the deep scan has identified several critical "broken" workflows and code-level bugs that pose risks to system integrity and consistency.
+
+2. CRITICAL BUGS & "WRONG" CODE
+-------------------------------
+A. Runtime Error in File Download:
+   In 'backend/src/routes/documents.js', the GET '/:id/file' route attempts to use a variable named 'actor' which is undefined in that scope. It should be 'req.actor'. This currently breaks ALL document download functionality across the system.
+
+B. Non-Atomic Workflow (The "Broken" Workflow):
+   The Document Upload workflow (POST '/api/documents') deducts NTKR tokens from the database and then triggers an on-chain burn. If the on-chain burn fails (due to gas issues, RPC failure, or contract pause), the DB transaction is already committed. 
+   - IMPACT: Database balances will drift from on-chain balances, leading to "ghost tokens" or user frustration.
+
+C. Missing State Reconciliation:
+   In the Notary Action workflow (PATCH '/api/documents/:id'), the document state is updated AFTER the blockchain transaction is sent. If the server crashes after the transaction succeeds but before the DB update, the system loses track of the notarization status.
+
+3. CONTRACT ISSUES & VULNERABILITIES
+------------------------------------
+A. Pausable Dependency (The Circuit Breaker):
+   Both 'DocumentRegistry.sol' and 'NTKRToken.sol' implement the 'Pausable' pattern. While this is a valid circuit breaker, the backend does not gracefully handle 'Paused' states.
+   - ISSUE: If the admin pauses the contract, the backend returns generic 502/500 errors instead of informative "System Maintenance" messages.
+
+B. Cryptographic Fuel Reliance:
+   'DocumentRegistry.sol' depends on 'ntkToken.burnForAction'. If the NotaryRegistry is not correctly configured to allow the DocumentRegistry to trigger burns, all notarizations will fail on-chain.
+
+4. CIRCUIT BREAKER ANALYSIS
+---------------------------
+A. On-Chain Circuit Breakers:
+   - STATUS: Operational via 'pause()' and 'unpause()' functions in 'NTKRToken' and 'DocumentRegistry'.
+   - RISK: If the Admin key is compromised, the entire system can be frozen.
+
+B. Backend Circuit Breakers:
+   - STATUS: 'server.js' implements a "Structural Route Audit" that crashes the server if any route lacks security middleware.
+   - ISSUE: This is a "fail-fast" breaker for developers, but can cause unexpected downtime in production if a configuration mismatch occurs.
+
+5. AREAS REQUIRING DETAILED WORK
+--------------------------------
+A. Relayer Resilience:
+   The backend Relayer ('backend/src/blockchain/connection.js') lacks a retry mechanism. Transaction failures due to network congestion or nonce issues will break the user workflow immediately.
+
+B. Code Clutter & Hygiene:
+   The 'backend' root directory is cluttered with over 100 temporary scripts and logs (e.g., 'check_*.js', 'test_*.js'). These should be moved to a 'scripts/' directory to prevent confusion and accidental execution.
+
+C. Role Inconsistency:
+   There is a slight mismatch in how roles are compared numerically vs string-wise between different route files, which could lead to privilege escalation or unintended locked-out states.
+
+6. RECOMMENDATIONS
+------------------
+1. Patch the 'actor' undefined error in 'documents.js' immediately.
+2. Implement a 'Reconciliation Queue' for blockchain transactions that fail.
+3. Consolidate all audit/test scripts into a dedicated folder.
+4. Add a 'Maintenance Mode' to the backend that mirrors the on-chain 'Paused' state.
+
+--- END OF REPORT ---

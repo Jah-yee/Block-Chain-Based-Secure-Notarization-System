@@ -15,6 +15,7 @@ dotenv.config({ path: path.join(__dirname, "../backend/.env") });
 const ABI_DIR = path.join(__dirname, "abi");
 const ENV_PATH = path.join(__dirname, "../backend/.env");
 const FRONTEND_ENV_PATH = path.join(__dirname, "../Web-App/.env.local");
+const REMOTE_AUTH_ENV_PATH = path.join(__dirname, "../Frontend Desktop Application/Remote Auth/.env");
 
 /**
  * BBSNS Hardened Deployment & Governance Simulation (PHASE 2)
@@ -22,7 +23,8 @@ const FRONTEND_ENV_PATH = path.join(__dirname, "../Web-App/.env.local");
  * Includes role separation and negative proof testing.
  */
 async function main() {
-    const provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL);
+    const STABLE_RPC = "https://data-seed-prebsc-1-s1.binance.org:8545"; // Original Mirror
+    const provider = new ethers.JsonRpcProvider(STABLE_RPC);
     const deployerWallet = new ethers.Wallet(process.env.BNB_SYSTEM_PRIVATE_KEY, provider);
 
     // Role Separation Simulation
@@ -30,6 +32,7 @@ async function main() {
     const unauthorizedWallet = ethers.Wallet.createRandom().connect(provider);
 
     const founder = deployerWallet.address;
+    const GENESIS_TARGET_WALLET = "0x02252Db03aF7CD8C8d3eC6CFd3AE5f6dab69ACd0";
 
     console.log(`\n====================================================`);
     console.log(`🚀 BBSNS HARDENED DEPLOYMENT SEQUENCE STARTED`);
@@ -45,14 +48,25 @@ async function main() {
 
     // Helper: Deploy with Artifact
     async function deploy(name, fileName, ...args) {
-        const artifactPath = path.join(__dirname, `artifacts/contracts/${fileName}.sol/${name}.json`);
-        const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf-8"));
-        const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, deployerWallet);
-        const contract = await factory.deploy(...args);
-        await contract.waitForDeployment();
-        const addr = await contract.getAddress();
-        console.log(`✅ ${name} deployed at: ${addr}`);
-        return new ethers.Contract(addr, artifact.abi, deployerWallet);
+        try {
+            const artifactPath = path.join(__dirname, `artifacts/contracts/${fileName}.sol/${name}.json`);
+            const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf-8"));
+            const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, deployerWallet);
+            
+            console.log(`   🔸 Deploying ${name}...`);
+            // Explicitly pass arguments to avoid spread confusion in some environments
+            const contract = await factory.deploy(...args, { 
+                gasLimit: 8000000 
+            });
+            
+            await contract.waitForDeployment();
+            const addr = await contract.getAddress();
+            console.log(`   ✅ ${name} deployed at: ${addr}`);
+            return contract;
+        } catch (err) {
+            console.error(`\n❌ Failed to deploy ${name}: ${err.message}`);
+            throw err;
+        }
     }
 
     // Helper: Execute MultiSig Transaction with Robust Log Parsing
@@ -97,7 +111,7 @@ async function main() {
         await fundTx.wait();
         console.log(`   ✅ Relayer funded: 0.05 BNB\n`);
 
-        // STEP 1: Buy-In (MultiSig) - 1-of-1 Bootstrap Simulation
+        // STEP 1: Buy-In (MultiSig)
         console.log(`[STEP 1] Deploying BBSNSMultiSig...`);
         const signers = [founder];
         const threshold = 1;
@@ -107,143 +121,88 @@ async function main() {
         assert.strictEqual((await multiSig.getSigners()).length, 1, "MultiSig: Signer count mismatch");
         assert.strictEqual(await multiSig.threshold(), BigInt(threshold), "MultiSig: Threshold mismatch");
 
-        // STEP 2 & 3: Token and Registry
-        console.log(`\n[STEP 2] Deploying NTKToken...`);
-        const ntk = await deploy("NTKToken", "NTK", founder);
+        // STEP 2: Deploy GenesisNFT
+        console.log(`\n[STEP 2] Deploying GenesisNFT...`);
+        const genesisNFT = await deploy("GenesisNFT", "GenesisNFT");
 
-        console.log(`\n[STEP 3] Deploying NotaryRegistry...`);
-        const notaryRegistry = await deploy("NotaryRegistry", "NotaryRegistry", await multiSig.getAddress());
-        assert.strictEqual(await notaryRegistry.multiSig(), await multiSig.getAddress(), "NotaryRegistry: Governance link failed");
+        // STEP 3: Deploy GenesisActivation
+        console.log(`\n[STEP 3] Deploying GenesisActivation...`);
+        // We do not have the NotaryRegistry address yet.
+        // Wait, GenesisActivation takes NotaryRegistry in constructor. This creates a circular dependency if NotaryRegistry needs GenesisActivation.
+        // Let's modify GenesisActivation to initialize the registry address AFTER deployment, OR we deploy NotaryRegistry first.
+        // Actually, NotaryRegistry takes the multiSig address (which we are temporarily treating as GenesisActivation for initialization).
+        
+        // Wait, NotaryRegistry constructor: `constructor(address _multiSig)`.
+        // If we want GenesisActivation to act as the temporary multiSig, we need its address first.
+        // But GenesisActivation needs `_notaryRegistry` in its constructor.
+        // To break the circular dependency, we compute the address of NotaryRegistry beforehand, or we pass the target MultiSig to GenesisActivation and point NotaryRegistry's initial governance directly to GenesisActivation.
+        
+        // Let's deploy GenesisActivation by passing a dummy address for notary registry, or better, we can deploy NotaryRegistry FIRST, pointing to the deployer wallet temporarily, then deploy GenesisActivation, then transfer governance to GenesisActivation. No, that breaks the "only one transfer" rule.
 
-        // STEP 4: DocumentRegistry
-        console.log(`\n[STEP 4] Deploying DocumentRegistry...`);
+        // Standard trick: Precompute contract addresses or change the constructor of GenesisActivation.
+        // Let's modify GenesisActivation to accept NotaryRegistry in a setter, or just use `ethers.getCreateAddress`.
+        const genesisActivation = await deploy("GenesisActivation", "GenesisActivation", await genesisNFT.getAddress(), await multiSig.getAddress());
+
+        // STEP 4: Token and Registry
+        console.log(`\n[STEP 4] Deploying NTKToken & NotaryRegistry...`);
+        const ntk = await deploy("NTKToken", "NTK", relayerWallet.address); // Bound to relayer initially
+        
+        // Deploy NotaryRegistry pointing to GenesisActivation as initial governance
+        const notaryRegistry = await deploy("NotaryRegistry", "NotaryRegistry", await genesisActivation.getAddress());
+
+        console.log(`\n[STEP 4.1] Initializing Registry in Activation Contract...`);
+        await (await genesisActivation.initializeRegistry(await notaryRegistry.getAddress())).wait();
+        console.log(`   ✅ Registry initialized in GenesisActivation.`);
+
+        // STEP 5: DocumentRegistry
+        console.log(`\n[STEP 5] Deploying DocumentRegistry...`);
         const docRegistry = await deploy("DocumentRegistry", "DocumentRegistry", await notaryRegistry.getAddress(), await ntk.getAddress());
 
-        // STEP 5: Critical Bootstrap (MultiSig Path)
-        console.log(`\n[STEP 5] Critical Bootstrap via MultiSig...`);
+        // STEP 6: Execute Genesis NFT Minting
+        console.log(`\n[STEP 6] Minting GenesisNFT to Target Admin...`);
+        console.log(`   🔸 Target Wallet: ${GENESIS_TARGET_WALLET}`);
 
-        const bootstrapSteps = [
-            { fn: "assignOwner", args: [founder], target: 1n, label: "OWNER" },
-            { fn: "promoteToNotary", args: [founder], target: 2n, label: "NOTARY" },
-            { fn: "promoteToAdmin", args: [founder], target: 3n, label: "ADMIN" }
-        ];
-
-        for (const step of bootstrapSteps) {
-            const data = notaryRegistry.interface.encodeFunctionData(step.fn, step.args);
-            await executeMultiSig(multiSig, await notaryRegistry.getAddress(), data);
-            assert.strictEqual(await notaryRegistry.getUserRole(founder), step.target, `Bootstrap: ${step.label} state failed`);
-        }
-
-        // STEP 6: Validate Governance State & Last-Admin Protection
-        console.log(`\n[STEP 6] Validating Governance Persistence & Fail-Safes...`);
-        assert.strictEqual(await notaryRegistry.adminCount(), 1n, "AdminCount: Mismatch after bootstrap");
-
-        // Negative Test: Attempt removeRole(founder) as last admin
-        console.log(`   🔸 Negative Test: Attempting to remove last admin (Should revert)...`);
-        const removeRoleData = notaryRegistry.interface.encodeFunctionData("removeRole", [founder]);
-        const txId = await submitAndConfirm(multiSig, await notaryRegistry.getAddress(), removeRoleData);
-        await expectRevert(multiSig.executeTransaction(txId), "MultiSig: Transaction execution failed");
-        console.log(`   ✅ Last-admin protection confirmed.`);
-
-        // STEP 7: Relayer Binding
-        console.log(`\n[STEP 7] Binding Relayer via MultiSig...`);
-        const updateRelayerData = notaryRegistry.interface.encodeFunctionData("updateRelayer", [relayerWallet.address]);
-        await executeMultiSig(multiSig, await notaryRegistry.getAddress(), updateRelayerData);
-        assert.strictEqual(await notaryRegistry.relayer(), relayerWallet.address, "Relayer binding failed");
-
-        // Negative Test: Zero Address Relayer
-        console.log(`   🔸 Negative Test: Setting relayer to address(0) (Should revert)...`);
-        const zeroRelayerData = notaryRegistry.interface.encodeFunctionData("updateRelayer", [ethers.ZeroAddress]);
-        const txIdZero = await submitAndConfirm(multiSig, await notaryRegistry.getAddress(), zeroRelayerData);
-        await expectRevert(multiSig.executeTransaction(txIdZero), "MultiSig: Transaction execution failed");
-        console.log(`   ✅ Zero-address relayer check confirmed.`);
-
-        // STEP 8: Functional Smoke Test (Notarization)
-        console.log(`\n[STEP 8] Functional Smoke Test (Notarization)...`);
-        // Setup Fuel
-        const RELAYER_ROLE = await ntk.RELAYER_ROLE();
-        await (await ntk.grantRole(RELAYER_ROLE, await docRegistry.getAddress())).wait();
-        await (await ntk.mintDailyNTK(founder)).wait();
-
-        // Perform Authorized Notarization
-        const docHash = ethers.id("test-notarization-" + Date.now());
-        const timestamp = Math.floor(Date.now() / 1000);
-        const nonce = await docRegistry.nonces(founder);
-        const signature = await generateDocSignature(deployerWallet, await docRegistry.getAddress(), chainId, docHash, unauthorizedWallet.address, 1, timestamp, nonce);
-
-        // Call via RelayerWallet
-        await (await docRegistry.connect(relayerWallet).recordAction(
-            docHash, unauthorizedWallet.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestamp, nonce, signature
-        )).wait();
-        console.log(`   ✅ Relayer notarization SUCCESS.`);
-        assert.strictEqual(await docRegistry.nonces(founder), nonce + 1n, "Nonce: Did not increment");
-
-        // Negative Test: Unauthorized Relayer
-        console.log(`   🔸 Negative Test: Non-relayer calling recordAction (Should revert)...`);
-        await expectRevert(
-            docRegistry.connect(deployerWallet).recordAction(ethers.id("fail"), unauthorizedWallet.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestamp, nonce + 1n, signature),
-            "DocumentRegistry: Not authorized relayer"
-        );
-        console.log(`   ✅ Unauthorized relayer block confirmed.`);
-
-        // STEP 9: Ban System Verification
-        console.log(`\n[STEP 9] Verifying Ban System Enforcement...`);
-        const banData = notaryRegistry.interface.encodeFunctionData("setBanStatus", [founder, true]);
-        await executeMultiSig(multiSig, await notaryRegistry.getAddress(), banData);
-        assert.strictEqual(await notaryRegistry.isBanned(founder), true, "Ban: Status failed to set");
-
-        console.log(`   🔸 Functional Test: Recording action while banned (Should revert)...`);
-        const docHashBanned = ethers.id("banned-notarization-" + Date.now());
-        const timestampBanned = Math.floor(Date.now() / 1000);
-        const nonceBanned = await docRegistry.nonces(founder);
-        const sigBanned = await generateDocSignature(deployerWallet, await docRegistry.getAddress(), chainId, docHashBanned, unauthorizedWallet.address, 1, timestampBanned, nonceBanned);
-
-        await expectRevert(
-            docRegistry.connect(relayerWallet).recordAction(docHashBanned, unauthorizedWallet.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestampBanned, nonceBanned, sigBanned),
-            "DocumentRegistry: Notary is banned"
-        );
-
-        // Unban and Recover
-        const unbanData = notaryRegistry.interface.encodeFunctionData("setBanStatus", [founder, false]);
-        await executeMultiSig(multiSig, await notaryRegistry.getAddress(), unbanData);
-        assert.strictEqual(await notaryRegistry.isBanned(founder), false, "Unban: Status failed to reset");
-
-        console.log(`   🔸 Post-Ban Recovery Test: Recording fresh action...`);
-        const docHashRecovered = ethers.id("recovered-notarization-" + Date.now());
-        const timestampRecovered = Math.floor(Date.now() / 1000);
-        const nonceRecovered = await docRegistry.nonces(founder);
-        const sigRecovered = await generateDocSignature(deployerWallet, await docRegistry.getAddress(), chainId, docHashRecovered, unauthorizedWallet.address, 1, timestampRecovered, nonceRecovered);
-
-        await (await docRegistry.connect(relayerWallet).recordAction(
-            docHashRecovered, unauthorizedWallet.address, 1, ethers.ZeroHash, ethers.ZeroHash, timestampRecovered, nonceRecovered, sigRecovered
-        )).wait();
-        console.log(`   ✅ System recovery confirmed.`);
-
+        await (await genesisNFT.mintGenesis(GENESIS_TARGET_WALLET)).wait();
+        assert.strictEqual(await genesisNFT.balanceOf(GENESIS_TARGET_WALLET), 1n, "GenesisNFT: Mint failed");
+        
+        console.log(`\n   ✅ GENESIS NFT MINTED SUCCESSFULLY.`);
+        
         // STEP 10: Environment Sync
         console.log(`\n[STEP 10] Final Environment Synchronization...`);
         const updates = {
             "NTK_CONTRACT_ADDRESS": await ntk.getAddress(),
             "MULTISIG_CONTRACT_ADDRESS": await multiSig.getAddress(),
             "NOTARY_REGISTRY_ADDRESS": await notaryRegistry.getAddress(),
-            "DOCUMENT_REGISTRY_ADDRESS": await docRegistry.getAddress()
+            "DOCUMENT_REGISTRY_ADDRESS": await docRegistry.getAddress(),
+            "GENESIS_NFT_ADDRESS": await genesisNFT.getAddress(),
+            "GENESIS_ACTIVATION_ADDRESS": await genesisActivation.getAddress()
         };
-        updateEnv(ENV_PATH, updates);
 
         const frontendUpdates = Object.fromEntries(
-            Object.entries(updates).map(([k, v]) => [`NEXT_PUBLIC_${k.replace(/_CONTRACT_ADDRESS/g, "_ADDRESS")}`, v])
+            Object.entries(updates).map(([k, v]) => [`VITE_${k}`, v])
         );
+
+        updateEnv(ENV_PATH, updates);
         updateEnv(FRONTEND_ENV_PATH, frontendUpdates);
 
-        console.log(`\n🎉 HARDENED DEPLOYMENT SUCCESSFUL!`);
-        console.log(`-----------------------------------------`);
-        console.log(`MultiSig:        ${await multiSig.getAddress()}`);
-        console.log(`NotaryRegistry:  ${await notaryRegistry.getAddress()}`);
-        console.log(`DocumentRegistry:${await docRegistry.getAddress()}`);
-        console.log(`-----------------------------------------`);
+        const remoteAuthUpdates = Object.fromEntries(
+            Object.entries(updates).map(([k, v]) => [`VITE_${k.replace(/_CONTRACT_ADDRESS/g, "_ADDRESS")}`, v])
+        );
+        updateEnv(REMOTE_AUTH_ENV_PATH, remoteAuthUpdates);
+
+        console.log(`\n   -------------------------------------------------`);
+        console.log(`   🚩 DEPLOYMENT & SYNC SUCCESSFUL!`);
+        console.log(`   🚩 ACTIVATOR WALLET: ${GENESIS_TARGET_WALLET}`);
+        console.log(`   🚩 NEXT STEP: Open Desktop App and click "Launch Initialization".`);
+        console.log(`   -------------------------------------------------`);
+
+        // We STOP here for the Handover. The client must call activate() via UI.
+        return;
 
     } catch (err) {
         console.error(`\n❌ CRITICAL DEPLOYMENT FAILURE:`);
         console.error(err);
+        if (err.data) console.error("Error Data:", err.data);
         process.exit(1);
     }
 }

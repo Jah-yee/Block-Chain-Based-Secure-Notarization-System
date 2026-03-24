@@ -188,6 +188,17 @@ const api = {
 
   async getSystemLogs() {
     return this.request('/api/system/logs');
+  },
+  
+  async getSignaturePayload(id, status, summary = "", reason = "") {
+    let url = `/api/documents/${id}/signature-payload?status=${status}`;
+    if (summary) url += `&summary=${encodeURIComponent(summary)}`;
+    if (reason) url += `&reason=${encodeURIComponent(reason)}`;
+    return this.request(url);
+  },
+
+  async getSystemConfig() {
+    return this.request('/api/system/config');
   }
 };
 

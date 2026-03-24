@@ -20,6 +20,7 @@ contract NotaryRegistry {
     address public multiSig;
     address public relayer;
     uint256 public adminCount;
+    bool public governanceLocked;
 
     modifier onlyGovernance() {
         require(msg.sender == multiSig, "NotaryRegistry: Not governance");
@@ -29,6 +30,17 @@ contract NotaryRegistry {
     constructor(address _multiSig) {
         require(_multiSig != address(0), "Invalid MultiSig address");
         multiSig = _multiSig;
+    }
+
+    /**
+     * @notice Transfers governance to a new address. Can only be called once before locking forever.
+     */
+    function transferGovernance(address newGov) external onlyGovernance {
+        require(!governanceLocked, "Governance locked");
+        require(newGov != address(0), "Invalid governance address");
+
+        multiSig = newGov;
+        governanceLocked = true;
     }
 
     /**

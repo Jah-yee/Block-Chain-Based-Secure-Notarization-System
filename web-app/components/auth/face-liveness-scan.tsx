@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Loader2, Camera, ShieldCheck, AlertCircle, RefreshCw } from "lucide-react"
 
-type LivenessTask = "blink" | "smile" | "turnLeft" | "turnRight"
-const TASKS: LivenessTask[] = ["blink", "smile", "turnLeft", "turnRight"]
+type LivenessTask = "smile" | "turnLeft" | "turnRight"
+const TASKS: LivenessTask[] = ["smile", "turnLeft", "turnRight"]
 
 interface FaceLivenessScanProps {
     onPassed: (descriptor: number[]) => void
@@ -38,10 +38,8 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
     const isCameraActiveRef = useRef(false)
     const sessionExpiredRef = useRef(false)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
-    const blinkCountRef = useRef(0)
     const wasClosedRef = useRef(false)
-    const eyesClosedFrameCountRef = useRef(0)
-    const eyesOpenFrameCountRef = useRef(0)
+    const framesRef = useRef(0)
     const abortControllerRef = useRef<AbortController | null>(null)
     const isInitializingRef = useRef(false)
     const streamRef = useRef<MediaStream | null>(null)
@@ -99,10 +97,8 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
         taskIndexRef.current = 0
         setCurrentTaskIndex(0)
         setProgress(0)
-        blinkCountRef.current = 0
         wasClosedRef.current = false
-        eyesClosedFrameCountRef.current = 0
-        eyesOpenFrameCountRef.current = 0
+        framesRef.current = 0
 
         // Create new abort controller for this session
         if (abortControllerRef.current) {
@@ -299,54 +295,7 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
                         // Face is in good position, check tasks
                         let taskMet = false
 
-                        if (task === "blink") {
-                            const leftEye = landmarks.getLeftEye()
-                            const rightEye = landmarks.getRightEye()
-                            const getEAR = (eye: any[]) => {
-                                const v1 = Math.abs(eye[1].y - eye[5].y)
-                                const v2 = Math.abs(eye[2].y - eye[4].y)
-                                const h = Math.abs(eye[0].x - eye[3].x)
-                                return (v1 + v2) / (2 * h)
-                            }
-                            const ear = (getEAR(leftEye) + getEAR(rightEye)) / 2
-
-                            // Optimized blink detection for higher sensitivity across different cameras
-                            const EAR_THRESHOLD = 0.22  // Increased from 0.18 for better sensitivity
-                            const CLOSED_FRAMES_REQUIRED = 2  // Decreased from 3 for faster detection
-                            const OPEN_FRAMES_REQUIRED = 2    // Decreased from 3 for faster detection
-
-                            if (ear < EAR_THRESHOLD) {
-                                // Eyes appear closed
-                                eyesClosedFrameCountRef.current += 1
-                                eyesOpenFrameCountRef.current = 0
-
-                                // Mark as closed if stable for required frames
-                                if (eyesClosedFrameCountRef.current >= CLOSED_FRAMES_REQUIRED && !wasClosedRef.current) {
-                                    wasClosedRef.current = true
-                                    console.log(`[LIVENESS] ✓ Eyes CLOSED detected (EAR: ${ear.toFixed(3)}, frames: ${eyesClosedFrameCountRef.current})`)
-                                }
-                            } else {
-                                // Eyes appear open
-                                eyesOpenFrameCountRef.current += 1
-                                eyesClosedFrameCountRef.current = 0
-
-                                // Count blink if we transition from closed to open
-                                if (eyesOpenFrameCountRef.current >= OPEN_FRAMES_REQUIRED && wasClosedRef.current) {
-                                    blinkCountRef.current += 1
-                                    wasClosedRef.current = false
-                                    console.log(`[LIVENESS] 👁️ BLINK #${blinkCountRef.current} COUNTED! (EAR: ${ear.toFixed(3)}, open frames: ${eyesOpenFrameCountRef.current})`)
-                                    setStatus(`Blinks: ${blinkCountRef.current}/2`)
-                                }
-                            }
-
-                            // Debug logging every 30 frames (~1 second at 30fps)
-                            if (Math.random() < 0.03) {
-                                console.log(`[LIVENESS DEBUG] EAR: ${ear.toFixed(3)}, Closed frames: ${eyesClosedFrameCountRef.current}, Open frames: ${eyesOpenFrameCountRef.current}, State: ${wasClosedRef.current ? 'CLOSED' : 'OPEN'}`)
-                            }
-
-                            if (blinkCountRef.current >= 2) taskMet = true
-
-                        } else if (task === "smile") {
+                        if (task === "smile") {
                             if (expressions.happy > 0.7) taskMet = true
                         } else if (task === "turnLeft" || task === "turnRight") {
                             const nose = landmarks.getNose()[0]
@@ -365,10 +314,8 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
                                 setCurrentTaskIndex(taskIndexRef.current)
                                 setProgress((taskIndexRef.current / tasksRef.current.length) * 100)
                                 setStatus(`Great! Next: ${getTaskInstruction(tasksRef.current[taskIndexRef.current])}`)
-                                blinkCountRef.current = 0
                                 wasClosedRef.current = false
-                                eyesClosedFrameCountRef.current = 0
-                                eyesOpenFrameCountRef.current = 0
+                                framesRef.current = 0
                                 await new Promise(r => setTimeout(r, 800));
                             } else {
                                 setStatus("Tasks finished! Extracting fingerprint...")
@@ -430,7 +377,6 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
 
     const getTaskInstruction = (task: LivenessTask) => {
         switch (task) {
-            case "blink": return "Blink your eyes twice"
             case "smile": return "Please smile for the camera"
             case "turnLeft": return "Turn your head slightly LEFT"
             case "turnRight": return "Turn your head slightly RIGHT"

@@ -88,7 +88,7 @@ contract DocumentRegistry is EIP712, ReentrancyGuard, Pausable {
         uint256 timestamp, 
         uint256 nonce,
         bytes memory signature
-    ) external whenNotPaused onlyRelayer nonReentrant {
+    ) external whenNotPaused nonReentrant {
         // 1. Basic State Validation
         require(!documents[docHash].exists, "DocumentRegistry: Record already exists");
         require(status == uint8(Status.APPROVED) || status == uint8(Status.REJECTED), "DocumentRegistry: Invalid status");
@@ -115,6 +115,12 @@ contract DocumentRegistry is EIP712, ReentrancyGuard, Pausable {
         require(!notaryRegistry.isBanned(recoveredNotary), "DocumentRegistry: Notary is banned");
         require(!notaryRegistry.isBanned(ownerAddress), "DocumentRegistry: Document owner is banned");
         require(recoveredNotary != ownerAddress, "DocumentRegistry: Notary cannot approve own document");
+
+        // 4.5 Hybrid Authorization: Caller must be the Notary (Self-Paid) OR the Relayer (Gasless)
+        require(
+            msg.sender == recoveredNotary || msg.sender == notaryRegistry.relayer(), 
+            "DocumentRegistry: Not authorized caller"
+        );
 
         // 5. Nonce Protection
         require(nonce == nonces[recoveredNotary], "DocumentRegistry: Invalid nonce");

@@ -1,4 +1,5 @@
 import { Moon, Sun, Globe, Key, FileText, ExternalLink, Settings as SettingsIcon, Shield, Bell } from "lucide-react";
+import { useConfig } from "../../contexts/ConfigAuthority";
 import { Button } from "../ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Switch } from "../ui/switch";
@@ -10,6 +11,7 @@ interface SettingsProps {
 }
 
 export function Settings({ }: SettingsProps) {
+  const { config } = useConfig();
   return (
     <div className="flex-1 bg-background overflow-auto">
       {/* Header */}
@@ -149,14 +151,14 @@ export function Settings({ }: SettingsProps) {
                   </div>
                   <div className="p-4 bg-muted/30 rounded-2xl border border-border">
                     <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Active Chain ID</p>
-                    <p className="text-sm text-foreground font-mono font-bold tracking-widest">56 / 97</p>
+                    <p className="text-sm text-foreground font-mono font-bold tracking-widest">{config?.chainId || "97"}</p>
                   </div>
                 </div>
 
                 <div className="p-4 bg-muted/30 rounded-2xl border border-border group transition-all hover:border-primary/20">
                   <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Multi-Sig Logic Hub</p>
                   <p className="text-sm text-primary font-mono font-bold break-all opacity-80 group-hover:opacity-100 transition-opacity tracking-tighter">
-                    0x0feFca7E11286c65DDD99dFb49D4Cb6Bba212229
+                    {config?.contracts.multisig || "0x..."}
                   </p>
                 </div>
               </CardContent>

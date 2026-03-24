@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Calendar, Hash, Eye, CheckCircle, XCircle, Clock, ExternalLink } from "lucide-react";
+import { FileText, Calendar, Hash, Eye, CheckCircle, XCircle, Clock, ExternalLink, Download } from "lucide-react";
 import { toast } from "sonner";
+import { generateCertificatePDF } from "@/lib/pdf-utils";
 
 interface Document {
     id: number;
@@ -16,6 +17,7 @@ interface Document {
     document_summary?: string;
     rejection_reason?: string;
     notary_id?: number;
+    notary_wallet?: string;
 }
 
 export default function DocumentsPage() {
@@ -251,6 +253,51 @@ export default function DocumentsPage() {
                                         View on BSCScan
                                         <ExternalLink size={14} />
                                     </a>
+                                </div>
+                            )}
+
+                            {selectedDocument.status === "approved" && (
+                                <div className="flex justify-center pt-2 pb-2">
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                toast.info("Generating certificate...")
+                                                
+                                                // Extract Owner Wallet from stored user data if available
+                                                let ownerWalletStr = "Owner Wallet (Redacted)"
+                                                try {
+                                                    const storedUser = localStorage.getItem('bbsns_user')
+                                                    if (storedUser) {
+                                                        const parsed = JSON.parse(storedUser)
+                                                        if (parsed.wallet_address) {
+                                                            ownerWalletStr = parsed.wallet_address
+                                                        }
+                                                    }
+                                                } catch (e) {
+                                                    // ignore parse errors
+                                                }
+
+                                                await generateCertificatePDF({
+                                                    filename: selectedDocument.filename,
+                                                    fileHash: selectedDocument.file_hash,
+                                                    status: selectedDocument.status,
+                                                    txHash: selectedDocument.approval_tx_hash || "",
+                                                    notaryWallet: selectedDocument.notary_wallet || "0xNotary... (Redacted by request)",
+                                                    ownerWallet: ownerWalletStr,
+                                                    timestamp: selectedDocument.updated_at,
+                                                    documentSummary: selectedDocument.document_summary
+                                                })
+                                                toast.success("Certificate downloaded successfully!")
+                                            } catch (err) {
+                                                console.error(err)
+                                                toast.error("Failed to generate PDF certificate")
+                                            }
+                                        }}
+                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-2 transition-colors font-medium border border-emerald-500"
+                                    >
+                                        <Download size={18} />
+                                        Download Official Receipt
+                                    </button>
                                 </div>
                             )}
 

@@ -19,7 +19,8 @@ import {
     Lock,
     UserCheck,
     Globe,
-    CheckCircle2
+    CheckCircle2,
+    Contact
 } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { countries } from "../../lib/countries"
@@ -126,12 +127,35 @@ export default function RegisterNotaryPage() {
                 })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Submission failed");
+            if (!res.ok) {
+                // If application already exists, we check if it's one we can resume
+                if (data.id && (['pending', 'APPLIED', 'KYC_VERIFIED'].includes(data.status))) {
+                    setApplicationId(data.id);
+                    localStorage.setItem("bbsns_resuming_id", data.id);
+                    toast({
+                        title: "Resuming Session",
+                        description: `Found existing ${data.status} status. Syncing profile...`,
+                        variant: "default"
+                    });
+
+                    // Always move to step 2 if they try to skip or re-fill step 1
+                    setStep(2);
+                    return;
+                }
+                throw new Error(data.error || "Submission failed");
+            }
 
             setApplicationId(data.id);
+            localStorage.setItem("bbsns_resuming_id", data.id);
             toast({ title: "Profile Secured", description: "Phase 1 complete. Proceeding to Biometric Verification." });
             setStep(2); // Auto-transition
         } catch (e: any) {
+            // Check if the error contains a resumed state or if we can extract ID
+            if (e.message.includes("Application already exists")) {
+                toast({ title: "Resuming Application", description: "Found your previous record. Syncing session..." });
+                // If we had a mechanism to get the ID from the error object, we'd use it here.
+                // For now, let's hope the next attempt works or inform user.
+            }
             toast({ title: "Submission Failed", description: e.message, variant: "destructive" });
         } finally {
             setIsLoading(false);
@@ -185,7 +209,7 @@ export default function RegisterNotaryPage() {
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '2s' }} />
             </div>
 
-            <div className="relative z-10 container max-w-6xl mx-auto py-12 px-4">
+            <div className="relative z-10 container max-w-6xl mx-auto py-6 px-4">
                 {/* Navigation */}
                 <motion.button
                     onClick={() => step > 1 ? setStep(step - 1) : router.back()}
@@ -200,7 +224,7 @@ export default function RegisterNotaryPage() {
                 <div className="grid lg:grid-cols-12 gap-16 items-start">
                     {/* Left Side: Info & Steps */}
                     <motion.div
-                        className="lg:col-span-5 space-y-10"
+                        className="lg:col-span-5 space-y-6"
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.1 }}
@@ -211,14 +235,14 @@ export default function RegisterNotaryPage() {
                             </div>
                             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-6 bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
                                 Become a <br />
-                                <span className="text-primary text-glow">Verified Notary</span>
+                                <span className="text-primary text-glow drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]">Verified Notary</span>
                             </h1>
                             <p className="text-slate-400 text-lg leading-relaxed max-w-md">
-                                Join our decentralized network of trusted professionals. Our automated registration ensures zero-trust security through multi-factor authentication.
+                                Join our decentralized network of trusted professionals. Our automated registration ensures <span className="text-slate-200 font-medium">zero-trust security</span> through multi-factor authentication.
                             </p>
                         </div>
 
-                        <div className="space-y-8">
+                        <div className="space-y-6">
                             {[
                                 { s: 1, title: "Intent & Info", desc: "Submit your professional credentials.", icon: FileText },
                                 { s: 2, title: "Biometric Signal", desc: "Neural liveness verification.", icon: Camera },
@@ -261,22 +285,22 @@ export default function RegisterNotaryPage() {
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ delay: 0.2 }}
                     >
-                        <div className="bg-slate-900/40 backdrop-blur-2xl border border-slate-800/60 p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden min-h-[650px] flex flex-col">
-                            <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
+                        <div className="bg-[#0f172a]/40 backdrop-blur-3xl border border-slate-800/40 p-8 rounded-[2rem] shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] relative overflow-hidden min-h-[550px] flex flex-col transition-all duration-500 hover:shadow-primary/5">
+                            <div className="absolute top-0 right-0 p-12 opacity-[0.03] pointer-events-none group-hover:opacity-5 transition-opacity">
                                 <Shield size={160} />
                             </div>
 
                             <AnimatePresence mode="wait">
                                 {step === 1 ? (
-                                    <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8 flex-1">
+                                    <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6 flex-1">
                                         <div className="grid md:grid-cols-2 gap-8">
-                                            <div className="space-y-3">
-                                                <Label className="text-slate-300 font-semibold ml-1">Full Legal Name</Label>
-                                                <Input placeholder="As shown on ID" className="bg-slate-950/50 border-slate-800 h-14 text-lg focus:ring-primary" value={formData.name} onChange={(e) => handleInputChange("name", e.target.value)} />
+                                            <div className="space-y-3 group">
+                                                <Label className="text-slate-300 font-semibold ml-1 group-focus-within:text-primary transition-colors">Full Legal Name</Label>
+                                                <Input placeholder="As shown on ID" className="bg-slate-950/50 border-slate-800 h-14 text-lg text-white focus:ring-primary focus:border-primary/50 transition-all" value={formData.name} onChange={(e) => handleInputChange("name", e.target.value)} />
                                             </div>
-                                            <div className="space-y-3">
-                                                <Label className="text-slate-300 font-semibold ml-1">Official Email</Label>
-                                                <Input type="email" placeholder="email@example.com" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} />
+                                            <div className="space-y-3 group">
+                                                <Label className="text-slate-300 font-semibold ml-1 group-focus-within:text-primary transition-colors">Official Email</Label>
+                                                <Input type="email" placeholder="email@example.com" className="bg-slate-950/50 border-slate-800 h-14 text-lg text-white focus:ring-primary focus:border-primary/50 transition-all" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} />
                                             </div>
                                         </div>
 
@@ -307,44 +331,78 @@ export default function RegisterNotaryPage() {
                                             </Popover>
                                         </div>
 
-                                        <div className="grid md:grid-cols-2 gap-8">
-                                            <div className="space-y-3">
-                                                <Label className="text-slate-300 font-semibold ml-1">National ID Number</Label>
-                                                <Input placeholder="ID Card / Passport No." className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.nationalId} onChange={(e) => handleInputChange("nationalId", e.target.value)} />
+                                        <div className="grid md:grid-cols-2 gap-8 items-start">
+                                            {/* Identity Card */}
+                                            <div className="bg-slate-900/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl space-y-6">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                                                        <Shield size={18} />
+                                                    </div>
+                                                    <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">Identity Details</h3>
+                                                </div>
+                                                <div className="space-y-4">
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">Full Legal Name</Label>
+                                                        <Input placeholder="As shown on ID" className="bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl mt-1.5" value={formData.name} onChange={(e) => handleInputChange("name", e.target.value)} />
+                                                    </div>
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">Official Email</Label>
+                                                        <Input type="email" placeholder="email@example.com" className="bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl mt-1.5" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} />
+                                                    </div>
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">Access Password</Label>
+                                                        <Input type="password" placeholder="••••••••" className="bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl mt-1.5" value={formData.password} onChange={(e) => handleInputChange("password", e.target.value)} />
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div className="space-y-3">
-                                                <Label className="text-slate-300 font-semibold ml-1">Login Password</Label>
-                                                <Input type="password" placeholder="••••••••" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.password} onChange={(e) => handleInputChange("password", e.target.value)} />
+
+                                            {/* Contact & Verification Card */}
+                                            <div className="bg-slate-900/40 backdrop-blur-xl border border-white/5 p-6 rounded-2xl space-y-6">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                                                        <Contact size={18} />
+                                                    </div>
+                                                    <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">Verification Info</h3>
+                                                </div>
+                                                <div className="space-y-4">
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">National Identity Number</Label>
+                                                        <Input placeholder="Personal ID Number" className="bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl mt-1.5" value={formData.nationalId} onChange={(e) => handleInputChange("nationalId", e.target.value)} />
+                                                    </div>
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">Professional License</Label>
+                                                        <Input placeholder="Official License Code" className="bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl mt-1.5" value={formData.license} onChange={(e) => handleInputChange("license", e.target.value)} />
+                                                    </div>
+                                                    <div className="group">
+                                                        <Label className="text-xs font-bold text-slate-500 ml-1 group-focus-within:text-primary transition-colors uppercase tracking-wider">Mobile Contact</Label>
+                                                        <div className="flex gap-2 mt-1.5">
+                                                            <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+                                                                <PopoverTrigger asChild>
+                                                                    <div className="h-12 px-4 bg-[#0f172a]/40 border border-slate-800/60 font-bold text-primary text-lg rounded-xl flex items-center cursor-pointer">
+                                                                        {selectedCountry.dial_code}
+                                                                    </div>
+                                                                </PopoverTrigger>
+                                                                <PopoverContent className="bg-slate-950 border-slate-800"><Command shouldFilter><CommandInput /><CommandList>{countries.map(c => (<CommandItem key={c.code} onSelect={() => { setSelectedCountry(c); setOpenCombobox(false); }}>{c.flag} {c.dial_code}</CommandItem>))}</CommandList></Command></PopoverContent>
+                                                            </Popover>
+                                                            <Input placeholder="Phone number" className="flex-1 bg-[#0f172a]/40 border-slate-800/60 h-12 text-base text-white focus:ring-primary/30 focus:border-primary/50 transition-all rounded-xl" value={formData.phone} onChange={(e) => handleInputChange("phone", e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-3">
-                                            <Label className="text-slate-300 font-semibold ml-1">Mobile Number</Label>
-                                            <div className="flex gap-3">
-                                                <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant="outline" className="h-14 px-4 bg-slate-950/50 border-slate-800 font-bold text-primary text-lg">
-                                                            {selectedCountry.dial_code}
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="bg-slate-950 border-slate-800"><Command shouldFilter><CommandInput /><CommandList>{countries.map(c => (<CommandItem key={c.code} onSelect={() => { setSelectedCountry(c); setOpenCombobox(false); }}>{c.flag} {c.dial_code}</CommandItem>))}</CommandList></Command></PopoverContent>
-                                                </Popover>
-                                                <Input placeholder="123 456 789" className="flex-1 bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.phone} onChange={(e) => handleInputChange("phone", e.target.value)} />
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <Label className="text-slate-300 font-semibold ml-1">Notary License Number</Label>
-                                            <Input placeholder="Official License Code" className="bg-slate-950/50 border-slate-800 h-14 text-lg" value={formData.license} onChange={(e) => handleInputChange("license", e.target.value)} />
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <Label className="text-slate-300 font-semibold ml-1">Professional Intent</Label>
-                                            <Textarea placeholder="Describe your background and intent..." className="bg-slate-950/50 border-slate-800 min-h-[120px] p-4 text-base focus:ring-primary" value={formData.experience} onChange={(e) => handleInputChange("experience", e.target.value)} />
+                                        <div className="space-y-4 group">
+                                            <Label className="text-slate-300 font-semibold ml-1 group-focus-within:text-primary transition-colors">Experience & Portfolio</Label>
+                                            <Textarea
+                                                placeholder="Briefly describe your professional background and notary experience..."
+                                                className="bg-[#0f172a]/40 border-slate-800/60 min-h-[140px] p-5 text-base text-white focus:ring-primary focus:border-primary/50 backdrop-blur-md transition-all rounded-xl resize-none"
+                                                value={formData.experience}
+                                                onChange={(e) => handleInputChange("experience", e.target.value)}
+                                            />
                                         </div>
 
                                         <div className="pt-4 mt-auto">
-                                            <Button className="w-full h-16 text-xl font-bold bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 group uppercase tracking-wide" onClick={handleSubmitPhase1} disabled={isLoading}>
+                                            <Button className="w-full h-14 text-lg font-bold bg-primary hover:bg-primary/90 shadow-xl shadow-primary/20 group uppercase tracking-wide" onClick={handleSubmitPhase1} disabled={isLoading}>
                                                 {isLoading ? "Validating..." : "Submit & Continue"}
                                                 <ArrowRight className="ml-3 group-hover:translate-x-1 transition-transform" />
                                             </Button>
@@ -431,10 +489,13 @@ export default function RegisterNotaryPage() {
 
             <style jsx global>{`
                 .text-glow {
-                    text-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+                    text-shadow: 0 0 30px rgba(59,130,246,0.3);
                 }
                 .shadow-3xl {
                     box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.5);
+                }
+                .focus-ring-glow:focus {
+                    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2), 0 0 15px rgba(59, 130, 246, 0.1);
                 }
             `}</style>
         </div>

@@ -45,8 +45,10 @@ interface WalletContextType {
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
 
 import { apiClient } from "@/lib/api-client"
+import { useConfig } from "@/providers/ConfigProvider"
 
 export function WalletProvider({ children }: { children: ReactNode }) {
+    const { config } = useConfig();
     const [user, setUser] = useState<UserProfile | null>(null)
     const [balances, setBalances] = useState<UserBalances | null>(null)
     const [connectedAccount, setConnectedAccount] = useState<string | null>(null)
@@ -77,8 +79,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
                 let ntkrBal = "0";
                 let ntkBal = "0";
-                const ntkrAddr = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS;
-                const ntkAddr = process.env.NEXT_PUBLIC_NTK_CONTRACT_ADDRESS;
+                const ntkrAddr = config?.contracts.ntkr;
+                const ntkAddr = config?.contracts.ntk;
                 const abi = ["function balanceOf(address) view returns (uint256)"];
 
                 if (ntkrAddr) {
@@ -111,12 +113,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const fetchProfile = async () => {
         try {
             const data = await apiClient.get('/auth/me');
-            setUser(data.user); // Fixed: Extract nested user object
-            await refreshBalances();
-        } catch (err: any) {
-            if (err.status !== 401) {
-                setError(err.message || "Connectivity issue: Server unreachable");
+            if (data && data.user) {
+                setUser(data.user);
+                await refreshBalances();
+            } else {
+                setUser(null);
             }
+        } catch (err: any) {
+            // Silently handle auth errors to reduce console noise
             setUser(null);
         } finally {
             setIsLoading(false);
@@ -207,8 +211,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
                 // Fetch Token Balances Live
                 let ntkrBal = "0";
                 let ntkBal = "0";
-                const ntkrAddr = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS;
-                const ntkAddr = process.env.NEXT_PUBLIC_NTK_CONTRACT_ADDRESS;
+                const ntkrAddr = config?.contracts.ntkr;
+                const ntkAddr = config?.contracts.ntk;
                 const abi = ["function balanceOf(address) view returns (uint256)"];
 
                 if (ntkrAddr) {

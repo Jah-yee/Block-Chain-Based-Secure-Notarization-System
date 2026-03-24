@@ -1,6 +1,29 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const http = require('http');
+const express = require('express');
+
+// Remote Auth Server Setup
+let authServerInstance = null;
+const AUTH_PORT = 3002;
+
+function startRemoteAuthServer() {
+  const authApp = express();
+  // Serve static files from the build directory
+  const staticPath = path.join(__dirname, 'Remote Auth', 'dist_final');
+  authApp.use(express.static(staticPath));
+
+  authServerInstance = authApp.listen(AUTH_PORT, () => {
+    console.log(`[DEBUG] main.js: Remote Auth internal server started on port ${AUTH_PORT}`);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[CRITICAL] main.js: Port ${AUTH_PORT} is already in use. Remote Auth server failed to start!`);
+    } else {
+      console.error(`[ERROR] main.js: Remote Auth server error:`, err);
+    }
+  });
+}
+
 
 // Configuration
 const BACKEND_HOST = process.env.BACKEND_HOST || '127.0.0.1';
@@ -109,6 +132,7 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    startRemoteAuthServer();
     waitForBackend();
   });
 }
@@ -116,5 +140,12 @@ if (!gotTheLock) {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('quit', () => {
+  if (authServerInstance) {
+    console.log('[DEBUG] main.js: Shutting down internal Remote Auth server...');
+    authServerInstance.close();
   }
 });
