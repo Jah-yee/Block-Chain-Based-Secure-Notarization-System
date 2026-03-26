@@ -11,11 +11,30 @@ const app = express();
 app.use(correlationMiddleware);
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- HARDENED CORS CONFIG (PHASE 4) ---
 app.use(cookieParser());
-const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(',');
+const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(o => o);
+
+// Add default local/dev and enterprise production origins if not explicitly restricted
+if (process.env.NODE_ENV !== 'production' || corsOrigins.length === 0) {
+  corsOrigins.push(
+    'http://localhost:3000', 
+    'http://localhost:5173', 
+    'http://localhost:3002',
+    'http://localhost:8080',
+    'http://localhost:8081',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3002',
+    'http://13.233.236.240:3000',
+    'http://13.233.236.240:5000',
+    'https://app.bbsns.xyz',
+    'https://auth.bbsns.xyz',
+    'https://bbsns.xyz'
+  );
+}
 
 app.use(cors({
 	origin: corsOrigins,

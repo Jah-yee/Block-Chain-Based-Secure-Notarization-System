@@ -5,6 +5,12 @@ const { hashPassword } = require("../utils/password.js");
 const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../../middleware/actor.js");
 const { requireSystemActivated } = require("../../middleware/activation.js");
 
+const multer = require("multer");
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
+
 // Validation functions
 function validateEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,10 +27,28 @@ function validateWallet(walletAddress) {
 }
 
 // REGISTER User (public)
-router.post("/register", allowPublic, requireSystemActivated, async (req, res) => {
-  console.log("[REGISTER_DEBUG] Received registration request:", { ...req.body, password: '[REDACTED]', faceDescriptor: '...' });
-  const { name, email, walletAddress, password, nationalId, faceDescriptor, signature } = req.body;
+router.post("/register", allowPublic, requireSystemActivated, upload.single('nationalIdFile'), async (req, res) => {
+  // Multer populates req.body with text fields and req.file with the file
+  const body = req.body || {};
+  
+  // Align Frontend vs Backend field names
+  const name = body.name || body.fullName;
+  const email = body.email;
+  const walletAddress = body.walletAddress;
+  const password = body.password;
+  const nationalId = body.nationalId || body.nationalIdText;
+  const signature = body.signature || body.wallet_nonce;
+  
+  // Handle faceDescriptor (may be stringified JSON from FormData)
+  let faceDescriptor = body.faceDescriptor;
+  if (typeof faceDescriptor === 'string') {
+    try { faceDescriptor = JSON.parse(faceDescriptor); } catch (e) { console.error("JSON parse failed for descriptor", e); }
+  }
+
+  console.log("[REGISTER_DEBUG] Received registration request:", { ...body, password: '[REDACTED]', faceDescriptor: '...', hasFile: !!req.file });
+
   if (!name || !email || !walletAddress || !password) {
+    console.error("[REGISTER_DEBUG] VALDIATION FAILED: Missing required fields", { name:!!name, email:!!email, wallet:!!walletAddress, pass:!!password });
     return res.status(400).json({ error: 'name, email, walletAddress, and password are required' });
   }
 
