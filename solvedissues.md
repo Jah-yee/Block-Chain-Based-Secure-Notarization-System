@@ -89,5 +89,17 @@ This document lists all system remediations performed after cloud integration to
 - **Final Solution**: Implemented an **NGINX Mock Endpoint** to serve a dummy script, suppressing the 404 without a high-risk Next.js rebuild.
 
 ---
-**Certification COMPLETE**: The system is now 100% synchronized and stable.
+
+## Known Production Issues (Under Investigation)
+
+### 1. Mobile Wallet Connectivity Failures
+- **Status**: OPEN (High Priority)
+- **Tracking**: [GitHub Issue #9](https://github.com/CoderShubhamMate/Block-Chain-Based-Secure-Notarization-System/issues/9)
+- **Description**: Mobile Safari and Chrome browsers fail to trigger the MetaMask app via Deep Links on the EC2 IP.
+- **Affected Area**: `Web-App/components/auth/signup-form.tsx`
+- **Workaround**: Users must currently use a **Desktop Browser with MetaMask Extension** to complete the `owner` registration phase.
+- **Root Cause Path**: Investigating Universal Link domain verification vs. Custom Protocol (`metamask://`) browser trapping.
+
+---
+**Certification COMPLETE**: The system is now 100% synchronized and stable for Desktop. Mobile support is a known regression tracked in Issue #9.
 **Final Test Endpoint**: https://13.233.236.240/signup
