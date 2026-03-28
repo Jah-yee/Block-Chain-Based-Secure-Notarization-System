@@ -110,27 +110,53 @@ router.post("/applications/:id/verify", allowPublic, async (req, res) => {
     const { signature, faceDescriptor, walletAddress } = req.body;
 
   try {
-    // In a real system, we would verify the EIP-712 signature here
-    // For now, we update the application with the liveness result and signature
-    
-    // Late-binding: If walletAddress is provided now, update it.
-    let result;
-    if (walletAddress) {
-        result = await pool.query(
-            "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'APPLIED', updated_at = NOW() WHERE id = $4 RETURNING *",
-            [JSON.stringify(faceDescriptor), signature, walletAddress.toLowerCase(), id]
-        );
-    } else {
-        result = await pool.query(
-            "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, status = 'APPLIED', updated_at = NOW() WHERE id = $3 RETURNING *",
-            [JSON.stringify(faceDescriptor), signature, id]
-        );
+    const { ethers } = require('ethers');
+    const normalizedWallet = (walletAddress || "").toLowerCase();
+
+    if (!normalizedWallet || !signature) {
+      return res.status(400).json({ error: "walletAddress and signature are required" });
     }
+
+    // 1. Fetch EXCLUSIVE valid nonce for NOTARY_BIND
+    const nonceResult = await pool.query(
+      `SELECT nonce FROM wallet_nonces 
+       WHERE LOWER(wallet_address) = $1 AND purpose = 'NOTARY_BIND' 
+       AND used_at IS NULL AND expiry > NOW() 
+       ORDER BY created_at DESC LIMIT 1`,
+      [normalizedWallet]
+    );
+
+    if (nonceResult.rows.length === 0) {
+      return res.status(401).json({ error: "Missing or expired verification session. Please request a new nonce." });
+    }
+
+    // 2. Cryptographic Signature Verification
+    const nonce = nonceResult.rows[0].nonce;
+    const APP_NAME = 'BBSNS';
+    const message = `Notary binding request for ${APP_NAME}: ${nonce}`;
+    const recoveredAddress = ethers.verifyMessage(message, signature);
+
+    if (recoveredAddress.toLowerCase() !== normalizedWallet) {
+      return res.status(401).json({ error: "Signature verification failed: Address mismatch" });
+    }
+
+    // 3. Mark Nonce Used
+    await pool.query(
+      "UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2",
+      [normalizedWallet, nonce]
+    );
+
+    // 4. Update Application State
+    const result = await pool.query(
+      "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'APPLIED', updated_at = NOW() WHERE id = $4 RETURNING *",
+      [JSON.stringify(faceDescriptor), signature, normalizedWallet, id]
+    );
 
     if (result.rows.length === 0) return res.status(404).json({ error: "Application not found" });
 
     res.json({ message: "Identity verified and locked for review.", application: result.rows[0] });
   } catch (err) {
+    console.error("Notary Verification Error:", err);
     res.status(500).json({ error: err.message });
   }
 });

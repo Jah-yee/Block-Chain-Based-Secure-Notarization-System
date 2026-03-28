@@ -102,10 +102,18 @@ router.post('/nonce', allowPublic, simpleRateLimiter(5, 60000), async (req, res)
       [normalizedWalletSize, nonce, expiry, noncePurpose]
     );
 
+    // 3. Define message template based on purpose
+    let message_template;
+    if (noncePurpose === 'NOTARY_BIND' || noncePurpose === 'NOTARY_ONBOARD') {
+      message_template = `Notary binding request for ${APP_NAME}: ${nonce}`;
+    } else {
+      message_template = `Login request for ${APP_NAME}: ${nonce}`;
+    }
+
     res.json({
       nonce,
       expiry: expiry.toISOString(),
-      message_template: `Login request for ${APP_NAME}: ${nonce}`
+      message_template
     });
   } catch (error) {
     console.error('Error generating nonce:', error);
