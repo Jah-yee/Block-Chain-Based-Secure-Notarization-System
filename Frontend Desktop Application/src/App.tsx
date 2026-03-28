@@ -15,7 +15,7 @@ import { Profile } from "./components/notary/Profile";
 import { Sidebar } from "./components/shared/Sidebar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog";
 import { Button } from "./components/ui/button";
-import api from "./api";
+import api from "./services/api";
 import { ethers } from "ethers";
 
 type AppState = "role-selection" | "admin-login" | "admin-app" | "notary-login" | "notary-app" | "initialize-system";
@@ -128,9 +128,10 @@ function DeploymentChecklist({ config }: { config: SystemConfig }) {
 }
 
 import { useConfig } from "./contexts/ConfigAuthority";
+import { ResilienceBanner } from "./components/shared/ResilienceBanner";
 
 export default function App() {
-  const { config } = useConfig();
+  const { config, status, mode, error: configError, retry } = useConfig();
   const [appState, setAppState] = useState<AppState>("role-selection");
   const [adminScreen, setAdminScreen] = useState<AdminScreen>("dashboard");
   const [notaryScreen, setNotaryScreen] = useState<NotaryScreen>("dashboard");
@@ -166,6 +167,8 @@ export default function App() {
     }
 
     if (config) {
+      console.log("[CONFIG] Applying dynamic authority:", config.apiBaseUrl);
+      api.setBaseUrl(config.apiBaseUrl);
       recoverSession();
     }
   }, [config]);
@@ -255,12 +258,13 @@ export default function App() {
   if (configError) {
     return (
       <div className="min-h-screen bg-[#07090e] flex items-center justify-center p-4">
+        <ResilienceBanner mode={mode} onRetry={retry} />
         <div className="max-w-md w-full bg-[#0a0d14] border border-red-500/20 rounded-2xl p-8 text-center space-y-4 shadow-2xl">
           <ShieldAlert className="w-16 h-16 text-red-500 mx-auto" />
-          <h1 className="text-2xl font-bold text-white italic">System Offline</h1>
-          <p className="text-slate-400 text-sm leading-relaxed">{configError}</p>
-          <Button onClick={() => window.location.reload()} className="w-full bg-red-500 hover:bg-red-600 font-bold py-6 rounded-xl transition-all">
-            <RefreshCw className="mr-2 h-4 w-4" /> Reconnect Protocol
+          <h1 className="text-2xl font-bold text-white italic">Protocol Error</h1>
+          <p className="text-slate-400 text-sm leading-relaxed">{configError.message}</p>
+          <Button onClick={retry} className="w-full bg-red-500 hover:bg-red-600 font-bold py-6 rounded-xl transition-all">
+            <RefreshCw className="mr-2 h-4 w-4" /> Reset Authority
           </Button>
         </div>
       </div>
@@ -270,6 +274,7 @@ export default function App() {
   if (isRecovering || !config) {
     return (
       <div className="min-h-screen bg-[#07090e] flex items-center justify-center">
+        <ResilienceBanner mode={mode} onRetry={retry} />
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
           <p className="text-slate-500 font-bold tracking-[0.3em] text-[10px] uppercase">Decrypting Config...</p>
@@ -278,127 +283,129 @@ export default function App() {
     );
   }
 
-  if (appState === "initialize-system") {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.05),transparent_70%)]" />
-        <div className="max-w-4xl w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
-          <div className="space-y-8">
-            <div className="space-y-4">
-              <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-emerald-500/10 shadow-xl">
-                <Shield className="w-8 h-8 text-emerald-400" />
+  return (
+    <div className="relative">
+      <ResilienceBanner mode={mode} onRetry={retry} />
+      
+      {appState === "initialize-system" && (
+        <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.05),transparent_70%)]" />
+          <div className="max-w-4xl w-full grid grid-cols-1 lg:grid-cols-2 gap-12 items-center relative z-10">
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-emerald-500/10 shadow-xl">
+                  <Shield className="w-8 h-8 text-emerald-400" />
+                </div>
+                <h1 className="text-5xl font-black text-white tracking-tighter italic">SECURITY<br /><span className="text-emerald-500">INITIATION</span></h1>
+                <p className="text-slate-400 leading-relaxed max-w-sm">The BBSNS protocol requires cryptographic activation. A Genesis Admin must initiate the root of trust.</p>
               </div>
-              <h1 className="text-5xl font-black text-white tracking-tighter italic">SECURITY<br /><span className="text-emerald-500">INITIATION</span></h1>
-              <p className="text-slate-400 leading-relaxed max-w-sm">The BBSNS protocol requires cryptographic activation. A Genesis Admin must initiate the root of trust.</p>
+              <DeploymentChecklist config={config} />
             </div>
-            <DeploymentChecklist config={config} />
-          </div>
-          <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-8 rounded-[32px] shadow-2xl space-y-6">
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold text-white">Genesis Controller</h3>
-              <p className="text-slate-500 text-sm italic">Authorize activation via secure portal</p>
+            <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-8 rounded-[32px] shadow-2xl space-y-6">
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-white">Genesis Controller</h3>
+                <p className="text-slate-500 text-sm italic">Authorize activation via secure portal</p>
+              </div>
+              <Button 
+                className="w-full h-20 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xl rounded-2xl border-b-8 border-emerald-800 shadow-emerald-900/40 shadow-2xl transition-all"
+                onClick={() => {
+                  const url = `${config.remoteAuthUrl}/?mode=genesis`;
+                  (window as any).electronAPI ? (window as any).electronAPI.openExternal(url) : window.open(url, '_blank');
+                }}
+              >
+                LAUNCH COMMAND CENTER
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full text-slate-500 hover:text-white"
+                onClick={() => window.location.reload()}
+              >
+                <RefreshCw className="mr-2 w-4 h-4 opacity-50" /> Sync System Status
+              </Button>
             </div>
-            <Button 
-              className="w-full h-20 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xl rounded-2xl border-b-8 border-emerald-800 shadow-emerald-900/40 shadow-2xl transition-all"
-              onClick={() => {
-                const url = "http://localhost:3002/?mode=genesis";
-                (window as any).electronAPI ? (window as any).electronAPI.openExternal(url) : window.open(url, '_blank');
-              }}
-            >
-              LAUNCH COMMAND CENTER
-            </Button>
-            <Button 
-               variant="ghost" 
-               className="w-full text-slate-500 hover:text-white"
-               onClick={() => window.location.reload()}
-            >
-              <RefreshCw className="mr-2 w-4 h-4 opacity-50" /> Sync System Status
-            </Button>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if ((appState as any) === "role-selection") {
-    return (
-      <div className="relative">
-        <RoleSelection onSelectRole={handleRoleSelect} />
-        {recoveryError && (
-          <div className="absolute top-4 right-4 bg-red-500/10 border border-red-500/50 p-3 rounded-lg text-red-400 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4" />
-            <span>Connection Error: {recoveryError}</span>
-            <button onClick={() => setRecoveryError(null)} className="ml-2">×</button>
-          </div>
-        )}
-      </div>
-    );
-  }
+      {appState === "role-selection" && (
+        <div className="relative">
+          <RoleSelection onSelectRole={handleRoleSelect} />
+          {recoveryError && (
+            <div className="absolute top-4 right-4 bg-red-500/10 border border-red-500/50 p-3 rounded-lg text-red-400 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
+              <span>Connection Error: {recoveryError}</span>
+              <button onClick={() => setRecoveryError(null)} className="ml-2">×</button>
+            </div>
+          )}
+        </div>
+      )}
 
-  if ((appState as any) === "admin-login") return <AdminLogin onLogin={handleAdminLogin} onBack={() => setAppState("role-selection")} />;
-  if ((appState as any) === "notary-login") return <NotaryLogin onLogin={handleNotaryLogin} onBack={() => setAppState("role-selection")} />;
+      {appState === "admin-login" && (
+        <AdminLogin onLogin={handleAdminLogin} onBack={() => setAppState("role-selection")} />
+      )}
 
-  if (appState === "admin-app") {
-    return (
-      <div className="flex h-screen bg-[#07090e]">
-        <Sidebar
-          role="admin" user={user} activeScreen={adminScreen}
-          onNavigate={(s) => setAdminScreen(s as AdminScreen)}
-          onLogout={() => setLogoutDialogOpen(true)}
-          alertCount={alertCount} isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        />
-        <main className="flex-1 overflow-auto">
-          {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} />}
-          {adminScreen === "manage-notaries" && <ManageNotaries />}
-          {adminScreen === "governance" && <Governance role="admin" user={user} />}
-          {adminScreen === "system-logs" && <SystemLogs />}
-          {adminScreen === "multi-sig" && <MultiSigApprovals />}
-          {adminScreen === "settings" && <Settings />}
-        </main>
-        <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-          <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
-            <DialogHeader>
-              <DialogTitle className="text-2xl font-black italic">TERMINATE SESSION?</DialogTitle>
-              <DialogDescription className="text-slate-400">Security tokens will be purged from the local environment.</DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="gap-2">
-              <Button variant="ghost" onClick={() => setLogoutDialogOpen(false)} className="rounded-xl">Cancel</Button>
-              <Button onClick={handleLogoutConfirm} className="bg-red-500 hover:bg-red-600 rounded-xl font-bold">Log Out</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    );
-  }
+      {appState === "notary-login" && (
+        <NotaryLogin onLogin={handleNotaryLogin} onBack={() => setAppState("role-selection")} />
+      )}
 
-  if (appState === "notary-app") {
-    return (
-      <div className="flex h-screen bg-[#07090e]">
-        <Sidebar
-          role="notary" user={user} activeScreen={notaryScreen}
-          onNavigate={(s) => setNotaryScreen(s as NotaryScreen)}
-          onLogout={() => setLogoutDialogOpen(true)}
-          alertCount={alertCount} isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        />
-        <main className="flex-1 overflow-auto">
-          {notaryScreen === "dashboard" && <NotaryDashboard onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
-          {notaryScreen === "request-details" && selectedRequestId && <RequestDetails requestId={selectedRequestId} onBack={() => { setNotaryScreen("dashboard"); setSelectedRequestId(null); }} />}
-          {notaryScreen === "governance" && <Governance role="notary" user={user} />}
-          {notaryScreen === "profile" && <Profile user={user} />}
-        </main>
-        <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-          <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
-            <DialogHeader><DialogTitle>Confirm Logout</DialogTitle></DialogHeader>
-            <DialogFooter><Button onClick={handleLogoutConfirm} className="bg-red-500">Logout</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    );
-  }
+      {appState === "admin-app" && (
+        <div className="flex h-screen bg-[#07090e]">
+          <Sidebar
+            role="admin" user={user} activeScreen={adminScreen}
+            onNavigate={(s) => setAdminScreen(s as AdminScreen)}
+            onLogout={() => setLogoutDialogOpen(true)}
+            alertCount={alertCount} isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          />
+          <main className="flex-1 overflow-auto">
+            {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} />}
+            {adminScreen === "manage-notaries" && <ManageNotaries />}
+            {adminScreen === "governance" && <Governance role="admin" user={user} />}
+            {adminScreen === "system-logs" && <SystemLogs />}
+            {adminScreen === "multi-sig" && <MultiSigApprovals />}
+            {adminScreen === "settings" && <Settings />}
+          </main>
+          <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
+            <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-black italic">TERMINATE SESSION?</DialogTitle>
+                <DialogDescription className="text-slate-400">Security tokens will be purged from the local environment.</DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2">
+                <Button variant="ghost" onClick={() => setLogoutDialogOpen(false)} className="rounded-xl">Cancel</Button>
+                <Button onClick={handleLogoutConfirm} className="bg-red-500 hover:bg-red-600 rounded-xl font-bold">Log Out</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
 
-  return null;
+      {appState === "notary-app" && (
+        <div className="flex h-screen bg-[#07090e]">
+          <Sidebar
+            role="notary" user={user} activeScreen={notaryScreen}
+            onNavigate={(s) => setNotaryScreen(s as NotaryScreen)}
+            onLogout={() => setLogoutDialogOpen(true)}
+            alertCount={alertCount} isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          />
+          <main className="flex-1 overflow-auto">
+            {notaryScreen === "dashboard" && <NotaryDashboard onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
+            {notaryScreen === "request-details" && selectedRequestId && <RequestDetails requestId={selectedRequestId} onBack={() => { setNotaryScreen("dashboard"); setSelectedRequestId(null); }} />}
+            {notaryScreen === "governance" && <Governance role="notary" user={user} />}
+            {notaryScreen === "profile" && <Profile user={user} />}
+          </main>
+          <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
+            <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
+              <DialogHeader><DialogTitle>Confirm Logout</DialogTitle></DialogHeader>
+              <DialogFooter><Button onClick={handleLogoutConfirm} className="bg-red-500">Logout</Button></DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
+    </div>
+  );
 }
+

@@ -1,5 +1,7 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const url = require('url');
 const http = require('http');
 const express = require('express');
 
@@ -25,43 +27,6 @@ function startRemoteAuthServer() {
 }
 
 
-// Configuration
-const BACKEND_HOST = process.env.BACKEND_HOST || '127.0.0.1';
-const BACKEND_PORT = process.env.BACKEND_PORT || 5000;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-
-let mainWindow;
-
-function checkBackendHealth() {
-  return new Promise((resolve) => {
-    // Check our Node.js backend
-    const req = http.request({
-      hostname: BACKEND_HOST,
-      port: BACKEND_PORT,
-      path: '/',
-      method: 'GET',
-      timeout: 2000
-    }, (res) => {
-      if (res.statusCode === 200) {
-        console.log('[DEBUG] main.js: Node.js backend health check passed');
-        resolve(true);
-      } else {
-        console.log(`[DEBUG] main.js: Node.js backend health check failed with status ${res.statusCode}`);
-        resolve(false);
-      }
-    });
-
-    req.on('error', () => {
-      resolve(false);
-    });
-
-    req.on('timeout', () => {
-      resolve(false);
-    });
-
-    req.end();
-  });
-}
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -72,12 +37,12 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false, // Explicitly disable sandbox for reliable preload in dev
-      webSecurity: true // Re-enable for production-readiness
+      sandbox: false,
+      webSecurity: true
     }
   });
 
-  // CSP: Allow everything for development to fix font/backend blocks
+  // CSP
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -89,34 +54,22 @@ function createMainWindow() {
     });
   });
 
-  // Load the Vite development server URL
-  mainWindow.loadURL(FRONTEND_URL);
+  if (app.isPackaged) {
+    const entryPath = path.join(__dirname, 'build', 'index.html');
+    mainWindow.loadURL(url.pathToFileURL(entryPath).toString());
+  } else {
+    mainWindow.loadURL(process.env.FRONTEND_URL || 'http://localhost:3001');
+  }
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-async function waitForBackend() {
-  console.log(`[DEBUG] main.js: Waiting for Node.js backend to be ready on port ${BACKEND_PORT}...`);
-  let attempts = 0;
-  const maxAttempts = 60; // 60 seconds total
+// Configuration
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
 
-  while (attempts < maxAttempts) {
-    const isHealthy = await checkBackendHealth();
-    if (isHealthy) {
-      console.log('[DEBUG] main.js: Backend confirmed, creating window...');
-      createMainWindow();
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    attempts++;
-  }
-
-  console.error(`[DEBUG] main.js: Node.js backend failed to respond on port ${BACKEND_PORT}. App may not function correctly.`);
-  // We still create the window in dev mode so the user can see what's wrong, but warning is logged
-  createMainWindow();
-}
+let mainWindow;
 
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -133,9 +86,42 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     startRemoteAuthServer();
-    waitForBackend();
+    createMainWindow();
   });
 }
+
+// 🛡️ [RESILIENCE] OS-Level Configuration Cache
+const CACHE_FILE = 'config_cache.json';
+
+ipcMain.handle('save-config-cache', async (event, data) => {
+    const cachePath = path.join(app.getPath('userData'), CACHE_FILE);
+    try {
+        const payload = {
+            data,
+            timestamp: Date.now()
+        };
+        fs.writeFileSync(cachePath, JSON.stringify(payload), 'utf8');
+        return true;
+    } catch (err) {
+        console.error(`[ERROR] main.js: Failed to write config cache:`, err.message);
+        return false;
+    }
+});
+
+ipcMain.handle('load-config-cache', async () => {
+    const cachePath = path.join(app.getPath('userData'), CACHE_FILE);
+    try {
+        if (fs.existsSync(cachePath)) {
+            const data = fs.readFileSync(cachePath, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (err) {
+        console.error(`[ERROR] main.js: Failed to read config cache:`, err.message);
+    }
+    return null;
+});
+
+ipcMain.handle('get-config', () => null); // Deprecated
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

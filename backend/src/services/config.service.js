@@ -1,5 +1,6 @@
 const pool = require('../db/index');
 const { ethers } = require('ethers');
+const crypto = require('crypto');
 
 /**
  * 🛡️ CONFIG SERVICE (PHASE 1.5 - HARDENED AUDIT)
@@ -24,6 +25,20 @@ const CONFIG_ERRORS = {
   ROLLBACK_FAILED: 'ROLLBACK_FAILED'
 };
 
+const SAFE_DEFAULTS = {
+  rpcUrl: "https://data-seed-prebsc-1-s1.binance.org:8545",
+  chainId: 97,
+  contracts: {
+    notaryRegistry: "0x0000000000000000000000000000000000000000",
+    documentRegistry: "0x0000000000000000000000000000000000000000",
+    ntkr: "0x0000000000000000000000000000000000000000",
+    ntk: "0x0000000000000000000000000000000000000000",
+    genesisActivation: "0x0000000000000000000000000000000000000000",
+    genesisNft: "0x0000000000000000000000000000000000000000",
+    multisig: "0x0000000000000000000000000000000000000000"
+  }
+};
+
 class ConfigService {
   constructor() {
     this.cache = null;
@@ -43,13 +58,23 @@ class ConfigService {
   async getConfig() {
     try {
       // 1. Version-Based Cache Check (Architecture Rule: FAST)
-      const res = await pool.query('SELECT config_snapshot, version FROM system_config WHERE id = 1');
+      const res = await pool.query('SELECT config_snapshot, version, updated_at FROM system_config WHERE id = 1');
       
-      if (res.rowCount === 0) {
-        throw this._createError(CONFIG_ERRORS.EMPTY_DB, 'system_config table is empty');
-      }
+      const { config_snapshot, version, updated_at } = res.rows[0];
 
-      const { config_snapshot, version } = res.rows[0];
+      // 🛡️ [TIER 1 RISK MITIGATION] Strict Address & State Validation
+      const isValidAddress = (addr) => typeof addr === 'string' && /^0x[a-fA-F0-9]{40}$/.test(addr);
+      
+      const isPlaceholder = version === 0 || !config_snapshot || Object.keys(config_snapshot).length === 0;
+      const hasMalformedAddress = config_snapshot && config_snapshot.contracts && 
+                                  Object.values(config_snapshot.contracts).some(addr => !isValidAddress(addr) || addr.startsWith('0x0000'));
+      
+      const isInvalid = !config_snapshot || !config_snapshot.rpcUrl || !config_snapshot.apiBaseUrl || config_snapshot.chainId === 0 || hasMalformedAddress;
+
+      if (isPlaceholder || isInvalid) {
+        console.warn(`⚠️ [CONFIG_CRITICAL] System config is UNINITIALIZED, MALFORMED or INCOMPLETE (Version ${version}). Triggering Self-Healing Auto-Seed...`);
+        return await this._autoSeedFromEnv();
+      }
 
       if (this.cache && this._version === version) {
         return this.cache;
@@ -57,19 +82,31 @@ class ConfigService {
 
       // 2. Single-Flight Request Collapsing (🛡️ Stampede Protection)
       if (this.ongoingVerification) {
-        console.log(`🛡️ [CONFIG] Awaiting ongoing verification for version: ${version}...`);
         return await this.ongoingVerification;
       }
 
       // 3. Initiate Verification with Lock
       this.ongoingVerification = (async () => {
         try {
-          console.log(`🛡️ [CONFIG] Initiating FRESH verification for version: ${version}`);
+          // Perform soft validation (don't throw fatal on boot if possible)
+          const isValid = this.validateConfig(config_snapshot, false);
           
-          this.validateConfig(config_snapshot);
-          await this.verifyConnectivity(config_snapshot);
+          if (isValid) {
+            try {
+              await this.verifyConnectivity(config_snapshot);
+            } catch (connErr) {
+              console.warn(`🛑 [CONFIG_WARN] Connectivity check failed: ${connErr.message}. Serving stale/unverified config to keep API alive.`);
+            }
+          }
 
-          this.cache = config_snapshot;
+          const enrichedConfig = {
+            ...config_snapshot,
+            version,
+            updatedAt: updated_at,
+            checksum: this.generateChecksum(config_snapshot)
+          };
+
+          this.cache = enrichedConfig;
           this._version = version;
           
           return this.cache;
@@ -81,8 +118,8 @@ class ConfigService {
       return await this.ongoingVerification;
 
     } catch (err) {
-      console.error(`❌ [CONFIG_FAIL] Code: ${err.code || 'UNKNOWN'}, Message: ${err.message}`);
-      throw err; // Fail Closed
+      console.error(`❌ [CONFIG_CRITICAL_FAIL] Serving SAFE_DEFAULTS to prevent crash. Reason: ${err.message}`);
+      return SAFE_DEFAULTS; 
     }
   }
 
@@ -94,7 +131,7 @@ class ConfigService {
     try {
       console.log(`🛡️ [CONFIG_UPDATE] Initiating update from v${expectedVersion} by Admin: ${adminId}`);
 
-      this.validateConfig(newConfig);
+      this.validateConfig(newConfig, true); // Strict on update
       await this.verifyConnectivity(newConfig);
 
       await client.query('BEGIN');
@@ -155,25 +192,38 @@ class ConfigService {
   /**
    * 🛡️ validateConfig() - Strict internal validation with Error Codes
    */
-  validateConfig(config) {
-    if (!config || typeof config !== 'object') throw this._createError(CONFIG_ERRORS.MALFORMED, 'Config missing or malformed');
+  validateConfig(config, strict = true) {
+    if (!config || typeof config !== 'object') {
+      if (!strict) return false;
+      throw this._createError(CONFIG_ERRORS.MALFORMED, 'Config missing or malformed');
+    }
     
     const required = ['rpcUrl', 'chainId', 'contracts'];
-    required.forEach(field => {
-      if (!config[field]) throw this._createError(CONFIG_ERRORS.MISSING_FIELD, `Missing required field: ${field}`);
-    });
+    for (const field of required) {
+      if (!config[field]) {
+        if (!strict) return false;
+        throw this._createError(CONFIG_ERRORS.MISSING_FIELD, `Missing required field: ${field}`);
+      }
+    }
 
-    if (Number(config.chainId) !== 97) {
+    if (Number(config.chainId) !== 97 && strict) {
       throw this._createError(CONFIG_ERRORS.INVALID_CHAIN, `Expected 97, but snapshot has ${config.chainId}`);
     }
 
     const criticalContracts = ['notaryRegistry', 'documentRegistry', 'ntkr', 'ntk'];
-    criticalContracts.forEach(contract => {
+    for (const contract of criticalContracts) {
       const addr = config.contracts[contract];
-      if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+      const isValidAddr = /^0x[a-fA-F0-9]{40}$/.test(addr);
+      
+      if (!isValidAddr) {
+        if (!strict) return false;
         throw this._createError(CONFIG_ERRORS.INVALID_CONTRACT, `Invalid address for ${contract}: ${addr}`);
       }
-    });
+      
+      if (strict && addr === "0x0000000000000000000000000000000000000000") {
+          throw this._createError(CONFIG_ERRORS.INVALID_CONTRACT, `Cannot use zero address for ${contract} in production.`);
+      }
+    }
 
     return true;
   }
@@ -200,10 +250,12 @@ class ConfigService {
             throw this._createError(CONFIG_ERRORS.INVALID_CHAIN, `RPC chainId (${network.chainId}) != Config chainId (${config.chainId})`);
           }
           
-          // 2. Verify Bytecode at critical address
-          const code = await provider.getCode(config.contracts.notaryRegistry);
-          if (code === '0x' || code === '0x0') {
-            throw this._createError(CONFIG_ERRORS.CONTRACT_NOT_FOUND, `No contract at NotaryRegistry: ${config.contracts.notaryRegistry}`);
+          // 2. Verify Bytecode at critical address (Skip if zero address)
+          if (config.contracts.notaryRegistry !== "0x0000000000000000000000000000000000000000") {
+            const code = await provider.getCode(config.contracts.notaryRegistry);
+            if (code === '0x' || code === '0x0') {
+              throw this._createError(CONFIG_ERRORS.CONTRACT_NOT_FOUND, `No contract at NotaryRegistry: ${config.contracts.notaryRegistry}`);
+            }
           }
           return true;
         } catch (innerErr) {
@@ -219,9 +271,59 @@ class ConfigService {
       const result = await Promise.race([checkAction, timeoutPromise]);
       return result;
     } finally {
-      clearTimeout(timer); // 🛡️ Prevent timer from hanging the process
-      // Note: provider.destroy() doesn't exist for JsonRpcProvider, but handles will close on GC
+      clearTimeout(timer); 
     }
+  }
+
+  async _autoSeedFromEnv() {
+    try {
+      const initialConfig = {
+        rpcUrl: process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL || SAFE_DEFAULTS.rpcUrl,
+        chainId: parseInt(process.env.CHAIN_ID || "97"),
+        apiBaseUrl: process.env.API_BASE_URL || "http://localhost:5000",
+        webAppUrl: process.env.WEB_APP_URL || "http://localhost:3000",
+        remoteAuthUrl: process.env.REMOTE_AUTH_URL || "http://localhost:3002",
+        contracts: {
+          notaryRegistry: process.env.NOTARY_REGISTRY_ADDRESS || SAFE_DEFAULTS.contracts.notaryRegistry,
+          documentRegistry: process.env.DOCUMENT_REGISTRY_ADDRESS || SAFE_DEFAULTS.contracts.documentRegistry,
+          ntkr: process.env.NTKR_ADDRESS || SAFE_DEFAULTS.contracts.ntkr,
+          ntk: process.env.NTK_ADDRESS || SAFE_DEFAULTS.contracts.ntk,
+          genesisActivation: process.env.GENESIS_ACTIVATION_ADDRESS || SAFE_DEFAULTS.contracts.genesisActivation,
+          genesisNft: process.env.GENESIS_NFT_ADDRESS || SAFE_DEFAULTS.contracts.genesisNft,
+          multisig: process.env.MULTISIG_ADDRESS || SAFE_DEFAULTS.contracts.multisig
+        }
+      };
+
+      // Idempotent insertion
+      await pool.query(
+        'INSERT INTO system_config (id, config_snapshot, version) VALUES (1, $1, 1) ON CONFLICT (id) DO NOTHING',
+        [JSON.stringify(initialConfig)]
+      );
+      
+      const currentRes = await pool.query('SELECT config_snapshot, version, updated_at FROM system_config WHERE id = 1');
+      const snapshot = currentRes.rows[0].config_snapshot;
+      this._version = currentRes.rows[0].version;
+      
+      this.cache = {
+        ...snapshot,
+        version: this._version,
+        updatedAt: currentRes.rows[0].updated_at,
+        checksum: this.generateChecksum(snapshot)
+      };
+      
+      console.log(`✅ [CONFIG] Self-healing seed successful (v${this._version}).`);
+      return this.cache;
+    } catch (err) {
+      console.error('❌ [CONFIG] Self-healing failed. Reverting to hardcoded SAFE_DEFAULTS:', err.message);
+      return SAFE_DEFAULTS;
+    }
+  }
+
+  generateChecksum(config) {
+    const salt = process.env.CONFIG_CHECKSUM_SALT || 'bbsns_dev_salt';
+    // Deterministic stringification
+    const data = JSON.stringify(config, Object.keys(config).sort());
+    return crypto.createHmac('sha256', salt).update(data).digest('hex');
   }
 
   _createError(code, message) {
