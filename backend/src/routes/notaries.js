@@ -8,26 +8,51 @@ const { registerNotaryOnChain } = require("../blockchain/notary-registry");
 // Apply actor loading middleware
 // router.use(loadActor) deprecated for zero-trust compliance
 
+// PUBLIC: Check application status
+router.get("/applications/status/:id", allowPublic, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT id, status, email FROM notary_applications WHERE id = $1",
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: "Application not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUBLIC: Submit initial notary application
 router.post("/applications/public", allowPublic, async (req, res) => {
   const { fullName, email, password, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
     // GUARD: Reject if wallet already registered as a document owner (separate accounts required)
-    const walletInUse = await pool.query(
-      "SELECT id, role FROM users WHERE wallet_address = $1",
-      [walletAddress.toLowerCase()]
-    );
-    if (walletInUse.rows.length > 0) {
-      return res.status(409).json({
-        error: "This wallet is already registered as a document owner. Notaries must use a separate wallet address."
-      });
+    if (walletAddress) {
+      const walletInUse = await pool.query(
+        "SELECT id, role FROM users WHERE wallet_address = $1",
+        [walletAddress.toLowerCase()]
+      );
+      if (walletInUse.rows.length > 0) {
+        return res.status(409).json({
+          error: "This wallet is already registered as a document owner. Notaries must use a separate wallet address."
+        });
+      }
     }
 
     // Check if wallet or email already has a pending/approved application
+    const queryParts = ["email = $1"];
+    const queryParams = [email.toLowerCase()];
+
+    if (walletAddress) {
+      queryParts.push("wallet_address = $2");
+      queryParams.push(walletAddress.toLowerCase());
+    }
+
     const existing = await pool.query(
-      "SELECT * FROM notary_applications WHERE wallet_address = $1 OR email = $2",
-      [walletAddress.toLowerCase(), email.toLowerCase()]
+      `SELECT * FROM notary_applications WHERE ${queryParts.join(" OR ")}`,
+      queryParams
     );
 
     if (existing.rows.length > 0) {
@@ -38,7 +63,7 @@ router.post("/applications/public", allowPublic, async (req, res) => {
       if (['pending', 'APPLIED', 'KYC_VERIFIED'].includes(app.status)) {
         await pool.query(`
           UPDATE notary_applications 
-          SET phone = $1, experience = $2, nationality = $3, national_id = $4, updated_at = NOW()
+          SET phone = $1, experience = $2, nationality = $3, national_id_number = $4, updated_at = NOW()
           WHERE id = $5
         `, [phone, experience, nationality, nationalId, app.id]);
 
@@ -64,10 +89,10 @@ router.post("/applications/public", allowPublic, async (req, res) => {
     // user_id is NULL at submission — a new user account is created on approval
     const result = await pool.query(`
       INSERT INTO notary_applications 
-      (user_id, full_name, email, password_hash, wallet_address, phone, license_number, experience, national_id, national_id_hash, nationality, status)
-      VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      (full_name, email, password_hash, wallet_address, phone, license_number, experience, national_id_number, national_id_hash, nationality, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
       RETURNING id
-    `, [fullName, email, passwordHash, walletAddress.toLowerCase(), phone, license, experience, nationalId, nationalIdHash, nationality]);
+    `, [fullName, email, passwordHash, walletAddress ? walletAddress.toLowerCase() : null, phone, license, experience, nationalId, nationalIdHash, nationality]);
 
     res.status(201).json({
       message: "Application recorded. Proceed to biometric verification.",
@@ -82,15 +107,25 @@ router.post("/applications/public", allowPublic, async (req, res) => {
 // PUBLIC: Finalize application with face descriptor & signature
 router.post("/applications/:id/verify", allowPublic, async (req, res) => {
   const { id } = req.params;
-  const { signature, faceDescriptor } = req.body;
+    const { signature, faceDescriptor, walletAddress } = req.body;
 
   try {
     // In a real system, we would verify the EIP-712 signature here
     // For now, we update the application with the liveness result and signature
-    const result = await pool.query(
-      "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, status = 'APPLIED', updated_at = NOW() WHERE id = $3 RETURNING *",
-      [JSON.stringify(faceDescriptor), signature, id]
-    );
+    
+    // Late-binding: If walletAddress is provided now, update it.
+    let result;
+    if (walletAddress) {
+        result = await pool.query(
+            "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'APPLIED', updated_at = NOW() WHERE id = $4 RETURNING *",
+            [JSON.stringify(faceDescriptor), signature, walletAddress.toLowerCase(), id]
+        );
+    } else {
+        result = await pool.query(
+            "UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, status = 'APPLIED', updated_at = NOW() WHERE id = $3 RETURNING *",
+            [JSON.stringify(faceDescriptor), signature, id]
+        );
+    }
 
     if (result.rows.length === 0) return res.status(404).json({ error: "Application not found" });
 
@@ -116,7 +151,7 @@ router.get("/applications", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_
         na.nationality,
         na.phone,
         na.experience,
-        na.national_id,
+        na.national_id_number,
         na.status,
         na.created_at as application_date
       FROM notary_applications na
@@ -258,7 +293,7 @@ router.get("/", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }
   try {
     const result = await pool.query(`
       SELECT u.id, u.username, COALESCE(na.full_name, u.name) as name, COALESCE(na.email, u.email) as email, u.role, u.wallet_address,
-             na.full_name, na.national_id, na.nationality, na.phone, na.experience
+             na.full_name, na.national_id_number, na.nationality, na.phone, na.experience
       FROM users u
       LEFT JOIN notary_applications na ON u.id = na.user_id
       WHERE u.role = 'notary'

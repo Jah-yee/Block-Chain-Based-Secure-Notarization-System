@@ -4,6 +4,7 @@ const pool = require("../db/index");
 const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../../middleware/actor.js");
 const { ethers } = require("ethers");
 const path = require("path");
+const ConfigService = require("../services/config.service");
 
 // UUID validation helper - prevents Postgres cast errors on invalid session IDs
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -128,8 +129,9 @@ router.post("/proposals/:id/vote", requirePrivilege({ minRole: ROLES.NOTARY, ris
 // GET /api/governance/multisig/settings
 router.get("/multisig/settings", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
     try {
-        const rpcUrl = process.env.BNB_TESTNET_RPC_URL;
-        const contractAddress = process.env.MULTISIG_CONTRACT_ADDRESS;
+        const config = await ConfigService.getConfig();
+        const rpcUrl = config.rpcUrl;
+        const contractAddress = config.contracts.multisig;
 
         if (!rpcUrl || !contractAddress) {
             console.warn("Missing RPC URL or Contract Address");
@@ -215,13 +217,13 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES
         if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
         const proposal = propRes.rows[0];
 
-        // 1. Get MultiSig Info
-        const multisigAddress = process.env.MULTISIG_CONTRACT_ADDRESS;
-        const chainId = parseInt(process.env.CHAIN_ID || "97");
+        // 1. Get MultiSig Info & Authoritative Config
+        const config = await ConfigService.getConfig();
+        const multisigAddress = config.contracts.multisig;
+        const chainId = Number(config.chainId);
 
         // 2. Load MultiSig Contract to get Version
-        const rpcUrl = process.env.BNB_TESTNET_RPC_URL;
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
         const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
         const artifact = require(artifactPath);
         const contract = new ethers.Contract(multisigAddress, artifact.abi, provider);
@@ -229,7 +231,7 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES
 
         // 3. Construct EIP-712 Data
         // To: DocumentRegistry (usually)
-        const to = process.env.DOCUMENT_REGISTRY_ADDRESS;
+        const to = config.contracts.documentRegistry;
         const value = "0";
         const data = "0x"; // Empty data for now as we just want to register it on-chain
         const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
@@ -277,12 +279,13 @@ router.post("/proposals/:id/submit-on-chain", requirePrivilege({ minRole: ROLES.
         const proposal = propRes.rows[0];
 
         // 1. Send Transaction via Relayer
-        const { provider, signer } = await require("../blockchain/connection").connectBNB();
-        const multisigAddress = process.env.MULTISIG_CONTRACT_ADDRESS;
+        const { signer } = await require("../blockchain/connection").connectBNB();
+        const config = await ConfigService.getConfig();
+        const multisigAddress = config.contracts.multisig;
         const artifact = require("../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
         const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
 
-        const to = process.env.DOCUMENT_REGISTRY_ADDRESS;
+        const to = config.contracts.documentRegistry;
         const value = "0";
         const data = "0x";
         const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);

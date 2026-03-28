@@ -1,19 +1,9 @@
-const express = require('express');
-const router = express.Router();
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
-const crypto = require('crypto');
-const { ethers } = require('ethers');
-const pool = require('../db/index');
-const { generateNonce } = require('../utils/nonce');
+const ConfigService = require('../services/config.service');
 
 const APP_NAME = 'BBSNS';
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = '12h'; 
 const JWT_EXPIRY_SECONDS = 12 * 60 * 60; 
-
-const NOTARY_REGISTRY_ADDRESS = process.env.NOTARY_REGISTRY_ADDRESS;
-const GENESIS_ACTIVATION_ADDRESS = process.env.GENESIS_ACTIVATION_ADDRESS;
 
 // UUID validation helper - prevents Postgres cast errors on invalid session IDs
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,9 +116,11 @@ router.post('/nonce', allowPublic, simpleRateLimiter(5, 60000), async (req, res)
 // GET /auth/system-status - Required for Desktop App startup check
 router.get('/system-status', allowPublic, async (req, res) => {
   try {
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
-    const registry = new ethers.Contract(NOTARY_REGISTRY_ADDRESS, ["function adminCount() view returns (uint256)"], provider);
-    const genesisContract = new ethers.Contract(process.env.GENESIS_ACTIVATION_ADDRESS, ["function activated() view returns (bool)"], provider);
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    
+    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)"], provider);
+    const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], provider);
 
     const [adminCount, activated, dbUserResult] = await Promise.all([
       registry.adminCount(),
@@ -138,7 +130,7 @@ router.get('/system-status', allowPublic, async (req, res) => {
 
     console.log(`[STATUS_DEBUG] activated=${activated}, adminCount=${adminCount}, dbUserCount=${dbUserResult.rows[0].count}`);
     res.json({ 
-      activated, 
+      activated: !!activated, 
       adminCount: Number(adminCount),
       dbUserCount: parseInt(dbUserResult.rows[0].count)
     });
@@ -189,9 +181,10 @@ router.post('/genesis/onboard', allowPublic, simpleRateLimiter(10, 3600000), asy
     console.log(`[ONBOARD_TRACE] Signature Verified OK`);
 
     // 4. On-Chain Strict Validation (Block-Based Temporal Check)
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
-    const registry = new ethers.Contract(NOTARY_REGISTRY_ADDRESS, ["function adminCount() view returns (uint256)", "function getUserRole(address) view returns (uint8)"], provider);
-    const genesisContract = new ethers.Contract(process.env.GENESIS_ACTIVATION_ADDRESS, ["function activated() view returns (bool)", "function activationTimestamp() view returns (uint256)"], provider);
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)", "function getUserRole(address) view returns (uint8)"], provider);
+    const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)", "function activationTimestamp() view returns (uint256)"], provider);
 
     const [adminCount, userRole, activated, activationTime] = await Promise.all([
       registry.adminCount(),
@@ -292,8 +285,9 @@ router.post('/notary/onboard', allowPublic, simpleRateLimiter(5, 3600000), async
     }
 
     // 4. On-Chain Check (role == NOTARY (2))
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
-    const registry = new ethers.Contract(NOTARY_REGISTRY_ADDRESS, ["function getUserRole(address) view returns (uint8)"], provider);
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)"], provider);
     const liveRole = await registry.getUserRole(normalizedWalletAddress);
 
     if (Number(liveRole) !== 2) {
@@ -362,10 +356,10 @@ router.post('/login', allowPublic, async (req, res) => {
     let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
     // --- PHASE 3E: ADMIN PASSWORD BYPASS & ON-CHAIN VALIDATION ---
-    // Fetch live role from chain to determine if we can skip password
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
-    const notaryRegistry = new ethers.Contract(process.env.NOTARY_REGISTRY_ADDRESS, ["function getUserRole(address) view returns (uint8)"], provider);
-    const liveRoleValue = await notaryRegistry.getUserRole(normalizedWalletAddress);
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)"], provider);
+    let liveRoleValue = await notaryRegistry.getUserRole(normalizedWalletAddress);
 
     const isAdmin = Number(liveRoleValue) === 3;
 
@@ -396,22 +390,23 @@ router.post('/login', allowPublic, async (req, res) => {
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
 
     // 4. On-Chain Authority Derivation (Zero-Trust)
-    let liveRole, isBanned, snapshotBlock, snapshotChainId, adminCount;
+    let isBanned, snapshotBlock, snapshotChainId, adminCount;
     try {
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+      const config = await ConfigService.getConfig();
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       const notaryRegistryAbi = [
         "function getUserRole(address) view returns (uint8)",
         "function isBanned(address) view returns (bool)",
         "function adminCount() view returns (uint256)"
       ];
-      const notaryRegistry = new ethers.Contract(process.env.NOTARY_REGISTRY_ADDRESS, notaryRegistryAbi, provider);
+      const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
       const network = await provider.getNetwork();
       snapshotChainId = Number(network.chainId);
 
       // Verify we are on the correct network (extra safety check)
-      if (String(snapshotChainId) !== String(process.env.CHAIN_ID)) {
-        console.error(`[LOGIN_CRITICAL] Network mismatch during login. Config: ${process.env.CHAIN_ID}, Detected: ${snapshotChainId}`);
+      if (String(snapshotChainId) !== String(config.chainId)) {
+        console.error(`[LOGIN_CRITICAL] Network mismatch during login. SSoT: ${config.chainId}, Detected: ${snapshotChainId}`);
         return res.status(503).json({ error: 'Service Unavailable: Network Configuration Mismatch' });
       }
 
@@ -685,9 +680,10 @@ router.post('/remote/authorize', allowPublic, requireSystemActivated, simpleRate
     // ZERO-TRUST ON-CHAIN VERIFICATION
     let liveRole = 0;
     try {
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+      const config = await ConfigService.getConfig();
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       const notaryRegistryAbi = ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"];
-      const notaryRegistry = new ethers.Contract(process.env.NOTARY_REGISTRY_ADDRESS, notaryRegistryAbi, provider);
+      const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
       const [roleData, isBanned] = await Promise.all([
         notaryRegistry.getUserRole(normalizedWalletAddress),

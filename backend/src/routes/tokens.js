@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { ethers } = require("ethers");
 const { requirePrivilege, ROLES, RISK_LEVELS } = require("../../middleware/actor");
+const ConfigService = require("../services/config.service");
 
 // Middleware to ensure user is loaded
 // router.use(loadActor) deprecated for zero-trust compliance
@@ -17,9 +18,10 @@ router.get("/balance", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVEL
 
     try {
         const { provider } = await require("../blockchain/connection").connectBNB();
+        const config = await ConfigService.getConfig();
 
-        const ntkAddress = process.env.NTK_CONTRACT_ADDRESS;
-        const ntkrAddress = process.env.NTKR_CONTRACT_ADDRESS;
+        const ntkAddress = config.contracts.ntk;
+        const ntkrAddress = config.contracts.ntkr;
         const abi = ["function balanceOf(address) view returns (uint256)"];
 
         let ntkBalance = "0.0";
@@ -76,13 +78,14 @@ router.get("/onchain/:type/:address", requirePrivilege({ minRole: ROLES.OWNER, r
     const { type, address } = req.params;
 
     try {
-        const provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL);
+        const config = await ConfigService.getConfig();
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
         let contractAddress;
 
         if (type === 'ntk') {
-            contractAddress = process.env.NTK_CONTRACT_ADDRESS;
+            contractAddress = config.contracts.ntk;
         } else if (type === 'ntkr') {
-            contractAddress = process.env.NTKR_CONTRACT_ADDRESS;
+            contractAddress = config.contracts.ntkr;
         } else {
             return res.status(400).json({ error: "Invalid token type" });
         }
@@ -125,10 +128,11 @@ router.post("/deposit", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVE
     }
 
     const pool = require('../db/index');
-    const ntkrAddress = process.env.NTKR_CONTRACT_ADDRESS;
-    if (!ntkrAddress) {
-        console.error("[DEPOSIT] NTKR_CONTRACT_ADDRESS not configured");
-        return res.status(500).json({ error: "Token contract not configured on server." });
+    const config = await ConfigService.getConfig();
+    const ntkrAddress = config.contracts.ntkr;
+    if (!ntkrAddress || ntkrAddress === ethers.ZeroAddress) {
+        console.error("[DEPOSIT] NTKR_CONTRACT_ADDRESS not configured in SSoT");
+        return res.status(500).json({ error: "Token contract not configured on server (SSoT)." });
     }
 
     // --- 0. PRE-CHECK: Has this tx already been processed? ---
@@ -147,7 +151,7 @@ router.post("/deposit", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVE
     let receipt;
     let currentBlock;
     try {
-        provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL);
+        provider = new ethers.JsonRpcProvider(config.rpcUrl);
         receipt = await provider.getTransactionReceipt(txHash);
     } catch (rpcErr) {
         console.error("[DEPOSIT] RPC error fetching receipt:", rpcErr.message);
@@ -293,9 +297,10 @@ router.post("/ntk/mint", requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LE
     const walletAddress = user.address;
 
     try {
-        const provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL);
+        const config = await ConfigService.getConfig();
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
         const privateKey = process.env.BNB_SYSTEM_PRIVATE_KEY;
-        const ntkAddress = process.env.NTK_CONTRACT_ADDRESS;
+        const ntkAddress = config.contracts.ntk;
 
         if (!ntkAddress) {
             return res.status(500).json({ error: "NTK contract not configured." });

@@ -7,15 +7,19 @@
     "test": "cross-env NODE_ENV=test jest",
     "test:coverage": "cross-env NODE_ENV=test jest --coverage",
     "start": "node server.js",
-    "migrate": "node-pg-migrate up"
+    "migrate": "node-pg-migrate up",
+    "deploy:init": "node scripts/deploy-init.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-ec2": "^3.1016.0",
     "@aws-sdk/client-kms": "^3.995.0",
     "@aws-sdk/client-s3": "^3.1015.0",
+    "@aws-sdk/client-ssm": "^3.1016.0",
+    "@aws-sdk/s3-request-presigner": "^3.1016.0",
     "asn1.js": "^5.4.1",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",

@@ -1,26 +1,29 @@
 const app = require("./src/app");
 const { ethers } = require("ethers");
+const ConfigService = require("./src/services/config.service");
 
 const PORT = process.env.PORT || 5000;
 
 async function bootstrap() {
   console.log("🚀 Initializing BBSNS Zero-Trust Backend...");
 
-  // 1. Fail-Fast Chain ID Verification
+  // 1. Authoritative Config Handshake (SSoT)
+  let config;
   try {
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+    config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
     const { chainId } = await provider.getNetwork();
 
     console.log(`   - Network Detected: ${chainId}`);
-    console.log(`   - Server Config:    ${process.env.CHAIN_ID}`);
+    console.log(`   - SSoT Authority:   ${config.chainId}`);
 
-    if (String(chainId) !== String(process.env.CHAIN_ID)) {
-      console.error("❌ CRITICAL: Chain ID Mismatch! Server configured for different network.");
+    if (String(chainId) !== String(config.chainId)) {
+      console.error("❌ CRITICAL: Chain ID Mismatch! Database authority differs from Network context.");
       process.exit(1);
     }
-    console.log("   ✅ Network Context Verified.");
+    console.log("   ✅ SSoT Context Verified.");
   } catch (err) {
-    console.error("❌ CRITICAL: Could not connect to RPC or verify Network Context.");
+    console.error("❌ CRITICAL: Could not connect to RPC or verify Configuration SSoT.");
     console.error(err.message);
     process.exit(1);
   }
@@ -85,8 +88,9 @@ async function bootstrap() {
     const checkActivation = async () => {
       if (global.systemActivated) return;
       try {
-        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
-        const genesisContract = new ethers.Contract(process.env.GENESIS_ACTIVATION_ADDRESS, ["function activated() view returns (bool)"], provider);
+        const config = await ConfigService.getConfig();
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], provider);
         const activated = await genesisContract.activated();
         if (activated) {
           global.systemActivated = true;

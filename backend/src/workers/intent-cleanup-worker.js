@@ -13,7 +13,7 @@ async function runIntentCleanup() {
   try {
     // Find all intents that have been awaiting payment past their expiry
     const expired = await pool.query(
-      `SELECT id, filepath FROM upload_intents
+      `SELECT id, storage_key FROM upload_intents
        WHERE status = 'awaiting_payment' AND expires_at < NOW()`
     );
 
@@ -31,17 +31,17 @@ async function runIntentCleanup() {
         }
       }
 
-      // 2. Delete local temp file if it exists
+      // 2. Delete local temp file if it exists (for hybrid support if storage_key is a path)
       try {
-        if (intent.filepath && fs.existsSync(intent.filepath)) {
-          fs.unlinkSync(intent.filepath);
-          console.log(`[INTENT_CLEANUP] Deleted temp file: ${intent.filepath}`);
+        if (intent.storage_key && fs.existsSync(intent.storage_key)) {
+          fs.unlinkSync(intent.storage_key);
+          console.log(`[INTENT_CLEANUP] Deleted temp file: ${intent.storage_key}`);
         }
       } catch (fileErr) {
         console.error(`[INTENT_CLEANUP] Local delete failed for intent ${intent.id}: ${fileErr.message}`);
       }
 
-      // 2. Mark intent as expired
+      // 3. Mark intent as expired
       await pool.query(
         `UPDATE upload_intents SET status = 'expired' WHERE id = $1`,
         [intent.id]

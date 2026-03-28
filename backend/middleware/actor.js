@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../src/db/index.js');
+const ConfigService = require('../src/services/config.service');
 
 const ROLES = {
   NONE: 0,
@@ -110,7 +111,8 @@ function requirePrivilege(config) {
     const { address, snapshotBlock, snapshotChainId, issuedAt } = decoded;
 
     // 3. Chain ID Integrity (Server-Authoritative)
-    if (String(snapshotChainId) !== String(process.env.CHAIN_ID)) {
+    const config = await ConfigService.getConfig();
+    if (String(snapshotChainId) !== String(config.chainId)) {
       return res.status(426).json({ error: 'Upgrade Required: Incorrect Network Context' });
     }
 
@@ -118,7 +120,7 @@ function requirePrivilege(config) {
     let currentBlock;
     try {
       const { ethers } = require('ethers');
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       currentBlock = await provider.getBlockNumber();
 
       // Future-dated check (Tolerance: 10 blocks)
@@ -155,12 +157,12 @@ function requirePrivilege(config) {
     if (needsLiveRefresh) {
       try {
         const { ethers } = require('ethers');
-        const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
         const notaryRegistryAbi = [
           "function getUserRole(address) view returns (uint8)",
           "function isBanned(address) view returns (bool)"
         ];
-        const notaryRegistry = new ethers.Contract(process.env.NOTARY_REGISTRY_ADDRESS, notaryRegistryAbi, provider);
+        const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
         const [liveRole, isBanned] = await Promise.all([
           notaryRegistry.getUserRole(address),

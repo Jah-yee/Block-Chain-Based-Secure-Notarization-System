@@ -1,6 +1,7 @@
 const pool = require("../db/index");
 const { ethers } = require("ethers");
 const lockService = require("../services/lock.service");
+const ConfigService = require("../services/config.service");
 const { Logger, SIGNALS, ERROR_TYPES, ERROR_STAGES } = require("../services/logger.service");
 const logger = new Logger('RECONCILIATION_WORKER');
 require("dotenv").config();
@@ -62,7 +63,7 @@ async function reconcile() {
 
         // --- PHASE 1: Reconcile Notarization Actions (Hardened) ---
         const docResult = await pool.query(`
-            SELECT id, idempotency_key, tx_hash, tx_status, submission_state, processing_started_at, storage_key, filepath, correlation_id
+            SELECT id, idempotency_key, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
             FROM documents 
             WHERE (tx_status IN ('initiated', 'pending') OR submission_state = 'submitted_to_blockchain')
             AND chain_confirmed = false
@@ -175,8 +176,9 @@ async function reconcile() {
 
         console.log(`🔎 Found ${userResult.rows.length} users requiring hardened reconciliation.`);
 
+        const config = await ConfigService.getConfig();
         const identityABI = ["function getUserRole(address) view returns (uint8)"];
-        const identityRegistry = new ethers.Contract(process.env.NOTARY_REGISTRY_ADDRESS, identityABI, provider);
+        const identityRegistry = new ethers.Contract(config.contracts.notaryRegistry, identityABI, provider);
 
         for (const user of userResult.rows) {
             try {
@@ -253,24 +255,24 @@ async function cleanupStorage(doc) {
     if (doc.storage_key) {
         try {
             const storageService = require('../services/storage.service');
+            // Try cloud delete first
             await storageService.deleteFile(doc.storage_key);
             deleteSuccess = true;
         } catch (s3Err) {
-            console.error(`   ⚠️ S3 Cleanup Failed for Document ${doc.id}: ${s3Err.message}`);
-        }
-    } else if (doc.filepath) {
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            let absPath = doc.filepath;
-            if (!path.isAbsolute(absPath)) absPath = path.join(__dirname, '../../', absPath);
-            if (fs.existsSync(absPath)) {
-                fs.unlinkSync(absPath);
-                console.log(`   🗑️ Local file deleted for Document ${doc.id}`);
+            // If cloud delete fails, try local unlink (hybrid support)
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                let absPath = doc.storage_key;
+                if (!path.isAbsolute(absPath)) absPath = path.join(__dirname, '../../', absPath);
+                if (fs.existsSync(absPath)) {
+                    fs.unlinkSync(absPath);
+                    console.log(`   🗑️ Local file deleted for Document ${doc.id}`);
+                    deleteSuccess = true;
+                }
+            } catch (fsErr) {
+                console.error(`   ⚠️ Local Cleanup Failed for Document ${doc.id}: ${fsErr.message}`);
             }
-            deleteSuccess = true;
-        } catch (fsErr) {
-            console.error(`   ⚠️ Local Cleanup Failed for Document ${doc.id}: ${fsErr.message}`);
         }
     }
 

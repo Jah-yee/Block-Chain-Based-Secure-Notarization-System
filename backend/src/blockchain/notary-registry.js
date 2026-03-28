@@ -1,13 +1,15 @@
 const { ethers } = require("ethers");
 const { connectBNB } = require("./connection");
+const ConfigService = require("../services/config.service");
 
 const attachNotaryRegistry = async () => {
     const { signer, provider } = await connectBNB();
+    const config = await ConfigService.getConfig();
 
-    const registryAddress = process.env.NOTARY_REGISTRY_ADDRESS;
+    const registryAddress = config.contracts.notaryRegistry;
     console.log(`[BLOCKCHAIN] Connecting to NotaryRegistry at: ${registryAddress}`);
-    if (!registryAddress) {
-        throw new Error("NOTARY_REGISTRY_ADDRESS not configured in .env");
+    if (!registryAddress || registryAddress === ethers.ZeroAddress) {
+        throw new Error("NOTARY_REGISTRY_ADDRESS not configured in SSoT");
     }
 
     const abi = [

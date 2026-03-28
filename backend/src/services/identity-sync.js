@@ -1,6 +1,5 @@
 const pool = require('../db/index.js');
-const { registerNotaryOnChain } = require('../blockchain/notary-registry.js');
-const { connectBNB } = require("../blockchain/connection.js");
+const { registerNotaryOnChain, attachNotaryRegistry } = require('../blockchain/notary-registry.js');
 
 /**
  * Triggers the on-chain registration for a KYC-verified user.
@@ -8,7 +7,7 @@ const { connectBNB } = require("../blockchain/connection.js");
  */
 async function triggerOnChainRegistration(userId) {
   try {
-    const { provider, contract } = await connectBNB();
+    const { contract } = await attachNotaryRegistry();
 
     // FETCH USER
     const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);

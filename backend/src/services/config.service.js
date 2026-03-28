@@ -206,8 +206,9 @@ class ConfigService {
       }
     }
 
-    if (Number(config.chainId) !== 97 && strict) {
-      throw this._createError(CONFIG_ERRORS.INVALID_CHAIN, `Expected 97, but snapshot has ${config.chainId}`);
+    const expectedChainId = parseInt(process.env.CHAIN_ID || "97");
+    if (Number(config.chainId) !== expectedChainId && strict) {
+      throw this._createError(CONFIG_ERRORS.INVALID_CHAIN, `Expected ${expectedChainId}, but snapshot has ${config.chainId}`);
     }
 
     const criticalContracts = ['notaryRegistry', 'documentRegistry', 'ntkr', 'ntk'];

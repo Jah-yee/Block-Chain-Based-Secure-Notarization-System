@@ -27,13 +27,13 @@ if (process.env.NODE_ENV !== 'production' || corsOrigins.length === 0) {
     'http://localhost:8080',
     'http://localhost:8081',
     'http://127.0.0.1:3000',
-    'http://127.0.0.1:3002',
-    'http://13.233.236.240:3000',
-    'http://13.233.236.240:5000',
-    'https://app.bbsns.xyz',
-    'https://auth.bbsns.xyz',
-    'https://bbsns.xyz'
+    'http://127.0.0.1:3002'
   );
+
+  // Add Dynamic Production Origins from Environment
+  if (process.env.WEB_APP_URL) corsOrigins.push(process.env.WEB_APP_URL);
+  if (process.env.REMOTE_AUTH_URL) corsOrigins.push(process.env.REMOTE_AUTH_URL);
+  if (process.env.ADMIN_PORTAL_URL) corsOrigins.push(process.env.ADMIN_PORTAL_URL);
 }
 
 app.use(cors({

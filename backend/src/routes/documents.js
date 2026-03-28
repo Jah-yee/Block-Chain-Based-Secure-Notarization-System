@@ -40,11 +40,10 @@ function sanitizeDocument(doc) {
     owner_wallet: doc.owner_wallet || null,
     filename: doc.filename,
     file_hash: doc.file_hash,
-    // Dual-Field Support: Prefer storage_key, fallback to filepath
+    // Dual-Field Support: Use storage_key exclusively (per latest schema)
     storage_key: doc.storage_key || null,
-    filepath: doc.filepath || null, 
     storage_state: doc.storage_state || 'STORED',
-    type: (doc.storage_key || doc.filepath || '').split('.').pop() || null,
+    type: (doc.storage_key || '').split('.').pop() || null,
     status: derivedStatus,
     submission_state: doc.submission_state,
     chain_confirmed: doc.chain_confirmed,
@@ -137,10 +136,10 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
     try {
       const intentRes = await pool.query(
         `INSERT INTO upload_intents
-           (id, user_id, wallet_address, file_hash, filename, filepath, storage_key, category, amount, amount_wei, storage_state, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW() + INTERVAL '1 hour')
+           (id, user_id, wallet_address, file_hash, filename, storage_key, category, amount, amount_wei, storage_state, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '1 hour')
          RETURNING id, expires_at`,
-        [intentId, actor.id, walletAddress.toLowerCase(), fileHash, filename, filepath, storage_key, category, cost, costWei, storage_key ? 'UPLOADED' : 'STORED']
+        [intentId, actor.id, walletAddress.toLowerCase(), fileHash, filename, storage_key || filepath, category, cost, costWei, storage_key ? 'UPLOADED' : 'STORED']
       );
       intent = intentRes.rows[0];
     } catch (dbErr) {
@@ -153,13 +152,16 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
 
     console.log(`[INITIATE] intent=${intent.id} user=${actor.id} hash=${fileHash} mode=${storage_key ? 'S3' : 'LOCAL'}`);
 
+    // AUTHORITATIVE CONFIG RESOLUTION
+    const config = await ConfigService.getConfig();
+
     res.status(201).json({
       intent_id:         intent.id,
       intent_id_bytes32: uuidToBytes32(intent.id),
       file_hash:         fileHash,
       amount:            cost,
       amount_wei:        costWei,
-      ntkr_contract:     process.env.NTKR_CONTRACT_ADDRESS,
+      ntkr_contract:     config.contracts.ntkr,
       expires_at:        intent.expires_at,
       storage_mode:      storage_key ? 'S3' : 'LOCAL'
     });
@@ -218,7 +220,8 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
     if (txUsed.rows.length > 0) return res.status(409).json({ error: 'Transaction hash already used.' });
 
     // Guard 5-8: On-chain verification
-    const provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL || process.env.RPC_URL);
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
     let receipt;
     try {
       receipt = await provider.getTransactionReceipt(tx_hash);
@@ -237,7 +240,7 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
     }
 
     // Guard 6: Sent to NTKR contract
-    const ntkrAddr = (process.env.NTKR_CONTRACT_ADDRESS || '').toLowerCase();
+    const ntkrAddr = (config.contracts.ntkr || '').toLowerCase();
     if (!receipt.to || receipt.to.toLowerCase() !== ntkrAddr) {
       return res.status(400).json({ error: 'Transaction not sent to NTKR contract.', expected: ntkrAddr, got: receipt.to });
     }
@@ -273,9 +276,9 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
 
     const docRes = await client.query(
       `INSERT INTO documents
-         (user_id, filename, filepath, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
-       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,NOW(),NOW(),false) RETURNING *`,
-      [intent.user_id, intent.filename, intent.filepath, intent.storage_key, intent.file_hash, intent.amount, tx_hash, intent.storage_key ? 'STORED' : 'STORED']
+         (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,NOW(),NOW(),false) RETURNING *`,
+      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, 'STORED']
     );
     const newDoc = docRes.rows[0];
 
@@ -410,16 +413,17 @@ router.get('/:id/signature-payload', requirePrivilege({ minRole: ROLES.NOTARY, r
       return res.status(400).json({ error: 'Active notary wallet not found in session' });
     }
 
-    // 1. Fetch Protocol Nonce from Contract
+    // 1. Fetch Protocol Nonce from Contract & Authoritative Config
     const { contract } = await connectBNB();
+    const config = await ConfigService.getConfig();
     const nonce = await contract.nonces(notaryWallet);
 
     // 2. Prepare EIP-712 Payload
     const domain = {
       name: "BBSNS_Protocol",
       version: "1",
-      chainId: Number(process.env.CHAIN_ID || 97),
-      verifyingContract: process.env.DOCUMENT_REGISTRY_ADDRESS
+      chainId: Number(config.chainId),
+      verifyingContract: config.contracts.documentRegistry
     };
 
     const types = {

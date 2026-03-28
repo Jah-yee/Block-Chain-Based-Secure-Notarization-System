@@ -1,4 +1,5 @@
 const { ethers } = require("ethers");
+const ConfigService = require("../services/config.service");
 require("dotenv").config({ override: true });
 
 let cachedProvider = null;
@@ -18,18 +19,23 @@ const connectBNB = async () => {
         return { provider: cachedProvider, signer: cachedSigner, contract: cachedContract };
     }
 
-    const registryAddress = process.env.DOCUMENT_REGISTRY_ADDRESS;
-    if (!registryAddress) {
-        throw new Error("FATAL: DOCUMENT_REGISTRY_ADDRESS not configured");
+    // 🛡️ Resolve Authoritative Config from SSoT
+    const config = await ConfigService.getConfig();
+    const registryAddress = config.contracts.documentRegistry;
+
+    if (!registryAddress || registryAddress === ethers.ZeroAddress) {
+        throw new Error("FATAL: DOCUMENT_REGISTRY_ADDRESS not configured in SSoT");
     }
 
-    // 2. Resolve RPC Endpoints
-    const rpcUrls = (process.env.BNB_RPC_URLS || process.env.BNB_TESTNET_RPC_URL || process.env.RPC_URL || "")
-        .split(',')
-        .filter(url => url.trim().length > 0);
+    // 2. Resolve RPC Endpoints (Prioritize Config, Fallback to Env for bootstrap)
+    const rpcUrls = [
+        config.rpcUrl,
+        process.env.BNB_TESTNET_RPC_URL,
+        process.env.RPC_URL
+    ].filter(url => url && url.trim().length > 0);
 
     if (rpcUrls.length === 0) {
-        throw new Error("FATAL: No blockchain RPC URLs configured");
+        throw new Error("FATAL: No blockchain RPC URLs found in SSoT or Env");
     }
 
     let provider = null;
