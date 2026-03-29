@@ -64,7 +64,7 @@ export function DashboardHeader({ onMenuClick }: DashboardHeaderProps) {
                     <AvatarFallback>{user?.name?.slice(0, 2).toUpperCase() || "JD"}</AvatarFallback>
                   </Avatar>
                   <div className="hidden md:flex flex-col items-start text-xs">
-                    <span className="font-semibold">{user?.username || "Guest"}</span>
+                    <span className="font-semibold">{user?.name || "Guest"}</span>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
