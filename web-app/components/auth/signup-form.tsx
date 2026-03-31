@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { Wallet, Eye, EyeOff, UploadCloud, CheckCircle2, FileText, ArrowLeft, ArrowRight, AlertCircle } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 
 type Step = 0 | 1 | 2 | 3
 
@@ -379,8 +380,35 @@ export function SignUpForm() {
   const handleWalletConnect = async () => {
     console.log("[WALLET] Starting connection process...");
 
+    // Check for mobile device
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    
     if (!window.ethereum) {
-      console.error("[WALLET] MetaMask not found in window.ethereum");
+      console.log("[WALLET] window.ethereum not found. User on mobile:", isMobile);
+      
+      if (isMobile) {
+        // Force MetaMask app to open via custom scheme and universal link fallback
+        const currentUrl = window.location.href.replace(/^https?:\/\//, '');
+        const metamaskAppDeepLink = `https://metamask.app.link/dapp/${currentUrl}`;
+        const metamaskCustomScheme = `metamask://dapp/${currentUrl}`;
+        
+        toast({
+          title: "Connecting to MetaMask...",
+          description: "If the app doesn't open automatically, please tap the link to open MetaMask.",
+        });
+        
+        // Try Universal Link first, then Custom Scheme
+        setTimeout(() => {
+            window.location.href = metamaskAppDeepLink;
+            // Fallback for some browsers that block universal links
+            setTimeout(() => {
+                window.location.href = metamaskCustomScheme;
+            }, 1000);
+        }, 500);
+        return;
+      }
+
+      console.error("[WALLET] MetaMask not found in window.ethereum (Desktop)");
       toast({
         title: "MetaMask Not Found",
         description: "Please install MetaMask browser extension and refresh this page.",
@@ -395,8 +423,9 @@ export function SignUpForm() {
       const { ethers } = await import("ethers");
       const provider = new ethers.BrowserProvider(window.ethereum as any);
 
-      // BNB Testnet Configuration
-      const BNB_TESTNET_CHAIN_ID = '0x61'; // 97 in decimal
+      // BNB Testnet Configuration (Generalized)
+      const targetChainInt = 97; // Fallback or fetch from SSoT
+      const BNB_TESTNET_CHAIN_ID = `0x${targetChainInt.toString(16)}`; 
       const BNB_TESTNET_CONFIG = {
         chainId: BNB_TESTNET_CHAIN_ID,
         chainName: 'BNB Smart Chain Testnet',
@@ -745,21 +774,10 @@ export function SignUpForm() {
 
       // 1. Get Nonce (Strict Replay Protection)
       console.log("[SIGNUP] Fetching nonce for address:", walletAddress);
-      const nonceRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/auth/nonce`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { message_template } = await apiClient.post('/auth/nonce', {
           wallet_address: walletAddress,
           action: 'register'
-        }),
       });
-
-      if (!nonceRes.ok) {
-        const errData = await nonceRes.json();
-        throw new Error(errData.error || "Failed to initialize secure registration session.");
-      }
-
-      const { message_template } = await nonceRes.json();
       if (!message_template) throw new Error("Invalid server response (missing auth template)");
 
       // 2. Sign Message
@@ -783,10 +801,8 @@ export function SignUpForm() {
 
     } catch (sigErr: any) {
       console.error("[SIGNUP] Signature/Nonce failed:", sigErr)
-
       let errorMsg = sigErr.message || "Failed to sign registration challenge.";
       if (sigErr.code === 4001) errorMsg = "Signature request was rejected in MetaMask.";
-
       toast({
         title: "Security & Signature Error",
         description: errorMsg,
@@ -797,26 +813,19 @@ export function SignUpForm() {
     }
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/users/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.fullName,
-          email: formData.email.toLowerCase().trim(),
-          password: formData.password,
-          nationalId: formData.nationalIdText,
-          walletAddress: localStorage.getItem("connectedWallet") || "0x0000000000000000000000000000000000000000",
-          faceDescriptor: formData.faceDescriptor,
-          signature
-          // Message is no longer sent; backend reconstructs it from nonce state
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || "Registration failed")
+      const signupForm = new FormData();
+      signupForm.append('fullName', formData.fullName);
+      signupForm.append('email', formData.email.toLowerCase().trim());
+      signupForm.append('password', formData.password);
+      signupForm.append('nationalIdText', formData.nationalIdText);
+      if (formData.nationalIdFile) {
+        signupForm.append('nationalIdFile', formData.nationalIdFile);
       }
+      signupForm.append('faceDescriptor', JSON.stringify(formData.faceDescriptor));
+      signupForm.append('walletAddress', localStorage.getItem("connectedWallet") || "");
+      signupForm.append('signature', signature);
+
+      await apiClient.post('/users/register', signupForm);
 
       toast({
         title: "Account Created",

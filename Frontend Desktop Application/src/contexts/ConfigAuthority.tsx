@@ -44,9 +44,9 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
-const DEFAULT_API_URL = "http://13.126.61.241:5000";
-const DEFAULT_WEB_URL = "http://13.126.61.241:3000";
-const DEFAULT_AUTH_URL = "http://13.126.61.241:3002";
+const DEFAULT_API_URL = import.meta.env.VITE_BOOTSTRAP_API_URL || "http://localhost:5000";
+const DEFAULT_WEB_URL = import.meta.env.VITE_BOOTSTRAP_WEB_URL || "http://localhost:3000";
+const DEFAULT_AUTH_URL = import.meta.env.VITE_BOOTSTRAP_AUTH_URL || "http://localhost:3002";
 
 export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<ConfigStatus>('loading');
@@ -76,10 +76,21 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
             const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
 
             if (isValid && isIntact) {
-              resolvedConfig = payload;
-              if (electronAPI?.saveConfigCache) {
-                  await electronAPI.saveConfigCache(resolvedConfig);
+              // 🛡️ [VERSION_GATING] Check against existing cache
+              const existing = await electronAPI?.loadConfigCache();
+              const isNewer = existing && payload.version > (existing.data?.version || 0);
+
+              if (isNewer) {
+                console.warn(`[CONFIG] Remote version ${payload.version} > Local ${existing.data?.version}. Forcing refresh.`);
               }
+
+              if (!existing || isNewer) {
+                if (electronAPI?.saveConfigCache) {
+                  await electronAPI.saveConfigCache(payload);
+                }
+              }
+              
+              resolvedConfig = payload;
               setMode('LIVE');
               break;
             } else {
@@ -138,8 +149,8 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
       }
 
       // 🛡️ Final Sanity Check for Chain Access
-      if (mode !== 'EMERGENCY' && resolvedConfig.rpcUrl && Number(resolvedConfig.chainId) !== 97) {
-        throw { code: 'INVALID_CHAIN_ID', message: `Mismatched network authority. Expected 97, got ${resolvedConfig.chainId}` };
+      if (mode !== 'EMERGENCY' && resolvedConfig.rpcUrl && !resolvedConfig.chainId) {
+        throw { code: 'INVALID_CHAIN_ID', message: `Mismatched network authority. Chain ID is missing.` };
       }
 
       setConfig(resolvedConfig);

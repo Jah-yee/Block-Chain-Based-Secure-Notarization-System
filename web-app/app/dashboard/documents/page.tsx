@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { FileText, Calendar, Hash, Eye, CheckCircle, XCircle, Clock, ExternalLink, Download } from "lucide-react";
+import { apiClient } from "@/lib/api-client"
 import { toast } from "sonner";
 import { generateCertificatePDF } from "@/lib/pdf-utils";
 
@@ -32,17 +33,8 @@ export default function DocumentsPage() {
     const loadDocuments = async () => {
         setLoading(true);
         try {
-            const token = localStorage.getItem("bbsns_token");
-            const response = await fetch("http://localhost:5000/api/documents", {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-
-            if (!response.ok) throw new Error("Failed to load documents");
-
-            const data = await response.json();
-            setDocuments(data);
+            const data = await apiClient.get('/api/documents')
+            setDocuments(data || [])
         } catch (err: any) {
             console.error(err);
             toast.error("Failed to load documents");
@@ -315,14 +307,8 @@ export default function DocumentsPage() {
                                 <button
                                     onClick={async () => {
                                         try {
-                                            const token = localStorage.getItem("bbsns_token");
-                                            const response = await fetch(`http://localhost:5000/api/documents/${selectedDocument.id}/preview`, {
-                                                headers: { Authorization: `Bearer ${token}` }
-                                            });
-                                            if (!response.ok) throw new Error("Failed to load preview");
-
-                                            const blob = await response.blob();
-                                            const url = window.URL.createObjectURL(blob);
+                                            const data = await apiClient.get(`/api/documents/${selectedDocument.id}/preview`, { responseType: 'blob' });
+                                            const url = window.URL.createObjectURL(data);
                                             window.open(url, '_blank');
 
                                             // Clean up URL object after a delay to allow browser to load it

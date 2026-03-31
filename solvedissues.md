@@ -88,6 +88,16 @@ This document lists all system remediations performed after cloud integration to
 - **Tries**: 1
 - **Final Solution**: Implemented an **NGINX Mock Endpoint** to serve a dummy script, suppressing the 404 without a high-risk Next.js rebuild.
 
+### 10. Notary Registration: Premature Wallet Signing & 500 Error
+- **The Issue**: Notaries were prompted for wallet signatures in Step 1, and the backend crashed (500) if no wallet was connected.
+- **Affected Files**: `backend/src/routes/notaries.js`, `Web-App/app/register-notary/page.tsx`.
+- **Requirement**: A compliant 3-step registration flow (Info -> Liveness -> Binding).
+- **Affecting Factors**: Eager `eth_requestAccounts` call in Step 1 and mandatory `walletAddress` validation on the backend.
+- **Tries**: 1
+- **Final Solution**: Implemented **Deferred Wallet Binding**:
+    - **Backend**: Modified `/applications/public` to support `NULL` wallet addresses in Phase 1 and enabled late-binding in Phase 3. Fixed column naming discrepancies (`user_id` removed, `national_id` renamed to `national_id_number`).
+    - **Frontend**: Source refactored to move MetaMask interactions to Step 3. (Live on backend; Frontend requires re-deployment).
+
 ---
 
 ## Known Production Issues (Under Investigation)

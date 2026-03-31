@@ -7,6 +7,20 @@ const correlationMiddleware = require('./middleware/correlation');
 
 const app = express();
 
+// ✅ Health Check Route (Standard & API prefixed)
+// Defined early to avoid middleware/router interference
+// allowPublic must be imported from middleware/actor
+const { allowPublic, requirePrivilege, ROLES, RISK_LEVELS } = require('../middleware/actor');
+
+app.get("/health", allowPublic, (req, res) => {
+	res.json({
+		status: "UP",
+		timestamp: new Date().toISOString(),
+		environment: process.env.NODE_ENV || "development",
+		version: "1.2.1"
+	});
+});
+
 // --- PHASE 7: OBSERVABILITY (CORRELATION) ---
 app.use(correlationMiddleware);
 
@@ -80,7 +94,7 @@ app.use('/notaries', notaryRoutes);
 app.use('/system', systemRoutes);
 
 // Special Legacy Aliases (Now handled by sub-routers where possible)
-const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../middleware/actor');
+// (Imports moved to top for health check)
 
 // Desktop App Compatibility Alias
 app.get('/me', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), (req, res) => {
@@ -109,3 +123,13 @@ const { startReputationWorker } = require('./workers/reputation-worker');
 startReputationWorker();
 
 module.exports = app;
+
+// 🛡️ Global Error Handler
+app.use((err, req, res, next) => {
+    console.error('[GLOBAL_ERROR]', err);
+    res.status(err.status || 500).json({
+        error: 'Internal Server Error',
+        message: err.message,
+        stack: err.stack
+    });
+});

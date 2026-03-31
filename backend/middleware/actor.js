@@ -4,7 +4,7 @@ const ConfigService = require('../src/services/config.service');
 
 const ROLES = {
   NONE: 0,
-  OWNER: 0, // Owners do not require on-chain roles (Clarified by user)
+  OWNER: 1,
   NOTARY: 2,
   ADMIN: 3
 };
@@ -147,6 +147,13 @@ function requirePrivilege(config) {
 
       // Allow RISK_LOW if fresh enough
       req.actor = { id: decoded.id, address, role: normalizeRole(decoded.role), isDegraded: true };
+      
+      if (req.actor.role < minRole) {
+        return res.status(403).json({
+          error: 'Forbidden: Insufficient privileges',
+          detail: `Role level ${minRole} required. Current level: ${req.actor.role}`
+        });
+      }
       return next();
     }
 
@@ -197,6 +204,14 @@ function requirePrivilege(config) {
         }
 
         req.actor = { id: decoded.id, address, role: Number(liveRole), verifiedAt: Date.now(), identityState };
+        
+        // Final Authorization Guard
+        if (req.actor.role < minRole) {
+          return res.status(403).json({
+            error: 'Forbidden: Insufficient privileges',
+            detail: `Role level ${minRole} required. Current level: ${req.actor.role}`
+          });
+        }
         return next();
       } catch (err) {
         console.error(`[AUTH_ERROR] Live check failed for ${address}:`, err.message);
@@ -204,8 +219,14 @@ function requirePrivilege(config) {
       }
     }
 
-    // 7. Cache-Based Evaluation (Fresh RISK_LOW only)
-    req.actor = { id: decoded.id, address, role: normalizeRole(decoded.role), verifiedAt: issuedAt };
+    // 8. Eligibility Enforcement
+    if (req.actor.role < minRole) {
+      return res.status(403).json({
+        error: 'Forbidden: Insufficient privileges',
+        detail: `Role level ${minRole} required. Current level: ${req.actor.role}`
+      });
+    }
+
     return next();
   };
   Object.defineProperty(middleware, 'name', { value: 'requirePrivilege' });

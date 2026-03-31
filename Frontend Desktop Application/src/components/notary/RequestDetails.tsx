@@ -5,7 +5,7 @@ import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
 
 interface RequestDetailsProps {
     requestId: string;

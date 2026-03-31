@@ -56,6 +56,7 @@
             "concurrently": "^9.2.1",
             "electron": "^38.8.1",
             "electron-builder": "^26.0.12",
+            "electron-packager": "^17.1.2",
             "vite": "^6.3.5",
             "wait-on": "^9.0.3"
       },
@@ -69,22 +70,34 @@
             "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3001 && electron .\"",
             "dist": "npm run build && electron-builder",
             "dist-win": "npm run build && electron-builder --win",
-            "dist-linux": "npm run build && electron-builder --linux"
+            "dist-linux": "npm run build && electron-builder --linux",
+            "package-win": "npm run build && electron-packager . \"BBSNS Desktop Application\" --platform=win32 --arch=x64 --out=dist/portable --overwrite --icon=assets/icon.ico --ignore=\"(dist|\\.git|\\.vscode|.electron-builder-cache|node_modules_old)\" "
       },
       "build": {
+            "extraResources": [
+                  {
+                        "from": "public/config.json",
+                        "to": "config.json"
+                  }
+            ],
             "appId": "com.bbsns.notarization",
             "productName": "BBSNS Desktop Application",
             "directories": {
                   "output": "dist"
             },
             "files": [
-                  "dist/**/*",
+                  "build/**/*",
                   "main.js",
-                  "backend.jar",
-                  "node_modules/**/*"
+                  "preload.js",
+                  "Remote Auth/dist_final/**/*",
+                  "node_modules/**/*",
+                  "!public/config.json"
             ],
             "win": {
-                  "target": "nsis",
+                  "target": [
+                        "nsis",
+                        "portable"
+                  ],
                   "icon": "assets/icon.ico"
             },
             "linux": {

@@ -1,5 +1,8 @@
 const app = require("./src/app");
 const { ethers } = require("ethers");
+
+// 🛡️ Global BigInt Serialization Policy
+BigInt.prototype.toJSON = function() { return this.toString(); };
 const ConfigService = require("./src/services/config.service");
 
 const PORT = process.env.PORT || 5000;

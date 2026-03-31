@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { User, Shield, Globe, ArrowRight, CheckCircle, AlertCircle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Progress } from "../ui/progress";
 import { Alert, AlertDescription } from "../ui/alert";
+import { useConfig } from "../../contexts/ConfigAuthority";
 
 interface NotaryLoginProps {
   onLogin: () => void;
@@ -137,7 +138,10 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       setSessionId(sessionId);
       setAuthStatus("awaiting_browser");
 
-      const webAppUrl = `http://localhost:3002/?sessionId=${sessionId}`;
+      const { config } = useConfig();
+      if (!config) throw new Error("Configuration not loaded");
+
+      const webAppUrl = `${config.remoteAuthUrl}/?sessionId=${sessionId}`;
       if (window.electronAPI) {
         // @ts-ignore
         window.electronAPI.openExternal(webAppUrl);

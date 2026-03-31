@@ -16,12 +16,14 @@ import {
   Clock,
   Terminal
 } from "lucide-react";
+import { SystemLogs } from "./SystemLogs";
 import { Button } from "../ui/button";
+import { useConfig } from "../../contexts/ConfigAuthority";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../ui/dialog";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
 import { ethers } from "ethers";
 
 // Simple ABI for decoding Multi-Sig and Target contract actions
@@ -188,7 +190,8 @@ export function MultiSigApprovals() {
       if (!window.ethereum) {
         // --- REMOTE SIGNING FLOW ---
         const session = await api.initRemoteMultiSigSession(tx.index);
-        const link = `http://localhost:3000/governance/multisig/remote-confirm?sessionId=${session.sessionId}`; // Use env var in real app
+        const { config } = useConfig();
+        const link = `${config?.webAppUrl}/governance/multisig/remote-confirm?sessionId=${session.sessionId}`;
         setRemoteSessionLink(link);
 
         // Open automatically if possible

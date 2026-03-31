@@ -5,7 +5,7 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import api from "../../api";
+import api from "../../services/api";
 import { useConfig } from "../../contexts/ConfigAuthority";
 
 interface NotaryDashboardProps {

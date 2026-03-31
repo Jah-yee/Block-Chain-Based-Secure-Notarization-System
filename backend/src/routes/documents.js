@@ -137,7 +137,7 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
       const intentRes = await pool.query(
         `INSERT INTO upload_intents
            (id, user_id, wallet_address, file_hash, filename, storage_key, category, amount, amount_wei, storage_state, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '1 hour')
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '30 minutes')
          RETURNING id, expires_at`,
         [intentId, actor.id, walletAddress.toLowerCase(), fileHash, filename, storage_key || filepath, category, cost, costWei, storage_key ? 'UPLOADED' : 'STORED']
       );
@@ -203,14 +203,27 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
     if (intent.status !== 'awaiting_payment' && intent.status !== 'expired') return res.status(400).json({ error: `Invalid intent status: ${intent.status}` });
 
     // Guard 3: Not past expiry
-    /*
     if (new Date(intent.expires_at) < new Date()) {
       await client.query(`UPDATE upload_intents SET status='expired' WHERE id=$1`, [intent_id]);
-      if (fs.existsSync(intent.filepath)) fs.unlinkSync(intent.filepath);
       await client.query('COMMIT');
+
+      if (intent.storage_state === 'UPLOADED') {
+          await storageService.deleteFile(intent.storage_key).catch(err => {
+              logger.error('FILE_DELETE_FAILED', { intent_id, key: intent.storage_key, error: err.message });
+          });
+      } else {
+          try {
+              let localPath = intent.storage_key;
+              if (localPath) {
+                  if (!path.isAbsolute(localPath)) localPath = path.join(__dirname, '../../', localPath);
+                  if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+              }
+          } catch (err) {
+              logger.error('FILE_DELETE_FAILED', { intent_id, key: intent.storage_key, error: err.message });
+          }
+      }
       return res.status(410).json({ error: 'Upload intent expired. Start a new upload.' });
     }
-    */
 
     // Guard 4: tx_hash not already used
     const txUsed = await client.query(
@@ -811,6 +824,7 @@ async function handleDocumentPatch(req, res) {
             submission_state = $1,
             tx_hash = $2,
             tx_status = 'pending',
+            needs_cleanup = true,
             updated_at = NOW(),
             status_updated_at = NOW()
            WHERE id = $3 RETURNING *`,
@@ -826,6 +840,37 @@ async function handleDocumentPatch(req, res) {
           }
         } catch (repErr) {
           console.error(`[REPUTATION] Event fire failed (non-fatal) | docId=${id} | error=${repErr.message}`);
+        }
+
+        const isApprovedOrRejected = (dbStatus === 'submitted_to_blockchain' || dbStatus === 'rejected');
+        const isChainSuccess = txResult.receipt && txResult.receipt.status === 1;
+        const isFinalized = isChainSuccess && isApprovedOrRejected;
+
+        if (isFinalized) {
+            setImmediate(async () => {
+                try {
+                    const freshDocRes = await pool.query('SELECT storage_key, storage_state FROM documents WHERE id=$1', [id]);
+                    if (freshDocRes.rows.length > 0) {
+                        const freshDoc = freshDocRes.rows[0];
+                        if (freshDoc.storage_state === 'UPLOADED' || (freshDoc.storage_key && freshDoc.storage_key.startsWith('intents/'))) {
+                            await storageService.deleteFile(freshDoc.storage_key).catch(err => {
+                                logger.error('FILE_DELETE_FAILED', { id, key: freshDoc.storage_key, error: err.message });
+                            });
+                        } else {
+                            let localPath = freshDoc.storage_key;
+                            if (localPath) {
+                                if (!path.isAbsolute(localPath)) localPath = path.join(__dirname, '../../', localPath);
+                                if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+                            }
+                        }
+                        
+                        await pool.query('UPDATE documents SET needs_cleanup = false WHERE id=$1', [id]);
+                        logger.info('FILE_DELETED_SUCCESSFULLY', { id, storage_key: freshDoc.storage_key });
+                    }
+                } catch (err) {
+                    logger.error('FILE_DELETE_FAILED', { id, error: err.message });
+                }
+            });
         }
 
         return res.json(sanitizeDocument(updateRes.rows[0]));

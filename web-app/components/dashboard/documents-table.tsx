@@ -157,12 +157,15 @@ export function DocumentsTable() {
                       </div>
                     </DialogContent>
                   </Dialog>
-                  <Button
+                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8"
                     title="Download File"
-                    onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/documents/${doc.id}/file`, '_blank')}
+                    onClick={async () => {
+                      const url = await apiClient.getUrl(`/api/documents/${doc.id}/file`);
+                      window.open(url, '_blank');
+                    }}
                   >
                     <Download className="h-4 w-4" />
                   </Button>

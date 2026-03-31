@@ -8,6 +8,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { Shield, Upload, History, CheckCircle, Coins, Home, LogOut, X, ChevronLeft, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useWalletSession } from "@/hooks/use-wallet-session"
+import { useConfig } from "@/providers/ConfigProvider"
 
 interface SidebarProps {
   open: boolean
@@ -25,6 +26,7 @@ const menuItems = [
 ]
 
 export function Sidebar({ open, onOpenChange, collapsed = false, onCollapseChange }: SidebarProps) {
+  const { config } = useConfig()
   const pathname = usePathname()
   const router = useRouter()
   const { logout } = useWalletSession()
@@ -94,7 +96,7 @@ export function Sidebar({ open, onOpenChange, collapsed = false, onCollapseChang
                 params: {
                   type: 'ERC20',
                   options: {
-                    address: process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS || "",
+                    address: config?.contracts.ntkr || "",
                     symbol: 'NTKR',
                     decimals: 18,
                   },

@@ -3,19 +3,17 @@
 import * as React from "react"
 import { useState, useEffect } from "react"
 import { ShieldAlert, Loader2 } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 
 export function GenesisShield({ children }: { children: React.ReactNode }) {
     const [viewState, setViewState] = useState<'checking' | 'active' | 'boot'>('checking')
 
     const checkState = React.useCallback(async () => {
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'}/api/auth/system-status`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.activated) {
-                    setViewState('active');
-                    return;
-                }
+            const data = await apiClient.get('/api/auth/system-status');
+            if (data && data.activated) {
+                setViewState('active');
+                return;
             }
             setViewState('boot');
         } catch (err) {

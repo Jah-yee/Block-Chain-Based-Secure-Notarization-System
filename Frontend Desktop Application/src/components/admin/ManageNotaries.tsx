@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
 
 export function ManageNotaries() {
   const [applications, setApplications] = useState<any[]>([]);

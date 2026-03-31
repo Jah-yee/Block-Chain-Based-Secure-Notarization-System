@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
-import api from "../../api";
+import api from "../../services/api";
 import { toast } from "sonner";
 
 interface LogEntry {

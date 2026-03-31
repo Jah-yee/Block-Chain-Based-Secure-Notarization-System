@@ -3,7 +3,8 @@ import { Lock, ShieldCheck, AlertCircle, Globe, CheckCircle2 } from "lucide-reac
 import { Button } from "../ui/button";
 import { Alert, AlertDescription } from "../ui/alert";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
+import { useConfig } from "../../contexts/ConfigAuthority";
 
 interface AdminLoginProps {
   onLogin: () => void;
@@ -80,7 +81,10 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
       setStatus("awaiting_browser");
 
       // 3. Open Browser for Signing
-      const webAppUrl = `http://localhost:3002/?sessionId=${sessionId}`;
+      const { config } = useConfig();
+      if (!config) throw new Error("System configuration integrity failure");
+
+      const webAppUrl = `${config.remoteAuthUrl}/?sessionId=${sessionId}`;
 
       const electron = (window as any).electronAPI;
       console.log("Electron API Status:", electron);

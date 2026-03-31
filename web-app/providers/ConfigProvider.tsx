@@ -50,8 +50,8 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
       const data = await apiClient.get('/api/system/config');
       
       // 🛡️ Final Integrity Check
-      if (Number(data.chainId) !== 97) {
-        throw { code: 'INVALID_CHAIN_ID', message: `Expected Chain 97, but Backend served ${data.chainId}` };
+      if (!data.chainId || isNaN(Number(data.chainId))) {
+        throw { code: 'INVALID_CHAIN_ID', message: `Backend served invalid or missing chainId: ${data.chainId}` };
       }
 
       setConfig(data);

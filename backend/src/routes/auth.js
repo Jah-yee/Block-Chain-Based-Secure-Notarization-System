@@ -1,3 +1,10 @@
+const express = require('express');
+const router = express.Router();
+const jwt = require('jsonwebtoken');
+const pool = require('../db/index');
+const crypto = require('crypto');
+const { generateNonce } = require('../utils/nonce');
+const { ethers } = require('ethers');
 const ConfigService = require('../services/config.service');
 
 const APP_NAME = 'BBSNS';
@@ -18,40 +25,35 @@ const simpleRateLimiter = distributedRateLimiter; // Alias for backward compatib
 // Zero-Trust JWT Helper
 async function signZeroTrustToken(user, walletAddress) {
   if (!user || !walletAddress) throw new Error("Missing user data for token signing");
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || process.env.BNB_TESTNET_RPC_URL);
+  
+  try {
+    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || "https://data-seed-prebsc-1-s1.binance.org:8545");
+    const network = await provider.getNetwork();
+    const snapshotChainId = Number(network.chainId);
+    const snapshotBlock = await provider.getBlockNumber();
 
-  // 1. Fetch live network context
-  const network = await provider.getNetwork();
-  const snapshotChainId = Number(network.chainId);
+    let numericRole = Number(user.role);
+    if (isNaN(numericRole)) {
+      const ROLE_MAP = { 'none': 0, 'user': 1, 'notary': 2, 'admin': 3 };
+      numericRole = ROLE_MAP[String(user.role).toLowerCase()] || 1; // Default to 'user' (1)
+    }
 
-  // 2. Verify chain ID
-  if (String(snapshotChainId) !== String(process.env.CHAIN_ID)) {
-    console.warn(`[JWT_WARN] Snapshot chainId (${snapshotChainId}) != Expected (${process.env.CHAIN_ID}). Proceeding for compatibility.`);
+    return jwt.sign(
+      {
+        id: user.id,
+        address: walletAddress.toLowerCase(),
+        role: Number(numericRole),
+        snapshotBlock: Number(snapshotBlock),
+        snapshotChainId: Number(snapshotChainId),
+        issuedAt: Date.now()
+      },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRY }
+    );
+  } catch (err) {
+    console.error("[JWT_SIGN_ERROR] Failed to sign token:", err.message);
+    throw err;
   }
-
-  // 3. Get latest block
-  const snapshotBlock = await provider.getBlockNumber();
-
-  // Role Normalization: Map string roles to numeric constants if needed
-  let numericRole = Number(user.role);
-  if (isNaN(numericRole)) {
-    const ROLE_MAP = { 'none': 0, 'owner': 1, 'notary': 2, 'admin': 3 };
-    numericRole = ROLE_MAP[String(user.role).toLowerCase()] || 0;
-  }
-
-  // 4. Issue token with mandatory Zero-Trust fields
-  return jwt.sign(
-    {
-      id: user.id,
-      address: walletAddress.toLowerCase(),
-      role: numericRole,
-      snapshotBlock,
-      snapshotChainId,
-      issuedAt: Date.now()
-    },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRY } // Default session duration
-  );
 }
 
 // POST /auth/pre-check - Verify account existence (Wallet-Only identity)
@@ -136,7 +138,6 @@ router.get('/system-status', allowPublic, async (req, res) => {
       pool.query('SELECT COUNT(*) FROM users')
     ]);
 
-    console.log(`[STATUS_DEBUG] activated=${activated}, adminCount=${adminCount}, dbUserCount=${dbUserResult.rows[0].count}`);
     res.json({ 
       activated: !!activated, 
       adminCount: Number(adminCount),
@@ -152,15 +153,14 @@ router.get('/system-status', allowPublic, async (req, res) => {
 router.post('/genesis/onboard', allowPublic, simpleRateLimiter(10, 3600000), async (req, res) => {
   try {
     const { fullName, email, walletAddress, nationalId, signature, nonce } = req.body;
-    console.log(`[ONBOARD_TRACE] Start | wallet=${walletAddress} | nonce=${nonce}`);
 
     if (!fullName || !walletAddress || !nationalId || !signature || !nonce) {
-      return res.status(400).json({ error: 'Missing onboarding metadata (Full Name, Wallet, ID, Signature, Nonce)' });
+      return res.status(400).json({ error: 'Missing onboarding metadata' });
     }
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
 
-    // 1. Fetch EXCLUSIVE valid nonce for this purpose
+    // 1. Fetch Nonce
     const nonceResult = await pool.query(
       `SELECT nonce FROM wallet_nonces 
        WHERE LOWER(wallet_address) = $1 AND purpose = 'GENESIS_ONBOARD' 
@@ -170,25 +170,21 @@ router.post('/genesis/onboard', allowPublic, simpleRateLimiter(10, 3600000), asy
     );
 
     if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== nonce) {
-      console.warn(`[SECURITY] Invalid or missing Genesis nonce | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
-      return res.status(401).json({ error: 'Invalid or expired onboarding session. Please restart.' });
+      return res.status(401).json({ error: 'Invalid or expired onboarding session' });
     }
 
-    // 2. Guard: Check if profile already exists in DB
+    // 2. Guard: No Profile
     const checkUser = await pool.query('SELECT id FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
     if (checkUser.rows.length > 0) return res.status(400).json({ error: 'Profile already exists' });
 
-    // 3. Strict Signature Verification
+    // 3. Sig Verification
     const message = `Login request for ${APP_NAME}: ${nonce}`;
     const recoveredAddress = ethers.verifyMessage(message, signature);
-
     if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
-      console.error(`[SECURITY] Signature mismatch during onboarding | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
       return res.status(401).json({ error: 'Cryptographic signature verification failed' });
     }
-    console.log(`[ONBOARD_TRACE] Signature Verified OK`);
 
-    // 4. On-Chain Strict Validation (Block-Based Temporal Check)
+    // 4. On-Chain Check
     const config = await ConfigService.getConfig();
     const provider = new ethers.JsonRpcProvider(config.rpcUrl);
     const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)", "function getUserRole(address) view returns (uint8)"], provider);
@@ -200,59 +196,30 @@ router.post('/genesis/onboard', allowPublic, simpleRateLimiter(10, 3600000), asy
       genesisContract.activated(),
       genesisContract.activationTimestamp()
     ]);
-    console.log(`[ONBOARD_TRACE] Chain data: adminCount=${adminCount}, activated=${activated}, activationTime=${activationTime}`);
 
     if (!activated) return res.status(403).json({ error: 'System not yet activated on-chain' });
     
-    // 7-Day Window: (7 * 24 * 60 * 60) seconds
     const MAX_TIME_WINDOW = 7 * 24 * 60 * 60;
     const currentTime = Math.floor(Date.now() / 1000);
-    
     if (currentTime - Number(activationTime) > MAX_TIME_WINDOW) {
-      console.error(`[SECURITY] Genesis Onboarding Expired | activatedAt=${new Date(Number(activationTime)*1000).toISOString()} | currentTime=${new Date(currentTime*1000).toISOString()} | wallet=${normalizedWalletAddress}`);
-      return res.status(403).json({ error: 'Genesis onboarding window expired (7-day limit exceeded).' });
+      return res.status(403).json({ error: 'Genesis onboarding window expired' });
     }
 
-    if (Number(adminCount) !== 1) {
-      console.error(`[SECURITY] Rejected Genesis attempt: adminCount != 1 | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
-      return res.status(403).json({ error: 'Genesis window closed' });
-    }
-    if (Number(userRole) !== 3) {
-      console.error(`[SECURITY] Role mismatch during onboarding | wallet=${normalizedWalletAddress} | expected=3 | got=${userRole}`);
-      return res.status(403).json({ error: 'Unauthorized: Wallet does not have ADMIN role' });
-    }
+    if (Number(adminCount) !== 1) return res.status(403).json({ error: 'Genesis window closed' });
+    if (Number(userRole) !== 3) return res.status(403).json({ error: 'Unauthorized role' });
 
-    // 5. Atomic Invalidation & Creation
+    // 5. Create Profile
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
-    console.log(`[ONBOARD_TRACE] Nonce used marked in DB`);
-
     const nationalIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
-    console.log(`[ONBOARD_TRACE] Attempting user INSERT...`);
-    try {
-      await pool.query(
-        `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          fullName, 
-          (email || '').toLowerCase().trim(), 
-          normalizedWalletAddress, 
-          'admin', 
-          true, 
-          nationalIdHash, 
-          'ADMIN_WEB3_ONLY',
-          (email || normalizedWalletAddress).split('@')[0], // Use email prefix or wallet as username
-          'ACTIVE'
-        ]
-      );
-    } catch (insertError) {
-      console.error(`[SECURITY] INSERT FAILURE | wallet=${normalizedWalletAddress} | error=${insertError.message} | detail=${insertError.detail} | column=${insertError.column}`);
-      throw insertError; // Re-throw to be caught by the outer catch and return 500
-    }
+    await pool.query(
+      `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [fullName, (email || '').toLowerCase().trim(), normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWalletAddress, 'ACTIVE']
+    );
 
-    console.log(`[SECURITY] Genesis Onboarding SUCCESS | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
     res.json({ success: true, message: 'Genesis Admin Onboarded Successfully' });
   } catch (error) {
-    console.error(`[SECURITY] FATAL Onboarding Error | ip=${req.ip} | error=${error.message}`);
+    console.error('Onboarding failed:', error);
     res.status(500).json({ error: 'Onboarding failed internally' });
   }
 });
@@ -268,7 +235,7 @@ router.post('/notary/onboard', allowPublic, simpleRateLimiter(5, 3600000), async
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
 
-    // 1. Verify Purpose-Bound Nonce
+    // 1. Verify Nonce
     const nonceResult = await pool.query(
       `SELECT nonce FROM wallet_nonces 
        WHERE LOWER(wallet_address) = $1 AND purpose = 'NOTARY_ONBOARD' 
@@ -278,40 +245,31 @@ router.post('/notary/onboard', allowPublic, simpleRateLimiter(5, 3600000), async
     );
 
     if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== nonce) {
-      return res.status(401).json({ error: 'Invalid or expired Notary onboarding session' });
+      return res.status(401).json({ error: 'Invalid or expired session' });
     }
 
-    // 2. Guard: No Profile in DB
-    const checkUser = await pool.query('SELECT id FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
-    if (checkUser.rows.length > 0) return res.status(400).json({ error: 'Profile already linked to this wallet' });
-
-    // 3. Sig Verification
+    // 2. Sig Verification
     const message = `Login request for ${APP_NAME}: ${nonce}`;
-    const recoveredAddress = ethers.verifyMessage(message, signature);
-    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
+    if (ethers.verifyMessage(message, signature).toLowerCase() !== normalizedWalletAddress) {
       return res.status(401).json({ error: 'Signature verification failed' });
     }
 
-    // 4. On-Chain Check (role == NOTARY (2))
+    // 3. On-Chain Check
     const config = await ConfigService.getConfig();
     const provider = new ethers.JsonRpcProvider(config.rpcUrl);
     const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)"], provider);
     const liveRole = await registry.getUserRole(normalizedWalletAddress);
 
-    if (Number(liveRole) !== 2) {
-      console.warn(`[SECURITY] Non-notary attempted notary onboarding | wallet=${normalizedWalletAddress} | role=${liveRole}`);
-      return res.status(403).json({ error: 'Not authorized: Notary role not found on-chain' });
-    }
+    if (Number(liveRole) !== 2) return res.status(403).json({ error: 'Not authorized role' });
 
-    // 5. Create Profile (Password-less Web3 Only)
+    // 4. Create Profile
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
     await pool.query(
-      `INSERT INTO users (name, wallet_address, role, kyc_verified, password_hash) 
-       VALUES ($1, $2, $3, $4, $5)`,
-      [fullName, normalizedWalletAddress, 'notary', true, 'NOTARY_WEB3_ONLY']
+      `INSERT INTO users (name, wallet_address, role, kyc_verified, password_hash, identity_state) 
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [fullName, normalizedWalletAddress, 'notary', true, 'NOTARY_WEB3_ONLY', 'ACTIVE']
     );
 
-    console.log(`[SECURITY] Notary Onboarding SUCCESS | wallet=${normalizedWalletAddress}`);
     res.json({ success: true, message: 'Notary profile created successfully' });
   } catch (error) {
     console.error('Notary onboarding error:', error);
@@ -319,21 +277,19 @@ router.post('/notary/onboard', allowPublic, simpleRateLimiter(5, 3600000), async
   }
 });
 
-// POST /auth/login - 3-Factor Secure Login
+// POST /auth/login - Secure Login
 router.post('/login', allowPublic, async (req, res) => {
   try {
     const { email, password, walletAddress, signature, nationalId, signature_nonce } = req.body;
-    const cleanEmail = (email || "").trim().toLowerCase();
     const normalizedWalletAddress = (walletAddress || "").trim().toLowerCase();
 
-    console.log(`[LOGIN_DEBUG] Attempting login for email: "${cleanEmail}", wallet: "${normalizedWalletAddress}"`);
+    console.log(`[LOGIN_DEBUG] Attempting login for wallet: "${normalizedWalletAddress}"`);
 
     if (!walletAddress || !signature || !signature_nonce) {
-      console.log('[LOGIN_DEBUG] Missing base wallet auth fields');
       return res.status(400).json({ error: 'Wallet address, signature, and nonce are required' });
     }
 
-    // 1. Wallet Signature Verification (Latest 'LOGIN' Nonce Only)
+    // 1. Wallet Signature Verification
     const nonceResult = await pool.query(
       `SELECT nonce FROM wallet_nonces 
        WHERE LOWER(wallet_address) = $1 AND purpose = 'LOGIN' AND used_at IS NULL AND expiry > NOW() 
@@ -342,164 +298,81 @@ router.post('/login', allowPublic, async (req, res) => {
     );
 
     if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== signature_nonce) {
-      console.warn(`[SECURITY] Invalid or missing login nonce | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
       return res.status(400).json({ error: 'Session expired. Please request a new nonce.' });
     }
 
     const nonce = nonceResult.rows[0].nonce;
     const message = `Login request for ${APP_NAME}: ${nonce}`;
-    const recoveredAddress = ethers.verifyMessage(message, signature);
-
-    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
-      console.error(`[SECURITY] Signature mismatch during login | wallet=${normalizedWalletAddress} | ip=${req.ip}`);
+    if (ethers.verifyMessage(message, signature).toLowerCase() !== normalizedWalletAddress) {
       return res.status(401).json({ error: 'Wallet signature verification failed' });
     }
 
-    // Mark Nonce Used Immediately (Replay Protection)
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
-    // 2. Fetch User Profile
-    const userResult = await pool.query('SELECT * FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
-    console.log(`[LOGIN_DEBUG] User lookup result: ${userResult.rows.length} rows found`);
 
+    // 2. Fetch/Provision User
+    const userResult = await pool.query('SELECT * FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
     let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
-    // --- PHASE 3E: ADMIN PASSWORD BYPASS & ON-CHAIN VALIDATION ---
-    const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-    const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)"], provider);
-    let liveRoleValue = await notaryRegistry.getUserRole(normalizedWalletAddress);
-
-    const isAdmin = Number(liveRoleValue) === 3;
-
-    if (user && !isAdmin) {
-        // Standard non-admin flow: Mandatory Email, Password & ID Hash
-        if (!email || !password || !nationalId) {
-            return res.status(400).json({ error: 'Email, Password, and National ID are required for this account type' });
-        }
-
-        const { comparePassword } = require('../utils/password');
-        const isPasswordValid = await comparePassword(password, user.password_hash);
-        if (!isPasswordValid) return res.status(401).json({ error: 'Invalid credentials' });
-
-        if (user.national_id_hash) {
-            const inputIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
-            if (user.national_id_hash !== inputIdHash) return res.status(401).json({ error: 'National ID verification failed' });
-        }
-    } else if (!user) {
-        // No profile found and signature verified (above)
-        return res.status(404).json({ error: 'Profile not found. Please complete initialization.' });
-    }
-
-    // Role Syncing handled below...
-
-    // 3. (Legacy) National ID Verification handled above.
-
-    // Mark Nonce Used
-    await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
-
-    // 4. On-Chain Authority Derivation (Zero-Trust)
-    let isBanned, snapshotBlock, snapshotChainId, adminCount;
+    // 3. On-Chain Authority
+    let liveRoleValue, liveBanned;
     try {
-      const config = await ConfigService.getConfig();
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const notaryRegistryAbi = [
-        "function getUserRole(address) view returns (uint8)",
-        "function isBanned(address) view returns (bool)",
-        "function adminCount() view returns (uint256)"
-      ];
-      const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
+      const liveConfig = await ConfigService.getConfig();
+      const provider = new ethers.JsonRpcProvider(liveConfig.rpcUrl);
+      const notaryRegistryAbi = ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"];
+      const notaryRegistry = new ethers.Contract(liveConfig.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
-      const network = await provider.getNetwork();
-      snapshotChainId = Number(network.chainId);
-
-      // Verify we are on the correct network (extra safety check)
-      if (String(snapshotChainId) !== String(config.chainId)) {
-        console.error(`[LOGIN_CRITICAL] Network mismatch during login. SSoT: ${config.chainId}, Detected: ${snapshotChainId}`);
-        return res.status(503).json({ error: 'Service Unavailable: Network Configuration Mismatch' });
-      }
-
-      const [liveRole, isBanned, snapshotBlock, adminCount] = await Promise.all([
+      [liveRoleValue, liveBanned] = await Promise.all([
         notaryRegistry.getUserRole(normalizedWalletAddress),
-        notaryRegistry.isBanned(normalizedWalletAddress),
-        provider.getBlockNumber(),
-        notaryRegistry.adminCount()
+        notaryRegistry.isBanned(normalizedWalletAddress)
       ]);
 
-      if (isBanned) {
-        console.warn(`[LOGIN_DENY] Banned user attempted login: ${normalizedWalletAddress}`);
-        return res.status(403).json({ error: 'Account is banned on-chain' });
-      }
+      if (liveBanned) return res.status(403).json({ error: 'Account is banned on-chain' });
 
-      // --- AUTO-SYNC ADMIN (Zero-Trust) ---
-      // If blockchain says ADMIN but no user in DB -> Auto-provision
-      if (!user && Number(liveRole) === 3) {
-        console.log(`[SECURITY] Auto-Syncing Genesis Admin | wallet=${normalizedWalletAddress}`);
+      // Auto-Sync Admin
+      if (!user && Number(liveRoleValue) === 3) {
+        console.log(`[SECURITY] Auto-Syncing Admin | wallet=${normalizedWalletAddress}`);
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
-        const insertResult = await pool.query(
-          `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash, username) 
+        const insertRes = await pool.query(
+          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-          ['Genesis Admin', null, normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWalletAddress]
+          ['Genesis Admin', normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWalletAddress, 'ACTIVE']
         );
-        user = insertResult.rows[0];
+        user = insertRes.rows[0];
       }
-
-      // STRICT CHECK: User must exist in DB (or have just been auto-synced)
-      if (!user) {
-        console.log(`[LOGIN_DENY] User profile not found for ${normalizedWalletAddress}`);
-        return res.status(404).json({ error: 'Profile not found. Please complete initialization or contact your administrator.' });
-      }
-
-      // Role Sync: Update DB role if it changed on-chain
-      const ROLE_MAP = { 1: 'owner', 2: 'notary', 3: 'admin' };
-      const currentOnChainRole = ROLE_MAP[Number(liveRole)];
-      if (currentOnChainRole && currentOnChainRole !== user.role) {
-         await pool.query('UPDATE users SET role = $1 WHERE id = $2', [currentOnChainRole, user.id]);
-         user.role = currentOnChainRole;
-      }
-    } catch (err) {
-      console.error('[LOGIN_ERROR] On-chain verification failed:', err.message);
-      return res.status(503).json({ error: 'Service Unavailable: Could not verify authority on-chain' });
+    } catch (chainErr) {
+      console.error("[LOGIN_CHAIN_ERROR]", chainErr.message);
+      if (!user) return res.status(503).json({ error: 'Unable to verify identity' });
     }
 
-    // Issue Zero-Trust JWT
-    const token = jwt.sign(
-      {
-        id: user.id,
-        address: normalizedWalletAddress,
-        role: Number(liveRole),
-        snapshotBlock,
-        snapshotChainId,
-        issuedAt: Date.now()
-      },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRY_SECONDS }
-    );
+    if (!user) return res.status(404).json({ error: 'User profile not found' });
 
-    // Set HttpOnly Cookie
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: JWT_EXPIRY_SECONDS * 1000,
-      sameSite: 'lax'
-    });
+    // 4. Identity Checks (Non-Admin)
+    const isAdmin = Number(liveRoleValue) === 3;
+    if (!isAdmin) {
+      if (!email || !password || !nationalId) {
+        return res.status(400).json({ error: 'Email, Password, and National ID are required' });
+      }
+      const { comparePassword } = require('../utils/password');
+      if (!(await comparePassword(password, user.password_hash))) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      const inputIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
+      if (user.national_id_hash && user.national_id_hash !== inputIdHash) {
+        return res.status(401).json({ error: 'National ID mismatch' });
+      }
+    }
 
-    console.log(`[LOGIN_SUCCESS] Actor ${normalizedWalletAddress} logged in with Role ${liveRole} at Block ${snapshotBlock}`);
+    // 5. Success
+    const token = await signZeroTrustToken(user, normalizedWalletAddress);
+    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 12*60*60*1000, sameSite: 'lax' });
     res.json({
       message: 'Login successful',
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        walletAddress: normalizedWalletAddress,
-        role: Number(liveRole) // On-chain derived role
-      }
+      user: { id: user.id, email: user.email, walletAddress: normalizedWalletAddress, role: Number(liveRoleValue), identity_state: user.identity_state },
+      token
     });
 
   } catch (error) {
-    console.error('[LOGIN_DEBUG] Unexpected error:', error.message);
-    console.error(error.stack);
-    if (error.detail) console.error('[LOGIN_DEBUG] DB Detail:', error.detail);
-    if (error.column) console.error('[LOGIN_DEBUG] DB Column:', error.column);
+    console.error('[LOGIN_FATAL]', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -510,54 +383,39 @@ router.post('/logout', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVEL
   res.json({ message: 'Logged out successfully' });
 });
 
-// GET /auth/me - Profile Source of Truth (Supports /api/auth/me and /auth/me)
-// Zero-Trust: Refactored to return null instead of 401 for silent guest checks
+// GET /auth/me - Profile Source of Truth
 router.get('/me', allowPublic, async (req, res) => {
   try {
-    // If no token or invalid token, return null silently
     const authHeader = req.headers.authorization;
     const tokenCookie = req.cookies.token;
     const token = tokenCookie || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null);
 
-    if (!token) {
-      return res.json({ user: null });
-    }
+    if (!token) return res.json({ user: null });
 
-    // Verify token manually since we are using allowPublic
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
       const normalizedWallet = decoded.address.toLowerCase();
 
       const result = await pool.query(
-        'SELECT id, username, name, email, wallet_address, role, kyc_verified, liveness_status FROM users WHERE LOWER(wallet_address) = $1',
+        'SELECT id, username, name, email, wallet_address, role, kyc_verified, liveness_status, identity_state FROM users WHERE LOWER(wallet_address) = $1',
         [normalizedWallet]
       );
 
       let user = result.rows.length > 0 ? result.rows[0] : null;
 
-      // --- AUTO-SYNC ADMIN (Zero-Trust Fallback) ---
       if (!user && decoded.role === 3) {
-        console.log(`[SECURITY] Auto-Syncing Genesis Admin via /me | wallet=${normalizedWallet}`);
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
         const insertResult = await pool.query(
-          `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash, username) 
+          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-          ['Genesis Admin', null, normalizedWallet, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWallet]
+          ['Genesis Admin', normalizedWallet, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWallet, 'ACTIVE']
         );
         user = insertResult.rows[0];
       }
 
-      if (!user) {
-        return res.json({ user: null });
-      }
-
-      // Normalize role for UI
-      const ROLE_STRING_MAP = { 0: 'none', 1: 'owner', 2: 'notary', 3: 'admin' };
-      const normalizedRole = ROLE_STRING_MAP[decoded.role] || user.role || 'none';
-
-      res.json({ user: { ...user, role: normalizedRole } });
+      if (!user) return res.json({ user: null });
+      res.json({ user });
     } catch (jwtErr) {
-      // Invalid token? Just return null. Silences noise.
       return res.json({ user: null });
     }
   } catch (error) {
@@ -570,12 +428,11 @@ router.get('/me', allowPublic, async (req, res) => {
 
 const { requireSystemActivated } = require('../../middleware/activation');
 
-// POST /auth/remote/session - Initialize remote login session
 router.post('/remote/session', allowPublic, requireSystemActivated, async (req, res) => {
   try {
     const { device_id } = req.body;
     const challenge = `BBSNS-LOGIN-${Math.random().toString(36).substring(2, 15)}`;
-    const expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expires_at = new Date(Date.now() + 10 * 60 * 1000); 
 
     const result = await pool.query(
       'INSERT INTO remote_auth_sessions (challenge, device_id, expires_at) VALUES ($1, $2, $3) RETURNING id',
@@ -589,170 +446,88 @@ router.post('/remote/session', allowPublic, requireSystemActivated, async (req, 
   }
 });
 
-// GET /auth/remote/status/:sessionId - Poll for session status
 router.get('/remote/status/:sessionId', allowPublic, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    if (isNaN(sessionId) && !isValidUUID(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID format' });
-    }
+    if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID format' });
+    
     const result = await pool.query('SELECT * FROM remote_auth_sessions WHERE id::text = $1', [sessionId]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
 
     const session = result.rows[0];
-    const now = new Date();
-
-    if (session.status === 'pending' && new Date(session.expires_at) < now) {
+    if (session.status === 'pending' && new Date(session.expires_at) < new Date()) {
       await pool.query("UPDATE remote_auth_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
       return res.json({ status: 'expired' });
     }
 
-    res.json({
-      status: session.status,
-      challenge: session.challenge,
-      wallet_address: session.wallet_address,
-      token: session.token // Only present if authorized
-    });
+    res.json({ status: session.status, challenge: session.challenge, wallet_address: session.wallet_address, token: session.token });
   } catch (error) {
-        console.error('Remote status error:', error);
+    console.error('Remote status error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST /auth/remote/authorize - Link wallet to remote session
 router.post('/remote/authorize', allowPublic, requireSystemActivated, simpleRateLimiter(5, 60000), async (req, res) => {
   try {
     const { sessionId, signature, walletAddress } = req.body;
-
-    if (!sessionId || !walletAddress || !signature) {
-      return res.status(400).json({ error: 'sessionId, walletAddress, and signature are required' });
-    }
-    if (isNaN(sessionId) && !isValidUUID(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session ID format' });
-    }
+    if (!sessionId || !walletAddress || !signature) return res.status(400).json({ error: 'Missing data' });
+    if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid format' });
 
     const sessionResult = await pool.query('SELECT * FROM remote_auth_sessions WHERE id::text = $1', [sessionId]);
-    if (sessionResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
+    if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
 
     const session = sessionResult.rows[0];
-    if (session.status !== 'pending') {
-      return res.status(400).json({ error: `Session is already ${session.status}` });
-    }
-
-    if (new Date(session.expires_at) < new Date()) {
-      return res.status(401).json({ error: 'Session expired' });
-    }
+    if (session.status !== 'pending') return res.status(400).json({ error: `Session ${session.status}` });
+    if (new Date(session.expires_at) < new Date()) return res.status(401).json({ error: 'Session expired' });
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
-
-    // 1. Verify signature based on payload type
     let recoveredAddress;
     try {
       if (signature === 'DIRECT_TX_CONFIRMED') {
-        // Self-paid case: We trust the provided wallet address for session linking
-        // The actual document update will still wait for on-chain verification
         recoveredAddress = normalizedWalletAddress;
       } else if (session.challenge.includes('"domain"') && session.challenge.includes('"message"')) {
-        // EIP-712 Payload (Notarization Action)
         const payload = JSON.parse(session.challenge);
-        recoveredAddress = ethers.verifyTypedData(
-          payload.domain,
-          payload.types,
-          payload.message,
-          signature
-        );
+        recoveredAddress = ethers.verifyTypedData(payload.domain, payload.types, payload.message, signature);
       } else {
-        // Standard String Message (Login)
         recoveredAddress = ethers.verifyMessage(session.challenge, signature);
       }
     } catch (e) {
-      console.error('[REMOTE_AUTH] Signature verification failed:', e);
-      await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id::text = $1", [sessionId]).catch(() => {});
       return res.status(401).json({ error: 'Signature verification failed' });
     }
 
-    console.log(`[REMOTE_AUTH_DEBUG] recoveredAddress: ${recoveredAddress.toLowerCase()}, providedAddress: ${normalizedWalletAddress}`);
-    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
-      await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id::text = $1", [sessionId]).catch(() => {});
-      return res.status(401).json({ error: 'Invalid signature: Address mismatch' });
-    }
+    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) return res.status(401).json({ error: 'Address mismatch' });
 
     const userResult = await pool.query('SELECT id, wallet_address, role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
     let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
-    // ZERO-TRUST ON-CHAIN VERIFICATION
-    let liveRole = 0;
     try {
       const config = await ConfigService.getConfig();
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const notaryRegistryAbi = ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"];
-      const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
+      const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
+      const [roleData, isBanned] = await Promise.all([registry.getUserRole(normalizedWalletAddress), registry.isBanned(normalizedWalletAddress)]);
 
-      const [roleData, isBanned] = await Promise.all([
-        notaryRegistry.getUserRole(normalizedWalletAddress),
-        notaryRegistry.isBanned(normalizedWalletAddress)
-      ]);
-
-      if (isBanned) {
-        console.warn(`[REMOTE_AUTH_DENY] Banned user attempted remote login: ${normalizedWalletAddress}`);
-        return res.status(403).json({ error: 'Account is banned on-chain' });
-      }
-
-      liveRole = Number(roleData);
-
-      // --- AUTO-SYNC ADMIN (Zero-Trust) ---
-      if (!user && liveRole === 3) {
-        console.log(`[SECURITY] Auto-Syncing Genesis Admin via Remote Auth | wallet=${normalizedWalletAddress}`);
+      if (isBanned) return res.status(403).json({ error: 'Banned' });
+      if (!user && Number(roleData) === 3) {
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
         const insertResult = await pool.query(
-          `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash) 
+          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, identity_state) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-          ['Genesis Admin', null, normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY']
+          ['Genesis Admin', normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', 'ACTIVE']
         );
         user = insertResult.rows[0];
       }
-
-      // Re-verify existence after potential sync
-      if (!user) {
-        console.log(`[REMOTE_AUTH_403] Wallet not found in users table: ${normalizedWalletAddress}`);
-        await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id::text = $1", [sessionId]).catch(() => {});
-        return res.status(404).json({ error: 'Account not found. Please complete initialization/registration first.' });
-      }
-
-      // Prevent DB tampering bypass: If DB says 'admin' but chain says otherwise
-      if (user.role === 'admin' && liveRole !== 3) {
-        console.warn(`[REMOTE_AUTH_CRITICAL] DB/Chain role mismatch! Wallet=${normalizedWalletAddress}`);
-        return res.status(403).json({ error: 'Unauthorized: On-chain governance privileges invalid.' });
-      }
-
-      // Override DB role with verifiable live on-chain role for JWT signing
-      user.role = liveRole;
+      if (!user) return res.status(404).json({ error: 'Account not found' });
+      user.role = Number(roleData);
     } catch(err) {
-      console.error('[REMOTE_AUTH_ERROR] Zero-Trust verification failed:', err.message);
-      return res.status(503).json({ error: 'Service Unavailable: Could not verify authority on-chain' });
+      return res.status(503).json({ error: 'Zero-Trust check failed' });
     }
 
     const token = await signZeroTrustToken(user, normalizedWalletAddress);
-
-    await pool.query(
-      "UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, token = $2, authorized_at = NOW() WHERE id = $3",
-      [normalizedWalletAddress, token, sessionId]
-    );
-
+    await pool.query("UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, token = $2, authorized_at = NOW() WHERE id = $3", [normalizedWalletAddress, token, sessionId]);
     res.json({ message: 'Authorized successfully' });
   } catch (error) {
     console.error('[REMOTE_AUTH_FATAL]', error);
-    await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id::text = $1", [sessionId]).catch(() => {});
-    res.status(500).json({ 
-      error: 'Internal server error', 
-      details: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

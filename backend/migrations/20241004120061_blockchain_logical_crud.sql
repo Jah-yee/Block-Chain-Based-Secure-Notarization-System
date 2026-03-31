@@ -27,7 +27,7 @@ ALTER TABLE users
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tx_type_enum') THEN
-        CREATE TYPE tx_type_enum AS ENUM ('credit', 'debit');
+        CREATE TYPE tx_type_enum AS ENUM ('credit', 'debit', 'approval', 'burn');
     END IF;
 END$$;
 

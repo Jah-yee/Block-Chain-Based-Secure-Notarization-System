@@ -9,8 +9,7 @@ import { CheckCircle, XCircle, UserCheck, Shield, Search, Loader2 } from "lucide
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+import { apiClient } from "@/lib/api-client"
 
 interface User {
     id: string
@@ -32,16 +31,8 @@ export function KYCAdminPanel() {
     const fetchUsers = async () => {
         setIsLoading(true)
         try {
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/users`, {
-                headers: { Authorization: `Bearer ${token}` }
-            })
-            if (res.ok) {
-                const data = await res.json()
-                setUsers(data)
-            } else {
-                throw new Error("Failed to fetch users")
-            }
+            const data = await apiClient.get('/users')
+            setUsers(data)
         } catch (err: any) {
             toast({
                 title: "Error",
@@ -60,26 +51,12 @@ export function KYCAdminPanel() {
     const handleUpdate = async (userId: string, updates: Partial<User>) => {
         setIsUpdating(userId)
         try {
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/users/${userId}`, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify(updates),
+            await apiClient.put(`/users/${userId}`, updates)
+            toast({
+                title: "Success",
+                description: "User updated successfully.",
             })
-
-            if (res.ok) {
-                toast({
-                    title: "Success",
-                    description: "User updated successfully.",
-                })
-                await fetchUsers()
-            } else {
-                const error = await res.json()
-                throw new Error(error.error || "Update failed")
-            }
+            await fetchUsers()
         } catch (err: any) {
             toast({
                 title: "Update Failed",

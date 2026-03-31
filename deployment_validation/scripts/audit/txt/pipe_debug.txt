@@ -1,0 +1,258 @@
+﻿  console.log
+    ≡ƒ¢á∩╕Å Test DATABASE_URL set to: postgres://bbsns_user:bbsns_pass@localhost:5433/bbsns_test_db
+
+      at Object.log (tests/setup.js:13:9)
+
+  console.log
+    [dotenv@17.2.3] injecting env (9) from .env -- tip: ≡ƒùé∩╕Å backup and recover secrets: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  override existing env vars with { override: true }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    Γ£à Test database bbsns_test_db created.
+
+      at Object.log (tests/setup.js:39:13)
+
+  console.log
+    Γÿó∩╕Å Performing Nuclear Schema Reset on public schema...
+
+      at Object.log (tests/setup.js:49:13)
+
+  console.log
+    Γ£à Schema reset complete.
+
+      at Object.log (tests/setup.js:53:13)
+
+  console.log
+    ≡ƒÜÇ Initializing schema from: C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\init-db.sql
+
+      at Object.log (tests/setup.js:65:13)
+
+  console.log
+    Γ£à Schema initialized successfully.
+
+      at Object.log (tests/setup.js:69:13)
+
+  console.log
+    [REGISTER_DEBUG] Received registration request: {
+      name: 'Document Owner',
+      email: 'owner@test.com',
+      walletAddress: '0xBBBA3c30Cf15F42cCCFA02d2a6316B0ef3dCe030',
+      password: '[REDACTED]',
+      nationalId: 'ABC123456',
+      faceDescriptor: '...',
+      signature: 'dummy_sig_nonce'
+    }
+
+      at log (src/routes/users.js:24:11)
+
+  console.log
+    [REGISTER_DEBUG] Inputs validated. Hashing sensitive data...
+
+      at log (src/routes/users.js:52:11)
+
+  console.log
+    [REGISTER_DEBUG] Data hashed. Inserting into DB...
+
+      at log (src/routes/users.js:58:11)
+
+  console.log
+    [REGISTER_DEBUG] Registration successful for: owner@test.com
+
+      at log (src/routes/users.js:65:13)
+
+npx : FAIL 
+tests/pipeline-flow.integration.test.js
+At line:1 char:1
++ npx jest 
+tests/pipeline-flow.integration.test.js 
+--forceExit 2>&1 | O ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (FA 
+   IL tests/pipe...gration.test.js:String) [],  
+   RemoteException
+    + FullyQualifiedErrorId : NativeCommandErro 
+   r
+ 
+  BBSNS Pipeline: End-to-End Dataflow
+    ΓêÜ Step 1: Document Owner Registration 
+(251 ms)
+    ΓêÜ Step 2: Notary Public Application (181 
+ms)
+    ├ù Step 3: Notary Biometric Verification 
+(44 ms)
+    ├ù Step 4: Admin Approves Notary (40 ms)
+    ├ù Step 5: User Uploads Document (45 ms)
+    ├ù Step 6: Notary Approves Document 
+(Blockchain Simulation) (29 ms)
+    ├ù Step 7: Admin Final Audit View (29 ms)
+
+  ΓùÅ BBSNS Pipeline: End-to-End Dataflow ΓÇ║ 
+Step 3: Notary Biometric Verification
+
+    expect(received).toBe(expected) // 
+Object.is equality
+
+    Expected: 200
+    Received: 404
+
+    [0m [90m 85 |[39m             
+})[33m;[39m
+     [90m 86 |[39m
+    [31m[1m>[22m[39m[90m 87 |[39m         
+expect(res[33m.[39mstatusCode)[33m.[39mtoBe(
+[35m200[39m)[33m;[39m
+     [90m    |[39m                            
+    [31m[1m^[22m[39m
+     [90m 88 |[39m         expect(res[33m.[3
+9mbody[33m.[39mapplication[33m.[39mstatus)[
+33m.[39mtoBe([32m'APPLIED'[39m)[33m;[39m
+     [90m 89 |[39m     })[33m;[39m
+     [90m 90 |[39m[0m
+
+      at Object.toBe 
+(tests/pipeline-flow.integration.test.js:87:32)
+
+  ΓùÅ BBSNS Pipeline: End-to-End Dataflow ΓÇ║ 
+Step 4: Admin Approves Notary
+
+    expect(received).toBe(expected) // 
+Object.is equality
+
+    Expected: 200
+    Received: 401
+
+    [0m [90m  95 |[39m             [33m.[39
+m[36mset[39m([32m'x-actor-role'[39m[33m,[3
+9m [32m'admin'[39m)[33m;[39m [90m// For 
+middleware safety[39m
+     [90m  96 |[39m
+    [31m[1m>[22m[39m[90m  97 |[39m        
+ expect(res[33m.[39mstatusCode)[33m.[39mtoBe
+([35m200[39m)[33m;[39m
+     [90m     |[39m                           
+     [31m[1m^[22m[39m
+     [90m  98 |[39m         expect(res[33m.[
+39mbody[33m.[39muser[33m.[39mrole)[33m.[39
+mtoBe([32m'notary'[39m)[33m;[39m
+     [90m  99 |[39m         notaryUserId 
+[33m=[39m res[33m.[39mbody[33m.[39muser[3
+3m.[39mid[33m;[39m
+     [90m 100 |[39m         notaryToken 
+[33m=[39m jwt[33m.[39msign({ id[33m:[39m 
+notaryUserId[33m,[39m 
+wallet_address[33m:[39m notaryWallet[33m.[39
+maddress[33m.[39mtoLowerCase()[33m,[39m 
+role[33m:[39m [32m'notary'[39m }[33m,[39m 
+process[33m.[39menv[33m.[39m[33mJWT_SECRET
+[39m)[33m;[39m[0m
+
+      at Object.toBe 
+(tests/pipeline-flow.integration.test.js:97:32)
+
+  ΓùÅ BBSNS Pipeline: End-to-End Dataflow ΓÇ║ 
+Step 5: User Uploads Document
+
+    expect(received).toBe(expected) // 
+Object.is equality
+
+    Expected: 201
+    Received: 401
+
+    [0m [90m 115 |[39m         [36mif[39m 
+(fs[33m.[39mexistsSync(testFilePath)) 
+fs[33m.[39munlinkSync(testFilePath)[33m;[39m
+     [90m 116 |[39m
+    [31m[1m>[22m[39m[90m 117 |[39m        
+ expect(res[33m.[39mstatusCode)[33m.[39mtoBe
+([35m201[39m)[33m;[39m
+     [90m     |[39m                           
+     [31m[1m^[22m[39m
+     [90m 118 |[39m         expect(res[33m.[
+39mbody[33m.[39msubmission_state)[33m.[39mto
+Be([32m'pending'[39m)[33m;[39m
+     [90m 119 |[39m         expect(res[33m.[
+39mbody[33m.[39mntkr_sent)[33m.[39mtoBeGreat
+erThan([35m0[39m)[33m;[39m
+     [90m 120 |[39m         docId [33m=[39m 
+res[33m.[39mbody[33m.[39mid[33m;[39m[0m
+
+      at Object.toBe 
+(tests/pipeline-flow.integration.test.js:117:32)
+
+  ΓùÅ BBSNS Pipeline: End-to-End Dataflow ΓÇ║ 
+Step 6: Notary Approves Document (Blockchain 
+Simulation)
+
+    expect(received).toContain(expected) // 
+indexOf
+
+    Expected value: 401
+    Received array: [200, 502]
+
+    [0m [90m 133 |[39m
+     [90m 134 |[39m         [90m// 
+Blockchain simulated: could be 200 or 502 if 
+simulation mode isn't fully wired[39m
+    [31m[1m>[22m[39m[90m 135 |[39m        
+ expect([[35m200[39m[33m,[39m [35m502[39m]
+)[33m.[39mtoContain(res[33m.[39mstatusCode)
+[33m;[39m
+     [90m     |[39m                           
+ [31m[1m^[22m[39m
+     [90m 136 |[39m         [36mif[39m 
+(res[33m.[39mstatusCode [33m===[39m 
+[35m200[39m) {
+     [90m 137 |[39m             
+expect([[32m'verifying'[39m[33m,[39m [32m's
+ubmitted_to_blockchain'[39m])[33m.[39mtoConta
+in(res[33m.[39mbody[33m.[39msubmission_state
+)[33m;[39m
+     [90m 138 |[39m         }[0m
+
+      at Object.toContain 
+(tests/pipeline-flow.integration.test.js:135:28)
+
+  ΓùÅ BBSNS Pipeline: End-to-End Dataflow ΓÇ║ 
+Step 7: Admin Final Audit View
+
+    expect(received).toBe(expected) // 
+Object.is equality
+
+    Expected: 200
+    Received: 401
+
+    [0m [90m 144 |[39m             [33m.[39
+m[36mset[39m([32m'Authorization'[39m[33m,[
+39m [32m`Bearer ${adminToken}`[39m)[33m;[39m
+     [90m 145 |[39m
+    [31m[1m>[22m[39m[90m 146 |[39m        
+ expect(res[33m.[39mstatusCode)[33m.[39mtoBe
+([35m200[39m)[33m;[39m
+     [90m     |[39m                           
+     [31m[1m^[22m[39m
+     [90m 147 |[39m         expect([33mArray
+[39m[33m.[39misArray(res[33m.[39mbody))[33m
+.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m 148 |[39m     })[33m;[39m
+     [90m 149 |[39m })[33m;[39m[0m
+
+      at Object.toBe 
+(tests/pipeline-flow.integration.test.js:146:32)
+
+Test Suites: 1 failed, 1 total
+Tests:       5 failed, 2 passed, 7 total
+Snapshots:   0 total
+Time:        3.22 s
+Ran all test suites matching 
+tests/pipeline-flow.integration.test.js.
+Force exiting Jest: Have you considered using 
+`--detectOpenHandles` to detect async 
+operations that kept running after all tests 
+finished?

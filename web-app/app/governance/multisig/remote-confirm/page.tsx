@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 
-const API_URL = "http://localhost:5000"; // Assuming local dev for now, should be env
+import { apiClient } from "@/lib/api-client"
 
 function RemoteConfirmContent() {
     const searchParams = useSearchParams()
@@ -46,10 +46,7 @@ function RemoteConfirmContent() {
 
         const fetchSession = async () => {
             try {
-                // Reuse status endpoint as it works for both generic remote sessions
-                const res = await fetch(`${API_URL}/api/governance/remote/vote/status/${sessionId}`)
-                if (!res.ok) throw new Error("Session not found or expired")
-                const data = await res.json()
+                const data = await apiClient.get(`/api/governance/remote/confirm/status/${sessionId}`)
 
                 if (data.status !== "pending") {
                     setStatus(data.status as any)
@@ -81,9 +78,9 @@ function RemoteConfirmContent() {
         try {
             const { ethers } = await import("ethers")
             const provider = new ethers.BrowserProvider((window as any).ethereum)
-            const accounts = await provider.send("eth_requestAccounts", [])
+            const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' })
             const signer = await provider.getSigner()
-            const walletAddress = await signer.getAddress()
+            const walletAddress = accounts[0] // Use accounts[0] directly
             setConnectedWallet(walletAddress)
 
             if (!sessionData?.challenge) {
@@ -93,25 +90,14 @@ function RemoteConfirmContent() {
             // Sign the challenge
             const signature = await signer.signMessage(sessionData.challenge)
 
-            // Submit to MultiSig Authorize Endpoint
-            const authRes = await fetch(`${API_URL}/api/governance/remote/multisig/authorize`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    sessionId,
-                    walletAddress,
-                    signature
-                })
+            // Submit to MultiSig Authorize Endpoint using apiClient
+            const result = await apiClient.post("/api/governance/remote/confirm/authorize", {
+                sessionId,
+                walletAddress,
+                signature
             })
 
-            if (!authRes.ok) {
-                const err = await authRes.json()
-                throw new Error(err.error || "Authorization failed")
-            }
-
-            const result = await authRes.json()
-
-            setStatus("authorized") // or 'executed' if we want to show that
+            setStatus("authorized")
             toast({
                 title: result.executed ? "Executed On-Chain!" : "Confirmation Signed",
                 description: result.message,

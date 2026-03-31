@@ -12,8 +12,9 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useEffect } from "react"
 import { apiClient } from "@/lib/api-client"
+import { useConfig } from "@/providers/ConfigProvider"
 
-const NTKR_ADDRESS = process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
+
 const NTKR_ABI = [
   "function buyPackage(uint256 packageId) external payable",
   "function userDailyLimit(address) view returns (uint256)",
@@ -21,14 +22,16 @@ const NTKR_ABI = [
 ];
 
 const tokenPackages = [
-  { id: 1, amount: 5, price: "0.001 BNB", bnbValue: "0.001", description: "Basic entry pack for standard notarizations" },
-  { id: 2, amount: 15, price: "0.002 BNB", bnbValue: "0.002", description: "Popular choice for active professional users" },
-  { id: 3, amount: 30, price: "0.003 BNB", bnbValue: "0.003", description: "Best value for high-volume enterprise needs" },
+  { id: 1, amount: 5, price: "0.001 BNB", bnbValue: "0.001", description: "Basic entry pack for standard notarizations" } as any,
+  { id: 2, amount: 15, price: "0.002 BNB", bnbValue: "0.002", description: "Popular choice for active professional users" } as any,
+  { id: 3, amount: 30, price: "0.003 BNB", bnbValue: "0.003", description: "Best value for high-volume enterprise needs" } as any,
 ]
 
 const NTKR_CAP = 100;
 
 export function TokenRequestInterface() {
+  const { config } = useConfig()
+  const NTKR_ADDRESS = config?.contracts.ntkr || "0x..."
   const { balances, liveBalances, connectedAccount, refreshBalances, connectWallet, user, isLoading: isProfileLoading } = useWalletSession()
   const [submittingId, setSubmittingId] = useState<number | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -40,7 +43,8 @@ export function TokenRequestInterface() {
     setIsRefreshing(false)
   }
 
-  const isWrongNetwork = liveBalances.chainId !== null && liveBalances.chainId !== 97;
+  const targetChainId = config?.chainId || 97;
+  const isWrongNetwork = liveBalances.chainId !== null && liveBalances.chainId !== targetChainId;
   const walletMismatch = Boolean(connectedAccount && user?.wallet_address &&
     connectedAccount.toLowerCase() !== user.wallet_address.toLowerCase());
 
@@ -144,8 +148,8 @@ export function TokenRequestInterface() {
         <Alert variant="destructive" className="bg-orange-500/10 border-orange-500/20 text-orange-600 mb-4 animate-in slide-in-from-top duration-500">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="text-xs font-medium flex items-center justify-between w-full">
-            <span><strong>Wrong Network:</strong> You are connected to Chain ID {liveBalances.chainId}. Please switch to BNB Testnet (Chain ID 97) to see your tokens.</span>
-            <Button size="sm" variant="outline" className="h-7 text-[10px] ml-4 bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/40" onClick={() => window.ethereum?.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x61' }] })}>
+            <span><strong>Wrong Network:</strong> You are connected to Chain ID {liveBalances.chainId}. Please switch to BNB Testnet (Chain ID {targetChainId}) to see your tokens.</span>
+            <Button size="sm" variant="outline" className="h-7 text-[10px] ml-4 bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/40" onClick={() => window.ethereum?.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${targetChainId.toString(16)}` }] })}>
               Switch Network
             </Button>
           </AlertDescription>
@@ -185,8 +189,8 @@ export function TokenRequestInterface() {
                             address: NTKR_ADDRESS,
                             symbol: 'NTKR',
                             decimals: 18,
-                          },
-                        },
+                          } as any,
+                        } as any,
                       });
                     } catch (error) {
                       console.error(error);

@@ -1,4 +1,4 @@
-let API_URL = 'http://13.126.61.241:5000';
+let API_URL = import.meta.env.VITE_API_BASE_URL || 'http://13.205.148.98:5000';
 let configMode = 'LIVE';
 
 // 🛡️ [RESILIENCE] Listen for Configuration Mode updates from ConfigAuthority

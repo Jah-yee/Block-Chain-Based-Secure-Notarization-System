@@ -1,0 +1,116 @@
+﻿  console.log
+    ≡ƒ¢á∩╕Å Test DATABASE_URL set to: postgres://bbsns_user:bbsns_pass@localhost:5433/bbsns_test_db
+
+      at Object.log (tests/setup.js:13:9)
+
+  console.log
+    [dotenv@17.2.3] injecting env (9) from .env -- tip: ≡ƒæÑ sync secrets across teammates & machines: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  suppress all logs with { quiet: true }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  suppress all logs with { quiet: true }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    Γ£à Test database bbsns_test_db created.
+
+      at Object.log (tests/setup.js:39:13)
+
+  console.log
+    Γÿó∩╕Å Performing Nuclear Schema Reset on public schema...
+
+      at Object.log (tests/setup.js:49:13)
+
+  console.log
+    Γ£à Schema reset complete.
+
+      at Object.log (tests/setup.js:53:13)
+
+  console.log
+    ≡ƒÜÇ Initializing schema from: C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\init-db.sql
+
+      at Object.log (tests/setup.js:65:13)
+
+  console.log
+    Γ£à Schema initialized successfully.
+
+      at Object.log (tests/setup.js:69:13)
+
+  console.error
+    Verify error: TypeError: invalid raw signature length (argument="signature", value="0xdeadbeef", code=INVALID_ARGUMENT, version=6.15.0)
+        at makeError (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\utils\errors.ts:691:21)
+        at assert (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\utils\errors.ts:719:25)
+        at assertArgument (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\utils\errors.ts:731:5)
+        at assertError (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\crypto\signature.ts:295:27)
+        at Function.from (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\crypto\signature.ts:319:13)
+        at Function.recoverPublicKey (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\crypto\signing-key.ts:169:31)
+        at recoverAddress (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\transaction\address.ts:27:38)
+        at Object.verifyMessage (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\node_modules\ethers\src.ts\hash\message.ts:50:26)
+        at verifyMessage (C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\src\routes\auth.js:67:37)
+        at processTicksAndRejections (node:internal/process/task_queues:95:5) {
+      code: 'INVALID_ARGUMENT',
+      argument: 'signature',
+      value: '0xdeadbeef',
+      shortMessage: 'invalid raw signature length'
+    }
+
+    [0m [90m 75 |[39m     res[33m.[39mjson({ token[33m,[39m expires_in[33m:[39m [33mJWT_EXPIRY_SECONDS[39m })[33m;[39m
+     [90m 76 |[39m   } [36mcatch[39m (error) {
+    [31m[1m>[22m[39m[90m 77 |[39m     console[33m.[39merror([32m'Verify error:'[39m[33m,[39m error)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 78 |[39m     res[33m.[39mstatus([35m500[39m)[33m.[39mjson({ error[33m:[39m [32m'Internal server error'[39m })[33m;[39m
+     [90m 79 |[39m   }
+     [90m 80 |[39m })[33m;[39m[0m
+
+      at error (src/routes/auth.js:77:13)
+
+npx : PASS tests/auth.test.js
+At line:1 char:1
++ npx jest tests/auth.test.js --forceExit 
+--testTimeout=30000 2>&1 | Ou ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (PA 
+   SS tests/auth.test.js:String) [], RemoteExc  
+  eption
+    + FullyQualifiedErrorId : NativeCommandErro 
+   r
+ 
+  Auth Tests
+    ΓêÜ POST /auth/nonce - should create nonce 
+(132 ms)
+    ΓêÜ POST /auth/nonce - should return 400 if 
+wallet_address missing (28 ms)
+    ΓêÜ verifyNonce - should verify valid nonce 
+(50 ms)
+    ΓêÜ verifyNonce - should throw for expired 
+nonce (40 ms)
+    ΓêÜ verifyNonce - should throw for already 
+used nonce (31 ms)
+    ΓêÜ verifyNonce - should throw for invalid 
+nonce (34 ms)
+    ΓêÜ POST /auth/verify - valid signature 
+returns JWT (188 ms)
+    ΓêÜ POST /auth/verify - invalid signature 
+returns 400/401 (92 ms)
+    ΓêÜ POST /auth/verify - reused nonce 
+returns 400 (75 ms)
+    ΓêÜ POST /auth/verify - missing fields 
+returns 400 (37 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       10 passed, 10 total
+Snapshots:   0 total
+Time:        3.027 s
+Ran all test suites matching tests/auth.test.js.
+Force exiting Jest: Have you considered using 
+`--detectOpenHandles` to detect async 
+operations that kept running after all tests 
+finished?

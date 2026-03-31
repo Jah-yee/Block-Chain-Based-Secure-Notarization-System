@@ -1,0 +1,169 @@
+﻿  console.log
+    ≡ƒ¢á∩╕Å Test DATABASE_URL set to: postgres://bbsns_user:bbsns_pass@localhost:5433/bbsns_test_db
+
+      at Object.log (tests/setup.js:13:9)
+
+  console.log
+    [dotenv@17.2.3] injecting env (9) from .env -- tip: ΓÜÖ∩╕Å  load multiple .env files with { path: ['.env.local', '.env'] }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (0) from .env -- tip: ≡ƒùé∩╕Å backup and recover secrets: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    Γ£à Test database bbsns_test_db created.
+
+      at Object.log (tests/setup.js:39:13)
+
+  console.log
+    Γÿó∩╕Å Performing Nuclear Schema Reset on public schema...
+
+      at Object.log (tests/setup.js:49:13)
+
+  console.log
+    Γ£à Schema reset complete.
+
+      at Object.log (tests/setup.js:53:13)
+
+  console.log
+    ≡ƒÜÇ Initializing schema from: C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\backend\tests\init-db.sql
+
+      at Object.log (tests/setup.js:65:13)
+
+  console.log
+    Γ£à Schema initialized successfully.
+
+      at Object.log (tests/setup.js:69:13)
+
+  console.log
+    [REGISTER_DEBUG] Received registration request: {
+      name: 'Document Owner',
+      email: 'owner@test.com',
+      walletAddress: '0x39F00F694e8C3628E8eFC4da8944B242fFd73d69',
+      password: '[REDACTED]',
+      nationalId: 'ABC123456',
+      faceDescriptor: '...',
+      signature: 'dummy_sig_nonce'
+    }
+
+      at log (src/routes/users.js:24:11)
+
+  console.log
+    [REGISTER_DEBUG] Inputs validated. Hashing sensitive data...
+
+      at log (src/routes/users.js:52:11)
+
+  console.log
+    [REGISTER_DEBUG] Data hashed. Inserting into DB...
+
+      at log (src/routes/users.js:58:11)
+
+  console.log
+    [REGISTER_DEBUG] Registration successful for: owner@test.com
+
+      at log (src/routes/users.js:65:13)
+
+  console.error
+    [DEBUG_ACTOR] Loaded actor 1, role: admin, wallet: 0xadminpipeline12345678
+
+    [0m [90m 38 |[39m     [36mif[39m (actor[33m.[39mis_deactivated) [36mreturn[39m res[33m.[39mstatus([35m403[39m)[33m.[39mjson({ error[33m:[39m [32m'Actor account is deactivated'[39m })[33m;[39m
+     [90m 39 |[39m     req[33m.[39mactor [33m=[39m actor[33m;[39m
+    [31m[1m>[22m[39m[90m 40 |[39m     console[33m.[39merror([32m`[DEBUG_ACTOR] Loaded actor ${actor.id}, role: ${actor.role}, wallet: ${actor.wallet_address}`[39m)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 41 |[39m     next()[33m;[39m
+     [90m 42 |[39m   } [36mcatch[39m (err) {
+     [90m 43 |[39m     console[33m.[39merror([32m'loadActor error'[39m[33m,[39m err)[33m;[39m[0m
+
+      at error (middleware/actor.js:40:13)
+
+  console.error
+    [DEBUG_ACTOR] Loaded actor 2, role: user, wallet: 0x39f00f694e8c3628e8efc4da8944b242ffd73d69
+
+    [0m [90m 38 |[39m     [36mif[39m (actor[33m.[39mis_deactivated) [36mreturn[39m res[33m.[39mstatus([35m403[39m)[33m.[39mjson({ error[33m:[39m [32m'Actor account is deactivated'[39m })[33m;[39m
+     [90m 39 |[39m     req[33m.[39mactor [33m=[39m actor[33m;[39m
+    [31m[1m>[22m[39m[90m 40 |[39m     console[33m.[39merror([32m`[DEBUG_ACTOR] Loaded actor ${actor.id}, role: ${actor.role}, wallet: ${actor.wallet_address}`[39m)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 41 |[39m     next()[33m;[39m
+     [90m 42 |[39m   } [36mcatch[39m (err) {
+     [90m 43 |[39m     console[33m.[39merror([32m'loadActor error'[39m[33m,[39m err)[33m;[39m[0m
+
+      at error (middleware/actor.js:40:13)
+
+  console.error
+    [DEBUG_ACTOR] Loaded actor 3, role: notary, wallet: 0x21aac5e2f344d09a89444b9f3e964c3a8a6025a1
+
+    [0m [90m 38 |[39m     [36mif[39m (actor[33m.[39mis_deactivated) [36mreturn[39m res[33m.[39mstatus([35m403[39m)[33m.[39mjson({ error[33m:[39m [32m'Actor account is deactivated'[39m })[33m;[39m
+     [90m 39 |[39m     req[33m.[39mactor [33m=[39m actor[33m;[39m
+    [31m[1m>[22m[39m[90m 40 |[39m     console[33m.[39merror([32m`[DEBUG_ACTOR] Loaded actor ${actor.id}, role: ${actor.role}, wallet: ${actor.wallet_address}`[39m)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 41 |[39m     next()[33m;[39m
+     [90m 42 |[39m   } [36mcatch[39m (err) {
+     [90m 43 |[39m     console[33m.[39merror([32m'loadActor error'[39m[33m,[39m err)[33m;[39m[0m
+
+      at error (middleware/actor.js:40:13)
+
+  console.error
+    [DEBUG_ACTOR] Loaded actor 1, role: admin, wallet: 0xadminpipeline12345678
+
+    [0m [90m 38 |[39m     [36mif[39m (actor[33m.[39mis_deactivated) [36mreturn[39m res[33m.[39mstatus([35m403[39m)[33m.[39mjson({ error[33m:[39m [32m'Actor account is deactivated'[39m })[33m;[39m
+     [90m 39 |[39m     req[33m.[39mactor [33m=[39m actor[33m;[39m
+    [31m[1m>[22m[39m[90m 40 |[39m     console[33m.[39merror([32m`[DEBUG_ACTOR] Loaded actor ${actor.id}, role: ${actor.role}, wallet: ${actor.wallet_address}`[39m)[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 41 |[39m     next()[33m;[39m
+     [90m 42 |[39m   } [36mcatch[39m (err) {
+     [90m 43 |[39m     console[33m.[39merror([32m'loadActor error'[39m[33m,[39m err)[33m;[39m[0m
+
+      at error (middleware/actor.js:40:13)
+
+  console.error
+    [DEBUG_DOCS] Hit GET /documents
+
+    [0m [90m 122 |[39m
+     [90m 123 |[39m router[33m.[39m[36mget[39m([32m'/'[39m[33m,[39m [36masync[39m (req[33m,[39m res) [33m=>[39m {
+    [31m[1m>[22m[39m[90m 124 |[39m   console[33m.[39merror([32m'[DEBUG_DOCS] Hit GET /documents'[39m)[33m;[39m
+     [90m     |[39m           [31m[1m^[22m[39m
+     [90m 125 |[39m   [36mtry[39m {
+     [90m 126 |[39m     [36mif[39m ([33m![39mreq[33m.[39mactor) [36mreturn[39m res[33m.[39mstatus([35m401[39m)[33m.[39mjson({ error[33m:[39m [32m'Actor header required'[39m })[33m;[39m
+     [90m 127 |[39m[0m
+
+      at error (src/routes/documents.js:124:11)
+      at Layer.handleRequest (node_modules/router/lib/layer.js:152:17)
+      at next (node_modules/router/lib/route.js:157:13)
+      at Route.dispatch (node_modules/router/lib/route.js:117:3)
+      at handle (node_modules/router/index.js:435:11)
+      at Layer.handleRequest (node_modules/router/lib/layer.js:152:17)
+      at node_modules/router/index.js:295:15
+      at processParams (node_modules/router/index.js:582:12)
+      at next (node_modules/router/index.js:291:5)
+      at next (middleware/actor.js:41:5)
+
+npx : PASS 
+tests/pipeline-flow.integration.test.js
+At line:1 char:1
++ npx jest 
+tests/pipeline-flow.integration.test.js 
+--forceExit --testTi ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (PA 
+   SS tests/pipe...gration.test.js:String) [],  
+   RemoteException
+    + FullyQualifiedErrorId : NativeCommandErro 
+   r
+ 
+  BBSNS Pipeline: End-to-End Dataflow
+    ΓêÜ Full End-to-End Pipeline Flow (397 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       1 passed, 1 total
+Snapshots:   0 total
+Time:        2.556 s, estimated 4 s
+Ran all test suites matching 
+tests/pipeline-flow.integration.test.js.
+Force exiting Jest: Have you considered using 
+`--detectOpenHandles` to detect async 
+operations that kept running after all tests 
+finished?

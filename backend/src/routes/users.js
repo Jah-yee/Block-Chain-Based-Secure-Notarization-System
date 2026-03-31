@@ -94,10 +94,10 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
         national_id_hash, 
         JSON.stringify(faceDescriptor), 
         signature, 
-        'owner', 
+        'user', 
         'pass',
         true,
-        'PENDING_KYC'
+        'PENDING'
       ]
     );
     console.log("[REGISTER_DEBUG] Registration successful for:", email);

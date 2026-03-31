@@ -24,9 +24,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useWalletSession } from "@/hooks/use-wallet-session"
 import { signSubmitAction, signConfirmAction, connectWallet } from "@/lib/web3"
+import { useConfig } from "@/providers/ConfigProvider"
 import { ethers } from "ethers"
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+import { apiClient } from "@/lib/api-client"
 
 interface Proposal {
     id: number
@@ -91,13 +92,14 @@ const PROPOSAL_PRESETS = [
 ]
 
 export function GovernancePanel() {
+    const { config } = useConfig()
     const { user } = useWalletSession()
     const [proposals, setProposals] = useState<Proposal[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [isCreating, setIsCreating] = useState(false)
     const [isVoting, setIsVoting] = useState<number | null>(null)
     const [isSubmittingOnChain, setIsSubmittingOnChain] = useState<number | null>(null)
-    const [multiSigAddress] = useState(process.env.NEXT_PUBLIC_MULTISIG_ADDRESS || "")
+    const [multiSigAddress] = useState(config?.contracts.multisig || "")
     const { toast } = useToast()
 
     // Form State
@@ -112,14 +114,8 @@ export function GovernancePanel() {
     const fetchProposals = async () => {
         setIsLoading(true)
         try {
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/governance/proposals`, {
-                headers: { Authorization: `Bearer ${token}` }
-            })
-            if (res.ok) {
-                const data = await res.json()
-                setProposals(data)
-            }
+            const data = await apiClient.get('/governance/proposals')
+            setProposals(data || [])
         } catch (err) {
             console.error("Fetch Proposals Error:", err)
         } finally {
@@ -156,26 +152,14 @@ export function GovernancePanel() {
 
         setIsCreating(true)
         try {
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/governance/proposals`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify(formData)
-            })
+            await apiClient.post('/governance/proposals', formData)
 
-            if (res.ok) {
-                toast({
-                    title: "Proposal Created",
-                    description: "Your proposal is now active for voting.",
-                })
-                setFormData({ ...formData, title: "", description: "", target_id: "" })
-                fetchProposals()
-            } else {
-                throw new Error("Failed to create proposal")
-            }
+            toast({
+                title: "Proposal Created",
+                description: "Your proposal is now active for voting.",
+            })
+            setFormData({ ...formData, title: "", description: "", target_id: "" })
+            fetchProposals()
         } catch (err: any) {
             toast({
                 title: "Error",
@@ -203,28 +187,15 @@ export function GovernancePanel() {
             })
 
             // 2. Submit to Backend
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/governance/proposals/${proposalId}/vote`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({ decision, signature })
-            })
+            const data = await apiClient.post(`/governance/proposals/${proposalId}/vote`, { decision, signature })
 
-            const data = await res.json()
-            if (res.ok) {
-                toast({
-                    title: data.executed ? "Proposal Executed!" : "Vote Recorded",
-                    description: data.executed
-                        ? "The threshold was met and the action has been performed."
-                        : "Your vote has been submitted and recorded on-chain.",
-                })
-                fetchProposals()
-            } else {
-                throw new Error(data.error || "Voting failed")
-            }
+            toast({
+                title: data.executed ? "Proposal Executed!" : "Vote Recorded",
+                description: data.executed
+                    ? "The threshold was met and the action has been performed."
+                    : "Your vote has been submitted and recorded on-chain.",
+            })
+            fetchProposals()
         } catch (err: any) {
             toast({
                 title: "Voting Error",
@@ -242,7 +213,9 @@ export function GovernancePanel() {
             const { signer, chainId } = await connectWallet()
 
             // 1. Prepare Data for Multi-Sig
-            let targetAddr = process.env.NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS || ""
+            const resData = await apiClient.post(`/governance/proposals/${proposal.id}/prepare-on-chain`)
+            
+            let targetAddr = resData.target || config?.contracts.documentRegistry || ""
             let value = "0"
             let data = "0x"
             const version = proposal.signer_version || 1
@@ -259,26 +232,13 @@ export function GovernancePanel() {
             )
 
             // 3. Relay to Backend
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/governance/proposals/${proposal.id}/submit-on-chain`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({ signature })
-            })
+            await apiClient.post(`/governance/proposals/${proposal.id}/submit-on-chain`, { signature })
 
-            const resData = await res.json()
-            if (res.ok) {
-                toast({
-                    title: "Submitted to Blockchain",
-                    description: "The proposal is now on the Multi-Sig queue.",
-                })
-                fetchProposals()
-            } else {
-                throw new Error(resData.error || "Submission failed")
-            }
+            toast({
+                title: "Submitted to Blockchain",
+                description: "The proposal is now on the Multi-Sig queue.",
+            })
+            fetchProposals()
         } catch (err: any) {
             toast({
                 title: "Submission Error",
@@ -309,26 +269,13 @@ export function GovernancePanel() {
             )
 
             // 2. Relay to Backend
-            const token = localStorage.getItem("bbsns_token")
-            const res = await fetch(`${BACKEND_URL}/governance/proposals/${proposal.id}/confirm-on-chain`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({ signature, txIndex })
-            })
+            await apiClient.post(`/governance/proposals/${proposal.id}/confirm-on-chain`, { signature, txIndex })
 
-            const resData = await res.json()
-            if (res.ok) {
-                toast({
-                    title: "Confirmation Relayed",
-                    description: "Your on-chain confirmation has been successfully recorded.",
-                })
-                fetchProposals()
-            } else {
-                throw new Error(resData.error || "Confirmation failed")
-            }
+            toast({
+                title: "Confirmation Relayed",
+                description: "Your on-chain confirmation has been successfully recorded.",
+            })
+            fetchProposals()
         } catch (err: any) {
             toast({
                 title: "Error",
@@ -431,7 +378,7 @@ export function GovernancePanel() {
                                     title: "Pause Document Notarizations",
                                     description: "Emergency pause for all new document registrations due to system maintenance or security alert.",
                                     type: "pause_registry",
-                                    target_id: process.env.NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS || ""
+                                    target_id: config?.contracts.documentRegistry || ""
                                 });
                                 toast({ title: "Template Loaded", description: "Review and click 'Submit for Voting' below." });
                             }}
@@ -447,7 +394,7 @@ export function GovernancePanel() {
                                     title: "Unpause Document Notarizations",
                                     description: "Restoring system registration capabilities following audit or maintenance.",
                                     type: "unpause_registry",
-                                    target_id: process.env.NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS || ""
+                                    target_id: config?.contracts.documentRegistry || ""
                                 });
                                 toast({ title: "Template Loaded", description: "Review and click 'Submit for Voting' below." });
                             }}

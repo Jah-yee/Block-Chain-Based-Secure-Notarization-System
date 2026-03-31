@@ -1,0 +1,69 @@
+﻿[dotenv@17.2.3] injecting env (3) from .env -- tip: ΓÜÖ∩╕Å  load multiple .env files with { path: ['.env.local', '.env'] }
+[
+  {
+    "constraint_name": "users_pkey",
+    "constraint_type": "p",
+    "constraint_def": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "users_username_key",
+    "constraint_type": "u",
+    "constraint_def": "UNIQUE (username)"
+  },
+  {
+    "constraint_name": "users_email_key",
+    "constraint_type": "u",
+    "constraint_def": "UNIQUE (email)"
+  },
+  {
+    "constraint_name": "users_wallet_address_key",
+    "constraint_type": "u",
+    "constraint_def": "UNIQUE (wallet_address)"
+  },
+  {
+    "constraint_name": "check_role_valid",
+    "constraint_type": "c",
+    "constraint_def": "CHECK (((role)::text = ANY ((ARRAY['user'::character varying, 'notary'::character varying, 'admin'::character varying])::text[])))"
+  },
+  {
+    "constraint_name": "unique_email",
+    "constraint_type": "u",
+    "constraint_def": "UNIQUE (email)"
+  },
+  {
+    "constraint_name": "unique_wallet",
+    "constraint_type": "u",
+    "constraint_def": "UNIQUE (wallet_address)"
+  }
+]
+Indices:
+[
+  {
+    "indexname": "users_pkey",
+    "indexdef": "CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)"
+  },
+  {
+    "indexname": "users_username_key",
+    "indexdef": "CREATE UNIQUE INDEX users_username_key ON public.users USING btree (username)"
+  },
+  {
+    "indexname": "users_email_key",
+    "indexdef": "CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email)"
+  },
+  {
+    "indexname": "users_wallet_address_key",
+    "indexdef": "CREATE UNIQUE INDEX users_wallet_address_key ON public.users USING btree (wallet_address)"
+  },
+  {
+    "indexname": "unique_email",
+    "indexdef": "CREATE UNIQUE INDEX unique_email ON public.users USING btree (email)"
+  },
+  {
+    "indexname": "unique_wallet",
+    "indexdef": "CREATE UNIQUE INDEX unique_wallet ON public.users USING btree (wallet_address)"
+  },
+  {
+    "indexname": "idx_users_wallet_lower",
+    "indexdef": "CREATE INDEX idx_users_wallet_lower ON public.users USING btree (lower((wallet_address)::text))"
+  }
+]

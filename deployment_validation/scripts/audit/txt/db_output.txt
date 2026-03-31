@@ -1,0 +1,74 @@
+﻿[dotenv@17.2.3] injecting env (2) from .env -- tip: ΓÜÖ∩╕Å  specify custom .env file path with { path: '/custom/path/.env' }
+USERS: [
+  {
+    "id": 1,
+    "email": "owner@bbsns.com",
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "role": "user",
+    "national_id_hash": "c404016cd0f11b7ab292a445e7521f6a2405b6623eae896fa243726b7f6e8312"
+  },
+  {
+    "id": 4,
+    "email": "admin@bbsns.com",
+    "wallet_address": "0x02252db03af7cd8c8d3ec6cfd3ae5f6dab69acd0",
+    "role": "admin",
+    "national_id_hash": "c55568700466c1f7beb5832605474d295849b25de0a44228611f8276a5a33a45"
+  },
+  {
+    "id": 5,
+    "email": "notary@bbsns.com",
+    "wallet_address": "0xa82a6fcbb2db5979a6fcca83c24317605580310e",
+    "role": "notary",
+    "national_id_hash": "da9031377ecf3979696ad244129c2a7bdc1d7a576d0b02f5463943a2b4e44b39"
+  }
+]
+RECENT NONCES: [
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "51ce58844848eaefd0de21f86907dd8358842591308e3beb75ef572f6682314f",
+    "created_at": "2026-02-16T09:45:26.230Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "66a7237447e244aaa887b3182f082e7a42a132d178abc00568996b874a0c2a40",
+    "created_at": "2026-02-16T09:40:20.173Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "49ca145fea5b43b337896ab34e73d6dc32843bf262823a564206a34a6dd3b23d",
+    "created_at": "2026-02-16T09:09:37.464Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "b9b5e67e1259bb8f0ffad641dd60b1f528b0d52313fb7eced90bd15b105b529e",
+    "created_at": "2026-02-16T09:04:50.757Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "48c13a8d1391760c363fc89c6453f54719e7dab8dcfc11d0a3548977ce185584",
+    "created_at": "2026-02-16T08:28:13.814Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "baedae77fee2fb74497ac19d5ae24a111852a447118b65f2642c32da6ceba060",
+    "created_at": "2026-02-16T08:27:23.091Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "f62cf5e02a533377f45ff24414dfd5ffe82151c912d732b5a60b5e11c19edda7",
+    "created_at": "2026-02-16T08:25:50.100Z",
+    "used_at": null
+  },
+  {
+    "wallet_address": "0x91ed53552ca83709a06d5763315e09f5fc6cdd30",
+    "nonce": "05ddf365c256aa973041a48e86ae82ec192505503c47e9b0e7f2797aca32ed06",
+    "created_at": "2026-02-16T08:23:48.467Z",
+    "used_at": null
+  }
+]

@@ -23,13 +23,14 @@ import {
     Settings
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../ui/card"
-import { Button } from "../ui/button"
+import { Button } from "../ui/button";
+import { useConfig } from "../../contexts/ConfigAuthority";
 import { Badge } from "../ui/badge"
 import { Input } from "../ui/input"
 import { Textarea } from "../ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { toast } from "sonner"
-import api from "../../api"
+import api from "../../services/api";
 
 interface Proposal {
     id: number
@@ -375,7 +376,8 @@ export function Governance({ role, user }: GovernanceProps) {
                 body: JSON.stringify({ proposalId, decision })
             });
 
-            const webAppUrl = `http://localhost:3000/governance/remote-sign?sessionId=${session.sessionId}`;
+            const { config } = useConfig();
+            const webAppUrl = `${config?.webAppUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
 
             // Open System Browser
             // @ts-ignore

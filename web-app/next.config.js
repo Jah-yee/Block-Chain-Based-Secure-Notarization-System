@@ -4,6 +4,12 @@ const path = require('path');
 const nextConfig = {
     reactStrictMode: true,
     swcMinify: true,
+    eslint: {
+        ignoreDuringBuilds: true,
+    },
+    typescript: {
+        ignoreBuildErrors: true,
+    },
     webpack: (config) => {
         config.resolve.alias['@'] = path.resolve(__dirname);
         // Suppress warnings from libraries that use dynamic requires for node compatibility

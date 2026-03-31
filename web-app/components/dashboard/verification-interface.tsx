@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast"
 import { useWalletSession } from "@/hooks/use-wallet-session"
 import { Search, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
+import { useConfig } from "@/providers/ConfigProvider"
 import { connectWallet, signNotarizeAction } from "@/lib/web3"
 
 interface VerificationResult {
@@ -23,6 +24,7 @@ interface VerificationResult {
 }
 
 export function VerificationInterface() {
+  const { config } = useConfig()
   const { user, balances, isLoading: isSessionLoading, refreshBalances } = useWalletSession()
   const [searchQuery, setSearchQuery] = useState("")
   const [isVerifying, setIsVerifying] = useState(false)
@@ -77,7 +79,7 @@ export function VerificationInterface() {
       // 2. Prepare Data
       const timestamp = Math.floor(Date.now() / 1000);
       const statusInt = newStatus === 'approved' ? 1 : 2;
-      const registryAddress = process.env.NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS || "";
+      const registryAddress = config?.contracts.documentRegistry || "";
 
       if (!registryAddress) {
         throw new Error("Registry contract address not configured in environment.");

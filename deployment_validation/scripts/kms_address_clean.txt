@@ -1,0 +1,9 @@
+﻿≡ƒôä PEM file: C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\documentation\IAM\Relayer Publickey-18f4f3b7-c83b-4a2e-9daf-b91692d5f95d.pem
+   DER length: 88 bytes
+   Uncompressed pubkey: 0x046211ca49073eb4c73c825b08e07d3c1ab9a1cf49e8180f619663152574ba5f14a6a8b420b542d75b4c6027ad022154fb6d5178a980269014ae070b2978e8b098
+
+Γ£à Derived Ethereum Address: 0x11FBDd7F0895526a6945C114e0fBaDF4Bf6159b3
+   (Checksummed via EIP-55)
+
+≡ƒôï For .env:
+KMS_EXPECTED_ADDRESS=0x11FBDd7F0895526a6945C114e0fBaDF4Bf6159b3

@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import { apiClient } from "@/lib/api-client"
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ""
 
 interface UserProfile {
     id: string
@@ -85,14 +85,7 @@ function RemoteLoginContent() {
 
         const fetchChallenge = async () => {
             try {
-                const res = await fetch(`${BACKEND_URL}/api/auth/remote/status/${sessionId}`)
-                if (!res.ok) {
-                    const body = await res.json().catch(() => ({}))
-                    if (res.status === 400) throw new Error("Invalid session ID. Please restart the desktop login.")
-                    if (res.status === 404) throw new Error("Session not found. It may have expired.")
-                    throw new Error(body.error || "Failed to load session.")
-                }
-                const data = await res.json()
+                const data = await apiClient.get(`/api/auth/remote/status/${sessionId}`)
 
                 if (data.status === "expired") { setStatus("expired"); return }
                 if (data.status === "authorized") { setStatus("authorized"); return }
@@ -137,12 +130,12 @@ function RemoteLoginContent() {
         try {
             const { ethers } = await import("ethers")
             const provider = new ethers.BrowserProvider((window as any).ethereum)
-            await provider.send("eth_requestAccounts", [])
+            const accounts = await provider.send("eth_requestAccounts", [])
             const signer = await provider.getSigner()
             const connectedAddress = await signer.getAddress()
 
             // Ensure the MetaMask account matches the registered admin wallet
-            if (connectedAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
+            if (user && connectedAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
                 throw new Error(
                     `Wrong wallet connected. Please switch to: ${user.wallet_address.substring(0, 6)}...${user.wallet_address.substring(38)}`
                 )
@@ -150,16 +143,11 @@ function RemoteLoginContent() {
 
             const signature = await signer.signMessage(challenge)
 
-            const authRes = await fetch(`${BACKEND_URL}/api/auth/remote/authorize`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId, walletAddress: connectedAddress, signature })
+            await apiClient.post("/api/auth/remote/authorize", {
+                sessionId,
+                walletAddress: accounts[0],
+                signature
             })
-
-            if (!authRes.ok) {
-                const errData = await authRes.json()
-                throw new Error(errData.error || "Authorization failed")
-            }
 
             setStatus("authorized")
             toast({

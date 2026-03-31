@@ -1,11 +1,12 @@
 import { Users, FileText, CheckCircle, Image, RefreshCw, TrendingUp, Activity, Loader2, Vote, Gavel, Plus, ExternalLink } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
-import { Button } from "../ui/button";
-import { Card } from "../ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { useConfig } from "../../contexts/ConfigAuthority";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import api from "../../api";
+import api from "../../services/api";
 import { toast } from "sonner";
 import { ethers } from "ethers";
+import { Button } from "../ui/button"; // Re-adding Button as it's used later
 
 interface AdminDashboardProps {
   onNavigate?: (screen: string) => void;
@@ -97,7 +98,8 @@ export function AdminDashboard({ onNavigate, isDarkMode }: AdminDashboardProps) 
         body: JSON.stringify({ proposalId, decision })
       });
 
-      const webAppUrl = `http://localhost:3000/governance/remote-sign?sessionId=${session.sessionId}`;
+      const { config } = useConfig();
+      const webAppUrl = `${config?.webAppUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
 
       // Open System Browser
       // @ts-ignore

@@ -22,8 +22,9 @@ export class ConfigValidator {
     }
 
     // 2. Chain Sanity
-    if (Number(config.chainId) !== VALID_CHAIN_ID) {
-      console.error(`[VALIDATOR] Invalid ChainID: ${config.chainId}`);
+    const expectedChainId = parseInt(process.env.NEXT_PUBLIC_CHAIN_ID || "97");
+    if (!config.chainId || Number(config.chainId) !== expectedChainId) {
+      console.error(`[VALIDATOR] Invalid ChainID: ${config.chainId} (Expected ${expectedChainId})`);
       return false;
     }
 

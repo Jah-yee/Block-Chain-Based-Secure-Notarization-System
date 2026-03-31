@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { toast } from "sonner";
-import api from "../../api";
+import api from "../../services/api";
 import { DocumentMetadata } from "./DocumentMetadata";
 
 export function UserDashboard() {

@@ -22,6 +22,7 @@ import {
     CheckCircle2,
     Contact
 } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 import { cn } from "../../lib/utils"
 import { countries } from "../../lib/countries"
 import {
@@ -74,6 +75,38 @@ export default function RegisterNotaryPage() {
     const router = useRouter()
     const { toast } = useToast()
 
+    // 🛡️ [GUARD] Check for existing application state on mount
+    useEffect(() => {
+        const checkExistingApplication = async () => {
+            const resumingId = localStorage.getItem("bbsns_resuming_id");
+            if (!resumingId) return;
+
+            try {
+                const statusData = await apiClient.get(`/api/notaries/applications/status/${resumingId}`);
+                setApplicationId(Number(resumingId));
+
+                // If application is in a "Terminal" or "Review" state, redirect to landing
+                if (['APPLIED', 'KYC_VERIFIED', 'approved'].includes(statusData.status)) {
+                    toast({ 
+                        title: "Application Received", 
+                        description: "Your official credentials are under review. You will be notified via email.",
+                        variant: "default"
+                    });
+                    router.push("/");
+                } else if (statusData.status === 'pending') {
+                    // Stay on page but potentially help them resume
+                    console.log("[GUARD] Resuming pending application:", resumingId);
+                }
+            } catch (e) {
+                console.error("[GUARD] Status check failed:", e);
+                // If 404, clear the dead resuming_id
+                localStorage.removeItem("bbsns_resuming_id");
+            }
+        };
+
+        checkExistingApplication();
+    }, [router, toast]);
+
     const handleInputChange = (field: string, value: string) => {
         let filteredValue = value;
         if (field === "phone") filteredValue = value.replace(/[^\d+]/g, "");
@@ -83,20 +116,6 @@ export default function RegisterNotaryPage() {
     }
 
     const handleSubmitPhase1 = async () => {
-        let wallet = localStorage.getItem("connectedWallet");
-        if (!wallet && (window as any).ethereum) {
-            try {
-                const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
-                wallet = accounts[0];
-                if (wallet) localStorage.setItem("connectedWallet", wallet);
-            } catch (e) { }
-        }
-
-        if (!wallet) {
-            toast({ title: "Wallet Link Required", description: "Please connect MetaMask to link your professional identity.", variant: "destructive" });
-            return;
-        }
-
         const missing = [];
         if (!formData.name) missing.push("Full Name");
         if (!formData.email) missing.push("Email");
@@ -111,52 +130,36 @@ export default function RegisterNotaryPage() {
 
         setIsLoading(true);
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/notaries/applications/public`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fullName: formData.name,
-                    email: formData.email,
-                    password: formData.password,
-                    walletAddress: wallet,
-                    phone: `${selectedCountry.dial_code} ${formData.phone}`,
-                    license: formData.license,
-                    experience: formData.experience,
-                    nationalId: formData.nationalId,
-                    nationality: selectedNationality.name
-                })
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                // If application already exists, we check if it's one we can resume
-                if (data.id && (['pending', 'APPLIED', 'KYC_VERIFIED'].includes(data.status))) {
-                    setApplicationId(data.id);
-                    localStorage.setItem("bbsns_resuming_id", data.id);
-                    toast({
-                        title: "Resuming Session",
-                        description: `Found existing ${data.status} status. Syncing profile...`,
-                        variant: "default"
-                    });
-
-                    // Always move to step 2 if they try to skip or re-fill step 1
-                    setStep(2);
-                    return;
-                }
-                throw new Error(data.error || "Submission failed");
-            }
-
+            const data = await apiClient.post('/api/notaries/applications/public', {
+                fullName: formData.name,
+                email: formData.email,
+                password: formData.password,
+                phone: `${selectedCountry.dial_code} ${formData.phone}`,
+                license: formData.license,
+                experience: formData.experience,
+                nationalId: formData.nationalId,
+                nationality: selectedNationality.name
+            })
+            
             setApplicationId(data.id);
             localStorage.setItem("bbsns_resuming_id", data.id);
+            
+            // If the server tells us it's already in a advanced state, redirect
+            if (['APPLIED', 'KYC_VERIFIED', 'approved'].includes(data.status)) {
+                toast({ title: "Application Under Review", description: "This identity is already being processed." });
+                router.push("/");
+                return;
+            }
+
             toast({ title: "Profile Secured", description: "Phase 1 complete. Proceeding to Biometric Verification." });
             setStep(2); // Auto-transition
         } catch (e: any) {
-            // Check if the error contains a resumed state or if we can extract ID
-            if (e.message.includes("Application already exists")) {
-                toast({ title: "Resuming Application", description: "Found your previous record. Syncing session..." });
-                // If we had a mechanism to get the ID from the error object, we'd use it here.
-                // For now, let's hope the next attempt works or inform user.
-            }
-            toast({ title: "Submission Failed", description: e.message, variant: "destructive" });
+             // If application already exists, we check if it's one we can resume
+             if (e.status === 400 && e.message.includes("Application already exists")) {
+                toast({ title: "Application Exists", description: "You already have an application in progress. Please use the 'Resume' flow or contact support." });
+             } else {
+                toast({ title: "Submission Failed", description: e.message, variant: "destructive" });
+             }
         } finally {
             setIsLoading(false);
         }
@@ -166,6 +169,12 @@ export default function RegisterNotaryPage() {
         if (!applicationId || !window.ethereum) return;
         setIsLoading(true);
         try {
+            // Ensure wallet is connected
+            const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+            const wallet = accounts[0];
+            if (!wallet) throw new Error("No wallet selected");
+            localStorage.setItem("connectedWallet", wallet);
+
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const message = `BBSNS-NOTARY-BIND:${applicationId}`;
@@ -182,15 +191,19 @@ export default function RegisterNotaryPage() {
 
     const handleFinalizeVerification = async () => {
         if (!signature || !faceDescriptor) return;
+        const wallet = localStorage.getItem("connectedWallet");
+        if (!wallet) {
+            toast({ title: "Wallet Missing", description: "Please connect wallet again.", variant: "destructive" });
+            return;
+        }
+
         setIsLoading(true);
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/notaries/applications/${applicationId}/verify`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ signature, faceDescriptor })
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Verification failed on server.");
+            await apiClient.post(`/api/notaries/applications/${applicationId}/verify`, { 
+                signature, 
+                faceDescriptor,
+                walletAddress: wallet 
+            })
 
             toast({ title: "KYC Verified & Locked", description: "Your application is now under administrative review." });
             router.push("/");

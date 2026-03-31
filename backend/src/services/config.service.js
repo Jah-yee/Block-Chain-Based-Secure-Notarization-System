@@ -60,6 +60,11 @@ class ConfigService {
       // 1. Version-Based Cache Check (Architecture Rule: FAST)
       const res = await pool.query('SELECT config_snapshot, version, updated_at FROM system_config WHERE id = 1');
       
+      if (!res.rows[0]) {
+        console.warn(`⚠️ [CONFIG_CRITICAL] System config is EMPTY in DB. Triggering Self-Healing Auto-Seed...`);
+        return await this._autoSeedFromEnv();
+      }
+      
       const { config_snapshot, version, updated_at } = res.rows[0];
 
       // 🛡️ [TIER 1 RISK MITIGATION] Strict Address & State Validation
@@ -287,11 +292,11 @@ class ConfigService {
         contracts: {
           notaryRegistry: process.env.NOTARY_REGISTRY_ADDRESS || SAFE_DEFAULTS.contracts.notaryRegistry,
           documentRegistry: process.env.DOCUMENT_REGISTRY_ADDRESS || SAFE_DEFAULTS.contracts.documentRegistry,
-          ntkr: process.env.NTKR_ADDRESS || SAFE_DEFAULTS.contracts.ntkr,
-          ntk: process.env.NTK_ADDRESS || SAFE_DEFAULTS.contracts.ntk,
+          ntkr: process.env.NTKR_CONTRACT_ADDRESS || SAFE_DEFAULTS.contracts.ntkr,
+          ntk: process.env.NTK_CONTRACT_ADDRESS || SAFE_DEFAULTS.contracts.ntk,
           genesisActivation: process.env.GENESIS_ACTIVATION_ADDRESS || SAFE_DEFAULTS.contracts.genesisActivation,
           genesisNft: process.env.GENESIS_NFT_ADDRESS || SAFE_DEFAULTS.contracts.genesisNft,
-          multisig: process.env.MULTISIG_ADDRESS || SAFE_DEFAULTS.contracts.multisig
+          multisig: process.env.MULTISIG_CONTRACT_ADDRESS || SAFE_DEFAULTS.contracts.multisig
         }
       };
 

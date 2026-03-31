@@ -2,8 +2,9 @@
 # 🚀 BBSNS Web-App Production Setup Script
 # Target: Ubuntu 22.04 LTS (EC2 Deployment)
 
-PUBLIC_IP="13.233.236.240"
-BACKEND_URL="http://$PUBLIC_IP:5000"
+# Config (Change these for different environments)
+export BBSNS_API_URL="${BBSNS_API_URL:-http://localhost:5000}"
+BACKEND_URL="$BBSNS_API_URL"
 
 echo "🎨 [1/5] Configuring Environment Variables..."
 # Update/Create .env.local with the correct PUBLIC API URL

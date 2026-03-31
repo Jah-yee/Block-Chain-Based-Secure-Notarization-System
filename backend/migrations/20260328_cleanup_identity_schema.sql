@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS users_backup_phase3_final AS SELECT * FROM users;
 DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'identity_lifecycle') THEN
-        CREATE TYPE identity_lifecycle AS ENUM ('PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED', 'ONCHAIN_PENDING', 'FAILED_SYNC');
+        CREATE TYPE identity_lifecycle AS ENUM ('PENDING', 'KYC_VERIFIED', 'ACTIVE', 'REJECTED', 'SUSPENDED', 'ONCHAIN_PENDING', 'FAILED_SYNC');
     END IF;
 END $$;
 
@@ -22,7 +22,7 @@ END $$;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_human_verified BOOLEAN;
 
 -- MAP ONLY LIVENESS
-UPDATE users SET is_human_verified = (liveness_status IN ('verified', 'pass', 'verified_biometric'))
+UPDATE users SET is_human_verified = (liveness_status IN ('verified'))
 WHERE liveness_status IS NOT NULL;
 
 UPDATE users SET is_human_verified = false WHERE is_human_verified IS NULL;

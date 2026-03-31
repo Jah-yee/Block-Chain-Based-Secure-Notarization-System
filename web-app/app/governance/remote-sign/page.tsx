@@ -3,7 +3,8 @@
 import { useState, useEffect, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
-import { ShieldCheck, Wallet, AlertCircle, CheckCircle2, Gavel, Loader2, Timer } from "lucide-react"
+import { CheckCircle2, AlertCircle, Loader2, ShieldCheck, Wallet, ArrowRight, ArrowLeft, Gavel, Timer } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -45,9 +46,7 @@ function RemoteSignContent() {
 
         const fetchSession = async () => {
             try {
-                const res = await fetch(`http://localhost:5000/api/governance/remote/vote/status/${sessionId}`)
-                if (!res.ok) throw new Error("Vote session not found or expired")
-                const data = await res.json()
+                const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
 
                 if (data.status !== "pending") {
                     setStatus(data.status as any)
@@ -87,8 +86,7 @@ function RemoteSignContent() {
             setConnectedWallet(walletAddress)
 
             // Get session info including challenge
-            const res = await fetch(`http://localhost:5000/api/governance/remote/vote/status/${sessionId}`)
-            const data = await res.json()
+            const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
 
             // We need the challenge to sign
             // Since our status endpoint currently doesn't return the challenge for security, 
@@ -107,19 +105,15 @@ function RemoteSignContent() {
 
             const signature = await signer.signMessage(data.challenge)
 
-            const authRes = await fetch("http://localhost:5000/api/governance/remote/vote/authorize", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            try {
+                await apiClient.post("/api/governance/remote/vote/authorize", {
                     sessionId,
                     walletAddress,
                     signature
                 })
-            })
-
-            if (!authRes.ok) {
-                const err = await authRes.json()
-                throw new Error(err.error || "Vote authorization failed")
+                // Status will update via polling
+            } catch (err: any) {
+                toast({ title: "Auth Failed", description: err.message, variant: "destructive" })
             }
 
             setStatus("authorized")
