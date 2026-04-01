@@ -45,14 +45,29 @@ class Logger {
     }
 
     /**
-     * Internal log formatter with strict validation
+     * Internal log formatter with strict validation and PII Masking
      */
     _log(level, event, data = {}) {
+        // 🛡️ PII Masking Policy (Zero-Trust)
+        const mask = (val) => {
+            if (typeof val !== 'string') return val;
+            if (val.length <= 8) return '****';
+            return val.substring(0, 6) + '...' + val.substring(val.length - 4);
+        };
+
+        const sensitiveFields = ['email', 'wallet_address', 'password_hash', 'notary_pin_hash', 'private_key', 'national_id_hash', 'phone'];
+        const sanitizedData = { ...data };
+        
+        for (const field of sensitiveFields) {
+            if (sanitizedData[field]) {
+                sanitizedData[field] = mask(sanitizedData[field]);
+            }
+        }
+
         // Lifecycle Event Validation: Must include states
         const lifecycleEvents = ['TASK_CLAIMED', 'TX_SENT', 'TX_CONFIRMED', 'TX_FAILED', 'TASK_RECOVERED'];
         if (lifecycleEvents.includes(event)) {
-            if (data.previous_state === undefined || data.new_state === undefined) {
-                // In production, we log a warning but don't crash; in dev we could throw
+            if (sanitizedData.previous_state === undefined || sanitizedData.new_state === undefined) {
                 console.error(`[LOGGER_WARNING] Missing state transition for lifecycle event: ${event}`);
             }
         }
@@ -62,14 +77,14 @@ class Logger {
             level: level,
             worker: this.workerName,
             event: event,
-            correlation_id: data.correlation_id || 'root',
-            entity_id: data.entity_id || data.id || null,
-            tx_hash: data.tx_hash || null,
-            duration_ms: data.duration_ms || null,
-            previous_state: data.previous_state || null,
-            new_state: data.new_state || null,
-            message: data.message || '',
-            ...data
+            correlation_id: sanitizedData.correlation_id || 'root',
+            entity_id: sanitizedData.entity_id || sanitizedData.id || null,
+            tx_hash: sanitizedData.tx_hash || null,
+            duration_ms: sanitizedData.duration_ms || null,
+            previous_state: sanitizedData.previous_state || null,
+            new_state: sanitizedData.new_state || null,
+            message: sanitizedData.message || '',
+            ...sanitizedData
         };
 
         // Remove redundant/aliased fields to keep logs clean
