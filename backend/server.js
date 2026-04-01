@@ -5,28 +5,33 @@ const { ethers } = require("ethers");
 BigInt.prototype.toJSON = function() { return this.toString(); };
 const ConfigService = require("./src/services/config.service");
 
-const PORT = process.env.PORT || 5000;
+const PORT = parseInt(process.env.PORT) || 5000;
+const HOST = '0.0.0.0';
+
+if (process.env.PORT && isNaN(PORT)) {
+    console.error(`❌ CRITICAL: Invalid PORT defined: ${process.env.PORT}`);
+    process.exit(1);
+}
 
 async function bootstrap() {
   console.log("🚀 Initializing BBSNS Zero-Trust Backend...");
 
-  // 1. Authoritative Config Handshake (SSoT)
-  let config;
+  // 1. Startup Guard & Authoritative Config Handshake (SSoT)
+  const StartupGuard = require("./src/services/startup-guard.service");
+  
   try {
-    config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-    const { chainId } = await provider.getNetwork();
+    // 🛡️ Audit Environment Configuration Correctness
+    await StartupGuard.verifyEnvironmentVars();
 
-    console.log(`   - Network Detected: ${chainId}`);
-    console.log(`   - SSoT Authority:   ${config.chainId}`);
+    // 🛡️ Audit Migration Integrity Before Network Operations
+    await StartupGuard.verifyMigrationIntegrity();
+    
+    // 🛡️ Verify Blockchain Network Context (Chain ID Verification)
+    await StartupGuard.verifyBlockchainContext();
 
-    if (String(chainId) !== String(config.chainId)) {
-      console.error("❌ CRITICAL: Chain ID Mismatch! Database authority differs from Network context.");
-      process.exit(1);
-    }
-    console.log("   ✅ SSoT Context Verified.");
+    console.log("   ✅ StartupGuard Handshake Complete.");
   } catch (err) {
-    console.error("❌ CRITICAL: Could not connect to RPC or verify Configuration SSoT.");
+    console.error("❌ CRITICAL: StartupGuard Failure. Environment is compromised or misconfigured.");
     console.error(err.message);
     process.exit(1);
   }
@@ -62,7 +67,7 @@ async function bootstrap() {
     }
   };
 
-  app.listen(PORT, () => {
+  app.listen(PORT, HOST, () => {
     console.log(`\n✅ BBSNS Server fully operational on port ${PORT}`);
     console.log(`   - Mode: ZERO-TRUST AUTHORITY (Chain Derived)`);
 
@@ -136,6 +141,17 @@ async function bootstrap() {
       runIntentCleanup(); // Run once on startup
     } catch (workerErr) {
       console.error("❌ Warning: Failed to launch Intent Cleanup Worker:", workerErr.message);
+    }
+
+    // 4d. Start Hardened Scavenger Worker (Distributed Recovery)
+    try {
+      const { runScavenger } = require("./src/workers/scavenger-worker");
+      const SCAVENGER_INTERVAL = 30000; // 30 seconds
+      console.log(`   - Launching Scavenger Worker (Self-Healing Recovery Active)`);
+      setInterval(runScavenger, SCAVENGER_INTERVAL);
+      runScavenger();
+    } catch (workerErr) {
+      console.error("❌ Warning: Failed to launch Scavenger Worker:", workerErr.message);
     }
 
     // 4. Initialize Circuit Breaker Status

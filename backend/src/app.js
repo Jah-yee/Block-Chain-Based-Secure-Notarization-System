@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const pool = require("./db/index.js");
-
+const ConfigService = require("./services/config.service");
 const correlationMiddleware = require('./middleware/correlation');
 
 const app = express();
@@ -12,13 +12,38 @@ const app = express();
 // allowPublic must be imported from middleware/actor
 const { allowPublic, requirePrivilege, ROLES, RISK_LEVELS } = require('../middleware/actor');
 
-app.get("/health", allowPublic, (req, res) => {
-	res.json({
-		status: "UP",
-		timestamp: new Date().toISOString(),
-		environment: process.env.NODE_ENV || "development",
-		version: "1.2.1"
-	});
+app.get("/health", allowPublic, async (req, res) => {
+    let dbStatus = 'UNAVAILABLE';
+    let rpcStatus = 'UNAVAILABLE';
+    let configStatus = 'MALFORMED';
+
+    try {
+        await pool.query('SELECT 1');
+        dbStatus = 'OK';
+    } catch (e) {}
+
+    try {
+        const config = await ConfigService.getConfig();
+        configStatus = 'OK';
+        const { ethers } = require('ethers');
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        await provider.getBlockNumber();
+        rpcStatus = 'OK';
+    } catch (e) {}
+
+    const isStable = dbStatus === 'OK' && rpcStatus === 'OK' && configStatus === 'OK';
+    
+    res.status(isStable ? 200 : 503).json({
+        status: isStable ? "STABLE" : "DEGRADED",
+        timestamp: new Date().toISOString(),
+        checks: {
+            database: dbStatus,
+            blockchain_rpc: rpcStatus,
+            system_config: configStatus
+        },
+        environment: process.env.NODE_ENV || "development",
+        version: "1.3.0-hardened"
+    });
 });
 
 // --- PHASE 7: OBSERVABILITY (CORRELATION) ---
@@ -118,9 +143,11 @@ app.get("/", allowPublic, async (req, res) => {
 	}
 });
 
-// Phase 4: Start Reputation Background Worker
-const { startReputationWorker } = require('./workers/reputation-worker');
-startReputationWorker();
+// Phase 4: Start Reputation Background Worker (Suppress during tests)
+if (process.env.NODE_ENV !== 'test') {
+    const { startReputationWorker } = require('./workers/reputation-worker');
+    startReputationWorker();
+}
 
 module.exports = app;
 
