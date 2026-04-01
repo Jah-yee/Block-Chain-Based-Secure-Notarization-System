@@ -18,6 +18,11 @@ if (process.env.DATABASE_URL) {
   };
 }
 
-const pool = new Pool(poolConfig);
+const pool = new Pool({
+  ...poolConfig,
+  max: 100, // High capacity for stress testing
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
+});
 
 module.exports = pool;
