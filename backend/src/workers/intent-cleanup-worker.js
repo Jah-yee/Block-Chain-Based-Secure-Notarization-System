@@ -6,53 +6,52 @@ const storageService = require('../services/storage.service');
 async function runIntentCleanup() {
   const lockId = 1004; // INTENT_CLEANUP
   if (!(await lockService.tryLock(lockId))) {
-    console.log('[INTENT_CLEANUP] Skip: Another instance is cleaning up.');
     return;
   }
 
   try {
-    // Find all intents that have been awaiting payment past their expiry
-    const expired = await pool.query(
-      `SELECT id, storage_key FROM upload_intents
-       WHERE status = 'awaiting_payment' AND expires_at < NOW()`
+    // 1. Find all intents that have expired or failed permanently
+    const targets = await pool.query(
+      `SELECT id, storage_key, status FROM upload_intents
+       WHERE (status = 'AWAITING_PAYMENT' AND expires_at < NOW())
+          OR status = 'FAILED_FINAL'`
     );
 
-    if (expired.rows.length === 0) return;
+    if (targets.rows.length === 0) return;
 
-    console.log(`[INTENT_CLEANUP] Expiring ${expired.rows.length} stale upload intent(s)...`);
-
-    for (const intent of expired.rows) {
-      // 1. Delete cloud file if it exists
+    for (const intent of targets.rows) {
+      // 🛡️ Physical Cleanup (PoNR protection: we only delete if not in recovery pipe)
       if (intent.storage_key) {
         try {
-          await storageService.deleteFile(intent.storage_key);
-        } catch (s3Err) {
-          console.error(`[INTENT_CLEANUP] S3 delete failed for intent ${intent.id}: ${s3Err.message}`);
+          if (intent.storage_key.startsWith('intents/')) {
+            await storageService.deleteFile(intent.storage_key);
+          } else {
+            // Local path cleanup
+            const fs = require('fs');
+            const path = require('path');
+            let localPath = intent.storage_key;
+            if (!path.isAbsolute(localPath)) localPath = path.join(__dirname, '../../', localPath);
+            if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+          }
+        } catch (storageErr) {
+          console.error(`[CLEANUP] Storage delete failed for intent ${intent.id}: ${storageErr.message}`);
         }
       }
 
-      // 2. Delete local temp file if it exists (for hybrid support if storage_key is a path)
-      try {
-        if (intent.storage_key && fs.existsSync(intent.storage_key)) {
-          fs.unlinkSync(intent.storage_key);
-          console.log(`[INTENT_CLEANUP] Deleted temp file: ${intent.storage_key}`);
-        }
-      } catch (fileErr) {
-        console.error(`[INTENT_CLEANUP] Local delete failed for intent ${intent.id}: ${fileErr.message}`);
+      // 🛡️ State Terminal Transition
+      if (intent.status === 'AWAITING_PAYMENT') {
+        await pool.query("UPDATE upload_intents SET status = 'EXPIRED' WHERE id = $1", [intent.id]);
       }
-
-      // 3. Mark intent as expired
-      await pool.query(
-        `UPDATE upload_intents SET status = 'expired' WHERE id = $1`,
-        [intent.id]
-      );
+      
+      // If was FAILED_FINAL, we don't change state, just cleaned the file.
+      // But we should null the storage_key to show it's gone
+      await pool.query("UPDATE upload_intents SET storage_key = NULL WHERE id = $1", [intent.id]);
     }
 
-    console.log(`[INTENT_CLEANUP] Done — expired ${expired.rows.length} intent(s)`);
   } catch (err) {
     console.error('[INTENT_CLEANUP] Worker error:', err.message);
   } finally {
-    await lockService.unlock(1004);
+    await lockService.unlock(lockId);
   }
 }
 

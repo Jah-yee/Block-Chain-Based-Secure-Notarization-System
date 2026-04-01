@@ -14,6 +14,7 @@ const { Logger, SIGNALS, ERROR_TYPES, ERROR_STAGES } = require("../services/logg
 const logger = new Logger('API_DOCUMENTS');
 const reputationService = require('../services/reputation.service');
 const storageService = require('../services/storage.service');
+const ConfigService = require('../services/config.service');
 
 // Configure Multer for secure memory-safe uploads
 const memoryUpload = multer({
@@ -136,8 +137,8 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
     try {
       const intentRes = await pool.query(
         `INSERT INTO upload_intents
-           (id, user_id, wallet_address, file_hash, filename, storage_key, category, amount, amount_wei, storage_state, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW() + INTERVAL '30 minutes')
+           (id, user_id, wallet_address, file_hash, filename, storage_key, category, amount, amount_wei, storage_state, status, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'AWAITING_PAYMENT', NOW() + INTERVAL '30 minutes')
          RETURNING id, expires_at`,
         [intentId, actor.id, walletAddress.toLowerCase(), fileHash, filename, storage_key || filepath, category, cost, costWei, storage_key ? 'UPLOADED' : 'STORED']
       );
@@ -187,135 +188,151 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
   try {
     const actor = req.actor;
 
-    // Guard 1: Intent exists and belongs to caller
+    // 🛡️ Guard 1: Lock intent and verify ownership
     const intentRes = await client.query(
       'SELECT * FROM upload_intents WHERE id=$1 FOR UPDATE', [intent_id]
     );
     if (intentRes.rows.length === 0) return res.status(404).json({ error: 'Upload intent not found' });
     const intent = intentRes.rows[0];
+
+    // Split-Brain Check: Is another node/API already processing this?
+    const now = new Date();
+    if (intent.processing_lock_until && intent.processing_lock_until > now) {
+      return res.status(423).json({ error: 'Intent is currently being processed by another worker. Please wait.' });
+    }
+
     if (Number(intent.user_id) !== Number(actor.id)) {
       return res.status(403).json({ error: 'Forbidden: intent belongs to a different user' });
     }
 
-    // Guard 2: Intent status
-    // if (intent.status === 'expired')   return res.status(410).json({ error: 'Upload intent expired. Start a new upload.' });
-    if (intent.status === 'completed') return res.status(409).json({ error: 'Intent already fulfilled.' });
-    if (intent.status !== 'awaiting_payment' && intent.status !== 'expired') return res.status(400).json({ error: `Invalid intent status: ${intent.status}` });
+    // 🛡️ Guard 2: State Guard (Idempotency)
+    if (intent.status === 'COMPLETED') {
+        const existingDoc = await client.query('SELECT * FROM documents WHERE payment_tx_hash=$1', [intent.payment_tx_hash]);
+        return res.status(200).json({ 
+            message: 'Already processed.', 
+            document: existingDoc.rows[0] ? sanitizeDocument(existingDoc.rows[0]) : null,
+            tx_hash: intent.payment_tx_hash 
+        });
+    }
+    if (intent.status === 'FAILED_FINAL') return res.status(410).json({ error: 'Intent failed permanently due to data mismatch.' });
 
-    // Guard 3: Not past expiry
-    if (new Date(intent.expires_at) < new Date()) {
-      await client.query(`UPDATE upload_intents SET status='expired' WHERE id=$1`, [intent_id]);
-      await client.query('COMMIT');
-
-      if (intent.storage_state === 'UPLOADED') {
-          await storageService.deleteFile(intent.storage_key).catch(err => {
-              logger.error('FILE_DELETE_FAILED', { intent_id, key: intent.storage_key, error: err.message });
-          });
-      } else {
-          try {
-              let localPath = intent.storage_key;
-              if (localPath) {
-                  if (!path.isAbsolute(localPath)) localPath = path.join(__dirname, '../../', localPath);
-                  if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-              }
-          } catch (err) {
-              logger.error('FILE_DELETE_FAILED', { intent_id, key: intent.storage_key, error: err.message });
-          }
+    // 🛡️ Guard 3: Expiry Check
+    if (intent.status === 'EXPIRED' || new Date(intent.expires_at) < now) {
+      if (intent.status !== 'EXPIRED') {
+          await client.query("UPDATE upload_intents SET status='EXPIRED' WHERE id=$1", [intent_id]);
       }
       return res.status(410).json({ error: 'Upload intent expired. Start a new upload.' });
     }
 
-    // Guard 4: tx_hash not already used
+    // 🛡️ Guard 4: tx_hash uniqueness across layers
     const txUsed = await client.query(
-      `SELECT 1 FROM upload_intents WHERE payment_tx_hash=$1
-       UNION ALL SELECT 1 FROM documents WHERE payment_tx_hash=$1 LIMIT 1`, [tx_hash]
+      `SELECT 1 FROM upload_intents WHERE payment_tx_hash=$1 AND id != $2
+       UNION ALL SELECT 1 FROM documents WHERE payment_tx_hash=$1 LIMIT 1`, [tx_hash, intent_id]
     );
     if (txUsed.rows.length > 0) return res.status(409).json({ error: 'Transaction hash already used.' });
 
-    // Guard 5-8: On-chain verification
+    // ── ON-CHAIN VERIFICATION ──
     const config = await ConfigService.getConfig();
     const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    
+    // Lock for this API node (Lease)
+    const lockUntil = new Date(Date.now() + 60000); // 1 minute lease
+    const nodeId = crypto.randomUUID(); // Simplified node identifier for this request
+    await client.query(
+        "UPDATE upload_intents SET processing_lock_until=$1, processing_node_id=$2 WHERE id=$3",
+        [lockUntil, nodeId, intent_id]
+    );
+
     let receipt;
     try {
       receipt = await provider.getTransactionReceipt(tx_hash);
+      if (!receipt) return res.status(202).json({ message: 'Transaction not yet mined.', tx_hash });
+      
+      // 🛡️ Guard 5: Confirmations
+      const currentBlock = await provider.getBlockNumber();
+      const confirmations = currentBlock - receipt.blockNumber + 1;
+      if (confirmations < 3) {
+          return res.status(202).json({ 
+              message: `Waiting for 3 confirmations (Current: ${confirmations}).`, 
+              confirmations,
+              tx_hash 
+          });
+      }
+
+      if (receipt.status !== 1) {
+          await client.query("UPDATE upload_intents SET status='FAILED_FINAL' WHERE id=$1", [intent_id]);
+          return res.status(400).json({ error: 'Transaction reverted on-chain. Intent failed.' });
+      }
     } catch (rpcErr) {
-      return res.status(502).json({ error: 'Cannot reach blockchain RPC. Retry shortly.' });
+      return res.status(502).json({ error: 'Blockchain RPC unreachable. Payment state preserved.' });
     }
 
-    // Guard 5: Mined?
-    if (!receipt) {
-      return res.status(202).json({ message: 'Transaction not yet confirmed. Retry in a few seconds.', tx_hash });
-    }
-
-    // Guard 5b: Succeeded?
-    if (receipt.status !== 1) {
-      return res.status(400).json({ error: 'Transaction reverted on-chain. No document created.', tx_hash });
-    }
-
-    // Guard 6: Sent to NTKR contract
+    // 🛡️ Guard 6: Contract & Event Validation
     const ntkrAddr = (config.contracts.ntkr || '').toLowerCase();
-    if (!receipt.to || receipt.to.toLowerCase() !== ntkrAddr) {
-      return res.status(400).json({ error: 'Transaction not sent to NTKR contract.', expected: ntkrAddr, got: receipt.to });
+    if (receipt.to.toLowerCase() !== ntkrAddr) {
+      return res.status(400).json({ error: 'Transaction sent to wrong contract.' });
     }
 
-    // Guard 7: BurnedForUpload event in logs
     const iface = new ethers.Interface(NTKR_ABI);
     let burnEvent = null;
     for (const log of receipt.logs) {
-      try { const p = iface.parseLog(log); if (p?.name === 'BurnedForUpload') { burnEvent = p; break; } } catch {}
+      try { 
+          if (log.address.toLowerCase() !== ntkrAddr) continue;
+          const p = iface.parseLog(log); 
+          if (p?.name === 'BurnedForUpload') { burnEvent = p; break; } 
+      } catch {}
     }
-    if (!burnEvent) return res.status(400).json({ error: 'BurnedForUpload event not found in transaction logs.' });
+    if (!burnEvent) return res.status(400).json({ error: 'BurnedForUpload event not found in logs.' });
 
-    // Guard 8a: Correct user signed the burn
-    if (burnEvent.args.user.toLowerCase() !== intent.wallet_address.toLowerCase()) {
-      return res.status(403).json({ error: 'Burn was signed by a different wallet.', expected: intent.wallet_address, got: burnEvent.args.user });
-    }
-
-    // Guard 8b: intentId matches
+    // 🛡️ Guard 7: Business Logic Integrity (PoNR Verification)
     const expectedBytes32 = uuidToBytes32(intent_id);
-    if (burnEvent.args.intentId.toLowerCase() !== expectedBytes32.toLowerCase()) {
-      return res.status(400).json({ error: 'Intent ID mismatch — burn was not for this upload.', expected: expectedBytes32, got: burnEvent.args.intentId });
+    const burnWallet = burnEvent.args.user.toLowerCase();
+    const burnIntentId = burnEvent.args.intentId.toLowerCase();
+    const burnAmount = BigInt(burnEvent.args.amount.toString());
+    const requiredAmount = BigInt(intent.amount_wei);
+
+    if (burnWallet !== intent.wallet_address.toLowerCase() || 
+        burnIntentId !== expectedBytes32.toLowerCase() || 
+        burnAmount < requiredAmount) {
+        
+        await client.query("UPDATE upload_intents SET status='FAILED_FINAL' WHERE id=$1", [intent_id]);
+        return res.status(400).json({ 
+            error: 'Payment validation failed (Integrity Mismatch).',
+            details: { walletMatch: burnWallet === intent.wallet_address.toLowerCase(), amountMatch: burnAmount >= requiredAmount }
+        });
     }
 
-    // Guard 8c: Sufficient amount burned
-    const burnedWei   = BigInt(burnEvent.args.amount.toString());
-    const requiredWei = BigInt(intent.amount_wei);
-    if (burnedWei < requiredWei) {
-      return res.status(402).json({ error: 'Insufficient NTKR burned.', required: requiredWei.toString(), burned: burnedWei.toString() });
-    }
+    // ── POINT OF NO RETURN (PoNR) ──
+    // 1. PAYMENT_VERIFIED
+    await client.query("UPDATE upload_intents SET status='PAYMENT_VERIFIED', payment_tx_hash=$1 WHERE id=$2", [tx_hash, intent_id]);
 
-    // ── ALL GUARDS PASSED — Create document ──────────────────────────────
-    await client.query('BEGIN');
-
+    // 2. DOC_CREATED
     const docRes = await client.query(
       `INSERT INTO documents
          (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
        VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,NOW(),NOW(),false) RETURNING *`,
-      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, 'STORED']
+      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, intent.storage_key.startsWith('intents/') ? 'STORED' : 'STORED']
     );
     const newDoc = docRes.rows[0];
+    await client.query("UPDATE upload_intents SET status='DOC_CREATED' WHERE id=$1", [intent_id]);
 
-    await client.query(
-      `UPDATE upload_intents SET status='completed', payment_tx_hash=$1 WHERE id=$2`, [tx_hash, intent_id]
-    );
-
-    // Audit log
+    // 3. COMPLETED
     await client.query(
       `INSERT INTO ntkr_transactions (user_id, document_id, tx_type, amount, tx_hash, status, note, created_at)
-       VALUES ($1,$2,'burn',$3,$4,'success','on-chain verified by backend',NOW())`,
+       VALUES ($1,$2,'burn',$3,$4,'success','verified on-chain',NOW())`,
       [intent.user_id, newDoc.id, intent.amount, tx_hash]
     );
+    await client.query("UPDATE upload_intents SET status='COMPLETED', processing_lock_until=NULL, processing_node_id=NULL WHERE id=$1", [intent_id]);
 
     await client.query('COMMIT');
-    console.log(`[CONFIRM] docId=${newDoc.id} tx=${tx_hash} intent=${intent_id}`);
-
+    
     // Non-blocking notary assignment
     setImmediate(async () => {
       try { await reputationService.assignNotary(newDoc.id); }
-      catch (e) { console.error(`[ASSIGNMENT] docId=${newDoc.id} ${e.message}`); }
+      catch (e) { console.error(`[ASSIGNMENT] ${e.message}`); }
     });
 
-    res.status(201).json({ message: 'Document created — burn verified on-chain.', document: sanitizeDocument(newDoc), tx_hash });
+    res.status(201).json({ message: 'Success.', document: sanitizeDocument(newDoc), tx_hash });
 
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
