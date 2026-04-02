@@ -13,6 +13,7 @@ class StartupGuard {
     const criticalVars = [
       'DATABASE_URL', 
       'JWT_SECRET', 
+      'BNB_SYSTEM_PRIVATE_KEY',
       'CHAIN_ID', 
       'AWS_S3_BUCKET', 
       'AWS_REGION', 
@@ -22,10 +23,11 @@ class StartupGuard {
     const missing = criticalVars.filter(v => !process.env[v]);
     
     if (missing.length > 0) {
-      console.error(`❌ [GUARD_FATAL] Missing required environment variables: ${missing.join(', ')}`);
-      console.error('👉 Please check your .env file or EC2 environment parameters.');
+      console.error(`❌ [GUARD_FATAL] Missing required configured parameters: ${missing.join(', ')}`);
+      console.error('👉 ACTION REQUIRED: Verify AWS Secrets Manager or .env configuration.');
       process.exit(1);
     }
+    console.log(`   ✅ Environment Audit Complete. ${criticalVars.length} critical variables verified.`);
   }
 
   static async verifyMigrationIntegrity() {

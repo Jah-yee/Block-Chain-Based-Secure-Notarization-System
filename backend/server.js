@@ -4,6 +4,7 @@ const { ethers } = require("ethers");
 // 🛡️ Global BigInt Serialization Policy
 BigInt.prototype.toJSON = function() { return this.toString(); };
 const ConfigService = require("./src/services/config.service");
+const SecretService = require("./src/services/secret.service");
 
 const PORT = parseInt(process.env.PORT) || 5000;
 const HOST = '0.0.0.0';
@@ -15,6 +16,15 @@ if (process.env.PORT && isNaN(PORT)) {
 
 async function bootstrap() {
   console.log("🚀 Initializing BBSNS Zero-Trust Backend...");
+  
+  // 0. 🛡️ Fetch Authoritative Secrets from AWS Vault (NON-ECHO)
+  try {
+    await SecretService.loadSecrets();
+  } catch (secretErr) {
+    console.error("❌ CRITICAL: SecretService Boot Failure. Application is unconfigured.");
+    console.error(secretErr.message);
+    process.exit(1);
+  }
 
   // 1. Startup Guard & Authoritative Config Handshake (SSoT)
   const StartupGuard = require("./src/services/startup-guard.service");
