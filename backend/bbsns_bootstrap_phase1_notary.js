@@ -1,6 +1,7 @@
 const pool = require('./src/db/index');
 const { registerNotaryOnChain } = require('./src/blockchain/notary-registry');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 async function run() {
   try {
@@ -20,8 +21,11 @@ async function run() {
     } else {
       console.log('Action 1: Approving Application in DB...');
       
-      // We need a password for the new user, we'll hash one here.
-      const hashedPassword = await bcrypt.hash('NotaryPass123!', 10);
+      // 🛡️ ACTION: Randomized Password Generation (STRICT HARDENING)
+      const password = crypto.randomBytes(20).toString('hex');
+      const hashedPassword = await bcrypt.hash(password, 10);
+      console.log(`\n🔑 [SECURITY] Temporary Notary Password Generated: ${password}`);
+      console.log(`⚠️  [SECURITY] Store this safely! This password is NOT stored anywhere else.\n`);
 
       await pool.query('BEGIN');
       

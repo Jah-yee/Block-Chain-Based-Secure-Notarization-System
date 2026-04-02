@@ -14,8 +14,9 @@ sudo apt-get install -y postgresql postgresql-contrib
 sudo systemctl start postgresql
 sudo systemctl enable postgresql
 
-# IDEMPOTENT DB SETUP
-sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = 'bbsns_user') THEN CREATE USER bbsns_user WITH PASSWORD 'bbsns_pass'; END IF; END \$\$;"
+# 🛡️ SECURE DB SETUP (STRICT HARDENING)
+DB_PASS=$(openssl rand -base64 32)
+sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = 'bbsns_user') THEN CREATE USER bbsns_user WITH PASSWORD '${DB_PASS}'; END IF; END \$\$;"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'notarydb'" | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE notarydb OWNER bbsns_user;"
 sudo -u postgres psql -c "ALTER USER bbsns_user WITH SUPERUSER;"
 
@@ -51,6 +52,8 @@ if curl -s http://localhost:5000/api/system/config | grep -q "chainId"; then
     echo "✅ SUCCESS: Backend is responding correctly."
     echo "------------------------------------------------"
     echo "🚀 BBSNS IS LIVE AT: http://$(curl -s http://checkip.amazonaws.com):5000"
+    echo "🔑 DATABASE PASSWORD: ${DB_PASS}"
+    echo "👉 (ACTION REQUIRED): Add this to your local .env as DB_PASSWORD"
     echo "------------------------------------------------"
     echo "👉 Check logs anytime with: pm2 logs bbsns-api"
 else
