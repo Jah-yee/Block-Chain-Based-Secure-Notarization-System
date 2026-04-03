@@ -1,22 +1,49 @@
 const pkg = require('pg');
-const dotenv = require('dotenv');
-dotenv.config({ override: true });
-
 const { Pool } = pkg;
 
-let poolConfig;
+let pool = null;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("❌ [DATABASE_FATAL] DATABASE_URL is required. Refusing to start in unconfigured state.");
-}
+/**
+ * 🛡️ DB_INIT (PHASE 2 - HARDENED BOOT)
+ * Responsibility: Manual, one-time initialization of the database pool.
+ * Constraint: MUST ONLY BE CALLED AFTER SecretService.loadSecrets().
+ */
+const init = () => {
+    if (pool) return pool; // Single-flight protection
 
-poolConfig = { connectionString: process.env.DATABASE_URL };
+    if (!process.env.DATABASE_URL) {
+        console.error("❌ [DATABASE_FATAL] DATABASE_URL is missing after vault handshake.");
+        process.exit(1);
+    }
 
-const pool = new Pool({
-  ...poolConfig,
-  max: 100, // High capacity for stress testing
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
-});
+    pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 100, // High capacity for stress testing
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000
+    });
 
-module.exports = pool;
+    // Handle background pool errors
+    pool.on('error', (err) => {
+        console.error('⚠️ [DATABASE_WARN] Unexpected error on idle client:', err.message);
+    });
+
+    return pool;
+};
+
+// Export Proxy to maintain compatibility without global refactor of every 'pool.query' call
+module.exports = {
+    init,
+    query: (...args) => {
+        if (!pool) {
+            throw new Error("❌ [DATABASE_FATAL] Attempted to query before DB initialization.");
+        }
+        return pool.query(...args);
+    },
+    // Expose direct pool for 'pool.connect()' usage
+    getPool: () => {
+        if (!pool) throw new Error("❌ [DATABASE_FATAL] DB Pool not initialized.");
+        return pool;
+    },
+    end: () => pool ? pool.end() : Promise.resolve()
+};

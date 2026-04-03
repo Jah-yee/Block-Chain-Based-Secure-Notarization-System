@@ -60,7 +60,7 @@ class SecretService {
       // In production, we FAIL CLOSED if the vault is unreachable.
       if (isProduction) {
          console.error("👉 ACTION REQUIRED: Verify EC2 IAM Role has 'secretsmanager:GetSecretValue' permissions.");
-         throw new Error("System is unconfigured and vault is unreachable. Boot aborted.");
+         process.exit(1);
       }
     }
   }

@@ -2,18 +2,38 @@ const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = re
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 require('dotenv').config();
 
-const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    }
-});
+let _s3Client = null;
+let _bucketName = null;
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET;
-const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024; // Default 10MB
-const ALLOWED_MIME_TYPES = (process.env.ALLOWED_MIME_TYPES || 'application/pdf,image/jpeg,image/png').split(',');
-const ALLOWED_EXTENSIONS = (process.env.ALLOWED_EXTENSIONS || '.pdf,.jpg,.jpeg,.png').split(',');
+/**
+ * 🛡️ STORAGE_INIT (PHASE 3 - HARDENED BOOT)
+ * Responsibility: Manual, one-time initialization of S3 client.
+ * Note: Uses IAM Instance Profile by default (no explicit creds required).
+ */
+const init = () => {
+    if (_s3Client) return;
+
+    _bucketName = process.env.AWS_S3_BUCKET;
+    const region = process.env.AWS_REGION || 'ap-south-1';
+
+    _s3Client = new S3Client({ region });
+    console.log(`   ✅ StorageService: Initialized for region [${region}] and bucket [${_bucketName || 'PENDING'}]`);
+};
+
+// Internal getters to ensure access happens after init
+const getClient = () => {
+    if (!_s3Client) throw new Error("❌ [STORAGE_FATAL] S3 Client used before initialization.");
+    return _s3Client;
+};
+
+const getBucket = () => {
+    if (!_bucketName) throw new Error("❌ [STORAGE_FATAL] AWS_S3_BUCKET is missing after handshake.");
+    return _bucketName;
+};
+
+const MAX_FILE_SIZE = () => parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = () => (process.env.ALLOWED_MIME_TYPES || 'application/pdf,image/jpeg,image/png').split(',');
+const ALLOWED_EXTENSIONS = () => (process.env.ALLOWED_EXTENSIONS || '.pdf,.jpg,.jpeg,.png').split(',');
 
 /**
  * Storage Service
@@ -28,16 +48,16 @@ class StorageService {
      * @returns {boolean}
      */
     validateFile(size, mimeType, filename) {
-        if (size > MAX_FILE_SIZE) {
+        if (size > MAX_FILE_SIZE()) {
             console.warn(`[STORAGE_VALIDATION] File too large: ${size} bytes`);
             return false;
         }
-        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+        if (!ALLOWED_MIME_TYPES().includes(mimeType)) {
             console.warn(`[STORAGE_VALIDATION] Unsupported MIME: ${mimeType}`);
             return false;
         }
         const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        if (!ALLOWED_EXTENSIONS().includes(ext)) {
             console.warn(`[STORAGE_VALIDATION] Unsupported Extension: ${ext}`);
             return false;
         }
@@ -52,11 +72,12 @@ class StorageService {
      * @returns {Promise<string>} - The S3 object key or URL
      */
     async uploadFile(buffer, key, contentType) {
-        if (!BUCKET_NAME) throw new Error("AWS_S3_BUCKET not configured");
+        const bucket = getBucket();
+        const client = getClient();
 
         console.log(`[S3_UPLOAD] Starting upload: ${key} (${buffer.length} bytes)`);
         const command = new PutObjectCommand({
-            Bucket: BUCKET_NAME,
+            Bucket: bucket,
             Key: key,
             Body: buffer,
             ContentType: contentType
@@ -77,10 +98,9 @@ class StorageService {
      * @param {string} key 
      */
     async deleteFile(key) {
-        if (!BUCKET_NAME) return;
         console.log(`[S3_DELETE] Attempting deletion: ${key}`);
         const command = new DeleteObjectCommand({
-            Bucket: BUCKET_NAME,
+            Bucket: getBucket(),
             Key: key
         });
         try {
@@ -99,12 +119,11 @@ class StorageService {
      * @returns {Promise<string>}
      */
     async getSignedDownloadUrl(key, expiresIn = 3600) {
-        if (!BUCKET_NAME) throw new Error("AWS_S3_BUCKET not configured");
         const command = new GetObjectCommand({
-            Bucket: BUCKET_NAME,
+            Bucket: getBucket(),
             Key: key
         });
-        return await getSignedUrl(s3Client, command, { expiresIn });
+        return await getSignedUrl(getClient(), command, { expiresIn });
     }
 
     /**
@@ -118,12 +137,11 @@ class StorageService {
      * @returns {Promise<Buffer>}
      */
     async getFileBuffer(key) {
-        if (!BUCKET_NAME) throw new Error("AWS_S3_BUCKET not configured");
         const command = new GetObjectCommand({
-            Bucket: BUCKET_NAME,
+            Bucket: getBucket(),
             Key: key
         });
-        const response = await s3Client.send(command);
+        const response = await getClient().send(command);
         const streamToBuffer = (stream) =>
             new Promise((resolve, reject) => {
                 const chunks = [];
@@ -135,4 +153,7 @@ class StorageService {
     }
 }
 
-module.exports = new StorageService();
+module.exports = {
+    init,
+    provider: new StorageService()
+};

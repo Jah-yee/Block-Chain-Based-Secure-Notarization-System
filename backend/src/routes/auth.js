@@ -8,7 +8,13 @@ const { ethers } = require('ethers');
 const ConfigService = require('../services/config.service');
 
 const APP_NAME = 'BBSNS';
-const JWT_SECRET = process.env.JWT_SECRET;
+const getJWTSecret = () => {
+  if (!process.env.JWT_SECRET) {
+     console.error("❌ [AUTH_FATAL] JWT_SECRET is missing after handshake.");
+     process.exit(1);
+  }
+  return process.env.JWT_SECRET;
+};
 const JWT_EXPIRY = '12h'; 
 const JWT_EXPIRY_SECONDS = 12 * 60 * 60; 
 
@@ -47,7 +53,7 @@ async function signZeroTrustToken(user, walletAddress) {
         snapshotChainId: Number(snapshotChainId),
         issuedAt: Date.now()
       },
-      JWT_SECRET,
+      getJWTSecret(),
       { expiresIn: JWT_EXPIRY }
     );
   } catch (err) {
@@ -393,7 +399,7 @@ router.get('/me', allowPublic, async (req, res) => {
     if (!token) return res.json({ user: null });
 
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, getJWTSecret());
       const normalizedWallet = decoded.address.toLowerCase();
 
       const result = await pool.query(

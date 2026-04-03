@@ -1,8 +1,6 @@
-const app = require("./src/app");
 const { ethers } = require("ethers");
-
-// 🛡️ Global BigInt Serialization Policy
-BigInt.prototype.toJSON = function() { return this.toString(); };
+const DB = require("./src/db/index");
+const Storage = require("./src/services/storage.service");
 const ConfigService = require("./src/services/config.service");
 const SecretService = require("./src/services/secret.service");
 
@@ -45,6 +43,28 @@ async function bootstrap() {
     console.error(err.message);
     process.exit(1);
   }
+
+  // 2. 🐘 Initialize Database Pool (PHASE 2 - HARDENED)
+  try {
+    DB.init();
+    console.log("   ✅ Database Pool initialized with vaulted credentials.");
+  } catch (dbErr) {
+    console.error("❌ CRITICAL: Database initialization failure:", dbErr.message);
+    process.exit(1);
+  }
+
+  // 3. 📦 Initialize Storage Service (PHASE 3 - HARDENED)
+  try {
+    Storage.init();
+    console.log("   ✅ Storage Service initialized for cloud operations.");
+  } catch (storageErr) {
+    console.error("❌ CRITICAL: Storage initialization failure:", storageErr.message);
+    process.exit(1);
+  }
+
+  // 4. 🚀 Load Application & Routes (PHASE 4 - LATE BINDING)
+  // We require 'app' ONLY HERE so all nested captures (JWT_SECRET, etc.) have access to the vault.
+  const app = require("./src/app");
 
   // 2. Structural Route Audit (Mandatory Privilege Verification)
   const unprotectedRoutes = [];
@@ -177,5 +197,3 @@ async function bootstrap() {
 if (require.main === module) {
   bootstrap();
 }
-
-module.exports = app;
