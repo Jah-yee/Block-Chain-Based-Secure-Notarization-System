@@ -47,15 +47,73 @@ export class ConfigValidator {
   }
 
   /**
+   * 🛡️ normalizeConfig() - Identical structure for both Backend and Frontend
+   * Responsibility: Ensure deterministic types and fields before hashing.
+   */
+  static normalizeConfig(config: any): any {
+    if (!config || typeof config !== 'object' || config === null) return config;
+
+    const normalized: any = {};
+    const keys = Object.keys(config).sort();
+
+    for (const key of keys) {
+      let value = config[key];
+
+      // 🛡️ Edge Case 1: Drop undefined, null, and excluded security fields
+      if (value === undefined || value === null) continue;
+      if (key === 'checksum' || key === 'signature') continue;
+
+      // 🛡️ Edge Case 2: Standardize Dates
+      if (value instanceof Date) {
+        value = value.toISOString();
+      }
+
+      // 🛡️ Edge Case 3: Recursive Normalize for Objects
+      if (typeof value === 'object' && !(value instanceof Date)) {
+        value = this.normalizeConfig(value);
+      }
+
+      // 🛡️ Edge Case 4: Explicit Type Casting for known numeric fields
+      if (['version', 'config_version', 'chainId'].includes(key)) {
+        value = Number(value);
+      }
+
+      normalized[key] = value;
+    }
+
+    return normalized;
+  }
+
+  /**
+   * 🛡️ deepSort() - Deterministic recursive sorting (Matches Backend)
+   */
+  static deepSort(obj: any): any {
+    if (Array.isArray(obj)) {
+      return obj.map((item: any) => this.deepSort(item));
+    } else if (obj !== null && typeof obj === "object") {
+      return Object.keys(obj)
+        .sort()
+        .reduce((acc: any, key: string) => {
+          acc[key] = this.deepSort(obj[key]);
+          return acc;
+        }, {});
+    }
+    return obj;
+  }
+
+  /**
    * Verifies SHA256 Checksum (Integrity check against corruption)
    */
   static async verifyChecksum(config: any, receivedChecksum: string): Promise<boolean> {
     try {
-      const salt = 'bbsns_prod_secure_2026'; // Match Backend salt
+      const salt = 'bbsns_prod_secure_2026';
       
-      // Deterministic stringification (Match Backend logic)
-      const keys = Object.keys(config).sort();
-      const data = JSON.stringify(config, keys);
+      // 🛡️ 1. Normalize and Sort (Deterministic Mirroring)
+      const normalized = this.normalizeConfig(config);
+      const sorted = this.deepSort(normalized);
+
+      // 🛡️ 2. Deterministic Stringification
+      const data = JSON.stringify(sorted);
       
       const encoder = new TextEncoder();
       const keyData = encoder.encode(salt);
@@ -77,6 +135,13 @@ export class ConfigValidator {
 
       const hashArray = Array.from(new Uint8Array(signature));
       const calculatedChecksum = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // 🛡️ 3. Double-Truth Logging
+      console.log("--- 🛡️ CONFIG CHECKSUM VERIFICATION ---");
+      console.log("FRONTEND_STRING:", data);
+      console.log("FRONTEND_HASH:", calculatedChecksum);
+      console.log("RECEIVED_HASH:", receivedChecksum);
+      console.log("---------------------------------------");
 
       return calculatedChecksum === receivedChecksum;
     } catch (e) {
