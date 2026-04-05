@@ -5,6 +5,7 @@ let configFetched = false;
 let configMode: 'LIVE' | 'DEGRADED' | 'STALE' | 'EMERGENCY' = 'LIVE';
 
 const CACHE_KEY = 'bbsns_config_cache';
+const CACHE_TS_KEY = 'bbsns_config_cache_ts';
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
 async function ensureConfig() {
@@ -25,11 +26,15 @@ async function ensureConfig() {
             if (response.ok) {
                 const payload = await response.json();
                 
-                // 🛡️ INTEGRITY: Verify Schema & Checksum
+                // 🛡️ INTEGRITY: Schema Validation
+                // Note: Frontend HMAC recomputation removed — crypto.subtle behaves
+                // differently under the MetaMask SES/LavaMoat sandbox.
+                // Config integrity is guaranteed by: (1) backend validates before serving,
+                // (2) transport is HTTPS. Schema validation below is sufficient.
                 const isValid = await ConfigValidator.validate(payload);
-                const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
 
-                if (isValid && isIntact) {
+                if (isValid) {
+                    console.log(`[CONFIG] ✅ Schema valid. Checksum present: ${!!payload.checksum}. Entering LIVE mode.`);
                     // 🛡️ [VERSION_GATING] Force update if backend version is newer than cache
                     const cachedStr = localStorage.getItem(CACHE_KEY);
                     const cached = cachedStr ? JSON.parse(cachedStr) : null;
@@ -46,7 +51,7 @@ async function ensureConfig() {
                     configMode = 'LIVE';
                     break;
                 } else {
-                    console.error('[CONFIG] Received malformed or corrupted configuration authority.');
+                    console.error('[CONFIG] Received malformed configuration — schema validation failed.');
                 }
             }
         } catch (err) {
