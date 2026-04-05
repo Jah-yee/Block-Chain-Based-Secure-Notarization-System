@@ -1,0 +1,1 @@
+// Content from web-app/script.js
