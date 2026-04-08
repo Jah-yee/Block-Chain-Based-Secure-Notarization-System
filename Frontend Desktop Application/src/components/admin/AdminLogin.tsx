@@ -17,38 +17,21 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
   const [status, setStatus] = useState<"idle" | "awaiting_browser" | "authorized" | "expired">("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Polling logic
+  // 🛡️ [SECURITY] Hardened Status Listener
   useEffect(() => {
-    let pollInterval: NodeJS.Timeout;
-
-    if (status === "awaiting_browser" && sessionId) {
-      pollInterval = setInterval(async () => {
-        try {
-          const res = await fetch(`${api.baseUrl}/auth/remote/status/${sessionId}`);
-          if (!res.ok) return;
-
-          const data = await res.json();
-          if (data.status === "authorized") {
-            setStatus("authorized");
-            localStorage.setItem("bbsns_token", data.token);
-            clearInterval(pollInterval);
-            toast.success("Login Successful!");
-            onLogin();
-          } else if (data.status === "expired" || data.status === "failed") {
-            setStatus("expired");
-            setError("Session expired or authorization failed. Please try again.");
-            clearInterval(pollInterval);
-          }
-        } catch (err) {
-          console.error("Polling error:", err);
+    if ((window as any).electronAPI?.auth) {
+      (window as any).electronAPI.auth.onStatusChanged((data: any) => {
+        if (data.status === "authorized") {
+          setStatus("authorized");
+          toast.success("Login Successful!");
+          onLogin();
+        } else if (data.status === "expired" || data.status === "failed") {
+          setStatus("expired");
+          setError("Session expired or authorization failed.");
         }
-      }, 2000);
+      });
     }
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [status, sessionId, onLogin]);
+  }, [onLogin]);
 
   const handleStartRemoteAuth = async () => {
     setConnecting(true);
@@ -56,55 +39,21 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
     setStatus("idle");
 
     try {
-      // 1. Create Device ID if not exists
-      let device_id = localStorage.getItem("bbsns_device_id");
-      if (!device_id) {
-        device_id = "desktop_" + Math.random().toString(36).substring(2, 15);
-        localStorage.setItem("bbsns_device_id", device_id);
-      }
+      // 🛡️ [SECURITY] OS-Level Auth Initiation
+      const electronAPI = (window as any).electronAPI;
+      if (!electronAPI?.auth) throw new Error("Security bridge failure: auth:start missing.");
 
-      // 2. Initialize Remote Session
-      const res = await fetch(`${api.baseUrl}/auth/remote/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_id }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(`${res.status}: ${data.error || "Failed to initialize secure session"}`);
-      }
-      
-      const { sessionId } = data;
+      const { sessionId } = await electronAPI.auth.start();
       setSessionId(sessionId);
       setStatus("awaiting_browser");
 
-      // 3. Open Browser for Signing
-      const { config } = useConfig();
-      if (!config) throw new Error("System configuration integrity failure");
-
-      const webAppUrl = `${config.remoteAuthUrl}/?sessionId=${sessionId}`;
-
-      const electron = (window as any).electronAPI;
-      console.log("Electron API Status:", electron);
-
-      if (electron) {
-        console.log("Opening external URL via Electron");
-        electron.openExternal(webAppUrl);
-      } else {
-        console.log("Opening window via standard API");
-        window.open(webAppUrl, '_blank');
-      }
-
       toast.info("Browser opened. Please sign the challenge in your wallet.");
-
     } catch (err: any) {
       console.error(err);
       if (err.message.includes("403") || err.message.toLowerCase().includes("not activated")) {
         setError("SYSTEM_NOT_ACTIVATED");
       } else {
-        setError(err.message || "Failed to start login flow.");
+        setError(err.message || "Failed to start secure login.");
       }
       toast.error("Process Halted");
       setStatus("idle");

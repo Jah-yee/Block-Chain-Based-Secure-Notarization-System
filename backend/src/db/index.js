@@ -31,19 +31,23 @@ const init = () => {
     return pool;
 };
 
-// Export Proxy to maintain compatibility without global refactor of every 'pool.query' call
-module.exports = {
-    init,
-    query: (...args) => {
+// 🛡️ [DATABASE_PROXY] Transparent Delegation to Internal Pool
+const dbProxy = new Proxy({}, {
+    get: (target, prop) => {
+        if (prop === 'init') return init;
+        if (prop === 'getPool') return () => pool;
+        if (prop === 'end') return () => pool ? pool.end() : Promise.resolve();
+        
+        // Throw if called before initialization
         if (!pool) {
-            throw new Error("❌ [DATABASE_FATAL] Attempted to query before DB initialization.");
+            console.error(`❌ [DATABASE_FATAL] Resource [${String(prop)}] accessed before DB initialization.`);
+            throw new Error(`DATABASE_NOT_INITIALIZED: Attempted to access property '${String(prop)}' before boot sequence.`);
         }
-        return pool.query(...args);
-    },
-    // Expose direct pool for 'pool.connect()' usage
-    getPool: () => {
-        if (!pool) throw new Error("❌ [DATABASE_FATAL] DB Pool not initialized.");
-        return pool;
-    },
-    end: () => pool ? pool.end() : Promise.resolve()
-};
+
+        // Delegate to the actual PG Pool instance
+        const val = pool[prop];
+        return typeof val === 'function' ? val.bind(pool) : val;
+    }
+});
+
+module.exports = dbProxy;

@@ -1,271 +1,120 @@
-import { Users, FileText, CheckCircle, Image, RefreshCw, TrendingUp, Activity, Loader2, Vote, Gavel, Plus, ExternalLink } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { useConfig } from "../../contexts/ConfigAuthority";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import api from "../../services/api";
-import { toast } from "sonner";
-import { ethers } from "ethers";
-import { Button } from "../ui/button"; // Re-adding Button as it's used later
+import { AuthStatusBar } from "./Cockpit/AuthStatusBar";
+import { HealthGrid } from "./Cockpit/HealthGrid";
+import { ActionPanel } from "./Cockpit/ActionPanel";
+import { EventRecorder } from "./Cockpit/EventRecorder";
+import { Loader2, RefreshCw } from "lucide-react";
+import { Button } from "../ui/button";
 
-interface AdminDashboardProps {
-  onNavigate?: (screen: string) => void;
-  isDarkMode?: boolean;
-}
-
-export function AdminDashboard({ onNavigate, isDarkMode }: AdminDashboardProps) {
-  const [data, setData] = useState({ users: [], documents: [] });
-  const [proposals, setProposals] = useState([]);
+export function AdminDashboard() {
+  const [user, setUser] = useState<any>(null);
+  const [stuckCount, setStuckCount] = useState(0);
+  const [isCritical, setIsCritical] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [chartData, setChartData] = useState([]);
-  const [isVoting, setIsVoting] = useState<number | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchSystemData = useCallback(async () => {
     setIsLoading(true);
-    setError("");
     try {
-      const [users, documents, proposalsData] = await Promise.all([
-        api.getUsers(),
-        api.getDocuments(),
-        api.getProposals()
-      ]);
-      setData({ users, documents });
-      setProposals(proposalsData);
+      // 1. Fetch Identity via Proxy (Main Process injects token)
+      const userData = await (window as any).electronAPI.api.call("/api/auth/me");
+      setUser(userData?.user);
 
-      // REAL ANALYTICS: Process chart data from documents
-      const monthMap = new Map();
-      documents.forEach((doc: any) => {
-        const date = new Date(doc.created_at);
-        const key = date.toLocaleString('default', { month: 'short' });
-        monthMap.set(key, (monthMap.get(key) || 0) + 1);
-      });
+      // 2. Fetch Sync Health for Action Panel
+      const health = await (window as any).electronAPI.api.call("/api/system/sync/health");
+      const summary = health.summary || {};
+      
+      const totalStuck = (Number(summary.stuck_identity_processing) || 0) + (Number(summary.stuck_role_processing) || 0);
+      setStuckCount(totalStuck);
 
-      const realChartData = Array.from(monthMap.entries()).map(([month, count]) => ({ month, count }));
-      if (realChartData.length === 0) {
-        // Fallback if empty
-        setChartData([{ month: "Jan", count: 0 }, { month: "Today", count: 0 }]);
-      } else {
-        setChartData(realChartData);
-      }
+      // 🛡️ [SECURITY] Semantic Criticality derivation
+      const critical = 
+        (Number(summary.perm_failed_identity) || 0) > 0 || 
+        (Number(summary.perm_failed_role) || 0) > 0 || 
+        totalStuck > 0;
+      setIsCritical(critical);
 
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to fetch admin stats.");
+      console.warn("[COCKPIT] Critical data fetch failure:", err.message);
+      setIsCritical(true); // Fail-Closed: Treat fetch failure as critical
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchSystemData();
+    const interval = setInterval(fetchSystemData, 60000); // 1m systematic refresh
+    return () => clearInterval(interval);
+  }, [fetchSystemData]);
 
-  const handleVote = async (proposalId: number, decision: 'approve' | 'reject') => {
-    setIsVoting(proposalId)
-    try {
-      // 1. Check for Local Wallet (MetaMask)
-      // @ts-ignore
-      if (window.ethereum) {
-        const now = Date.now();
-        const message = `BBSNS Governance Vote\nProposal ID: ${proposalId}\nDecision: ${decision}\nTimestamp: ${now}`
-        // @ts-ignore
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
-        // @ts-ignore
-        const signature = await window.ethereum.request({
-          method: 'personal_sign',
-          params: [message, accounts[0]]
-        })
-
-        // Submit to Backend
-        const data = await api.voteOnProposal(proposalId, decision, signature, now)
-        if (data.executed) {
-          toast.success("Proposal Executed! The threshold was met.")
-        } else {
-          toast.success("Vote recorded successfully")
-        }
-        fetchData()
-        setIsVoting(null)
-        return;
-      }
-
-      // 2. Fallback: Remote Signing (Electron Environment)
-      console.log("[GOV-DASH] window.ethereum not found. Starting Remote Sign Handshake...");
-      toast.info("Opening system browser for secure wallet audit...")
-
-      const session = await api.request('/api/governance/remote/vote/session', {
-        method: 'POST',
-        body: JSON.stringify({ proposalId, decision })
-      });
-
-      const { config } = useConfig();
-      const webAppUrl = `${config?.webAppUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
-
-      // Open System Browser
-      // @ts-ignore
-      if (window.electronAPI) {
-        // @ts-ignore
-        window.electronAPI.openExternal(webAppUrl);
-      } else {
-        window.open(webAppUrl, '_blank');
-      }
-
-      // 3. Polling for Completion
-      let pollCount = 0;
-      const pollMax = 60; // 2 minutes max
-      const pollInterval = setInterval(async () => {
-        pollCount++;
-        try {
-          const status = await api.request(`/api/governance/remote/vote/status/${session.sessionId}`);
-          if (status.status === 'authorized') {
-            clearInterval(pollInterval);
-            toast.success("Audit handshake complete. Vote recorded.");
-            setIsVoting(null);
-            fetchData();
-          } else if (status.status === 'expired' || status.status === 'failed') {
-            clearInterval(pollInterval);
-            toast.error("Handshake expired or failed.");
-            setIsVoting(null);
-          } else if (pollCount >= pollMax) {
-            clearInterval(pollInterval);
-            toast.error("Request timed out. Please try again.");
-            setIsVoting(null);
-          }
-        } catch (e) {
-          console.error("Poll Error:", e);
-        }
-      }, 2000);
-
-    } catch (err: any) {
-      toast.error(err.message || "Failed to submit vote")
-      setIsVoting(null)
-    }
-  };
-
-  const stats = [
-    {
-      label: "Total Users",
-      value: data.users.length.toString(),
-      icon: Users,
-      color: "emerald",
-      trend: "Live"
-    },
-    {
-      label: "Pending Documents",
-      value: data.documents.filter((d: any) => d.status === 'pending').length.toString(),
-      icon: Activity,
-      color: "yellow",
-      trend: "Action Req"
-    },
-    {
-      label: "Verified Records",
-      value: data.documents.filter((d: any) => d.status === 'approved').length.toString(),
-      icon: CheckCircle,
-      color: "blue",
-      trend: "On-Chain"
-    },
-    {
-      label: "Active Proposals",
-      value: proposals.filter((p: any) => p.status === 'active').length.toString(),
-      icon: Gavel,
-      color: "purple",
-      trend: "Governance"
-    },
-  ];
-
-  return (
-    <div className="flex-1 bg-background overflow-auto">
-      {/* Header */}
-      <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center justify-between p-6">
-          <div>
-            <h1 className="text-foreground mb-1">Admin Dashboard</h1>
-            <p className="text-sm text-muted-foreground">Multisig Governance & Analytics</p>
-          </div>
-          <Button
-            onClick={fetchData}
-            disabled={isLoading}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
-          >
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
-            Refresh Stats
-          </Button>
+  if (isLoading && !user) {
+    return (
+      <div className="flex-1 bg-[#07090e] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500">
+          <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
+          <span className="text-[10px] font-black tracking-widest text-emerald-500/50 uppercase italic">Initializing Cockpit Authority...</span>
         </div>
       </div>
+    );
+  }
 
-      {/* Content */}
-      <div className="p-6 space-y-6">
-        {error && (
-          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-destructive text-sm">
-            {error}
+  return (
+    <div className="flex-1 bg-[#07090e] h-screen flex flex-col relative overflow-hidden">
+      {/* 1. Auth Status Bar (Persistent System Truth) */}
+      <AuthStatusBar user={user} isLocked={false} />
+
+      <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide">
+        {/* Header Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none select-none">ADMIN COCKPIT</h1>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.4em] mt-2 italic shadow-emerald-500/10">BBSNS protocol control system node _1</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button 
+                variant="ghost" 
+                onClick={() => fetchSystemData()}
+                className="text-slate-500 hover:text-white transition-all text-[10px] font-bold uppercase tracking-widest"
+            >
+                <RefreshCw size={14} className={`mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                SYSTEM RE-SYNC
+            </Button>
+          </div>
+        </div>
+
+        {/* 2. Primary Status Grid (Backend / Chain / Workers) */}
+        <HealthGrid />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+          {/* 3. Event Flight Recorder (Live Telemetry) */}
+          <div className="lg:col-span-1">
+             <EventRecorder />
+          </div>
+
+          {/* 4. Action Decision Panel (Remediation) */}
+          <div className="lg:col-span-1">
+             <ActionPanel stuckCount={stuckCount} isCritical={isCritical} />
+          </div>
+        </div>
+
+        {/* 5. Trust Boundary Overlay (Fail-Closed Visibility) */}
+        {(!user || isCritical && !isLoading && !user) && (
+          <div className="absolute inset-0 bg-[#07090e]/80 backdrop-blur-2xl z-50 flex items-center justify-center p-8 animate-in fade-in duration-700">
+            <div className="max-w-md w-full text-center space-y-6">
+                <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+                    <Loader2 className="w-10 h-10 text-red-500 animate-spin" />
+                </div>
+                <h2 className="text-3xl font-black text-white italic tracking-tighter">TRUST BOUNDARY LOST</h2>
+                <p className="text-slate-400 text-sm italic leading-relaxed">Cryptographic link to production node has been severed or system state corrupted. All systematic control surfaces have been isolated for security.</p>
+                <Button onClick={() => window.location.reload()} className="w-full bg-red-500 hover:bg-red-600 font-black h-16 rounded-2xl transition-all shadow-red-500/20 shadow-xl">RE-ESTABLISH HANDSHAKE</Button>
+            </div>
           </div>
         )}
+      </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-6">
-          {stats.map((stat) => {
-            const Icon = stat.icon;
-            const colorMap: any = {
-              emerald: "bg-primary/20 text-primary border-primary/20",
-              yellow: "bg-yellow-500/20 text-yellow-500 border-yellow-500/20",
-              blue: "bg-blue-500/20 text-blue-500 border-blue-500/20",
-              purple: "bg-purple-500/20 text-purple-500 border-purple-500/20",
-            };
-
-            return (
-              <Card
-                key={stat.label}
-                className="bg-card border-border rounded-xl p-6 hover:shadow-lg hover:shadow-primary/10 transition-all"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${colorMap[stat.color]}`}>
-                    <Icon size={24} />
-                  </div>
-                  <span className="text-xs text-primary bg-primary/10 px-2 py-1 rounded-lg">
-                    {stat.trend}
-                  </span>
-                </div>
-                <h2 className="text-foreground mb-1">{isLoading ? "..." : stat.value}</h2>
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* GOVERNANCE SECTION */}
-        <div className="grid grid-cols-1 gap-6">
-          {/* REAL ANALYTICS CHART */}
-          <Card className="bg-card border-border rounded-xl p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-foreground mb-1">System Traffic</h3>
-                <p className="text-sm text-muted-foreground">Real Document Volume</p>
-              </div>
-              <Activity className="text-primary" size={24} />
-            </div>
-
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1f2330" : "#e2e8f0"} />
-                  <XAxis dataKey="month" stroke={isDarkMode ? "#94a3b8" : "#64748b"} style={{ fontSize: '10px' }} />
-                  <YAxis stroke={isDarkMode ? "#94a3b8" : "#64748b"} style={{ fontSize: '10px' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: isDarkMode ? "#1e293b" : "#ffffff",
-                      borderColor: isDarkMode ? "#334155" : "#e2e8f0",
-                      color: isDarkMode ? "#f1f5f9" : "#0f172a",
-                      borderRadius: '12px',
-                      border: '1px solid'
-                    }}
-                    itemStyle={{ color: '#10b981' }}
-                  />
-                  <Line type="monotone" dataKey="count" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </div>
+      {/* Decorative Branding */}
+      <div className="absolute bottom-4 right-8 pointer-events-none opacity-20">
+        <span className="text-[60px] font-black italic tracking-tighter text-white/5 select-none">BBSNS_01</span>
       </div>
     </div>
   );

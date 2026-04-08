@@ -2,11 +2,13 @@
 
 import { useState } from "react"
 import { Copy, CheckCircle2, ShieldAlert, ArrowUpRight, Hexagon, Component } from "lucide-react"
+import { useConfig } from "@/providers/ConfigProvider"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 
 export default function TokenContractsPage() {
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
+  const { config } = useConfig()
 
   const handleCopy = (address: string) => {
     navigator.clipboard.writeText(address)
@@ -14,25 +16,26 @@ export default function TokenContractsPage() {
     setTimeout(() => setCopiedAddress(null), 2000)
   }
 
+  // Authoritative Configuration (SSoT)
   const contracts = [
     {
       name: "NTKR Token",
       description: "The primary utility and reputation token for Notaries in the BBSNS ecosystem.",
-      address: process.env.NEXT_PUBLIC_NTKR_CONTRACT_ADDRESS || "0x...",
+      address: config?.contracts.ntkr || "0x...",
       symbol: "NTKR",
       priority: true,
     },
     {
       name: "NTK Token",
       description: "The base network token used for transactions.",
-      address: process.env.NEXT_PUBLIC_NTK_CONTRACT_ADDRESS || "0x...",
+      address: config?.contracts.ntk || "0x...",
       symbol: "NTK",
       priority: false,
     },
     {
       name: "Document Registry",
       description: "Core smart contract storing notarization proofs and signatures.",
-      address: process.env.NEXT_PUBLIC_DOCUMENT_REGISTRY_ADDRESS || "0x...",
+      address: config?.contracts.documentRegistry || "0x...",
       symbol: "REGISTRY",
       priority: false,
     }

@@ -1,56 +1,56 @@
 const pool = require('../db');
-const logger = require('./logger.service');
+const { Logger } = require('./logger.service');
+const logger = new Logger('UserService');
 
 /**
- * UserService: Hardened Identity Lifecycle Stewardship
- * Centralizes all user state transitions to ensure auditability and FSM compliance.
+ * UserService: Hardened Identity Lifecycle Authority
+ * Centralizes all user creations and state transitions to ensure auditability and FSM compliance.
  */
 class UserService {
   /**
-   * updateIdentityState: Atomic, Auditable State Transition
-   * @param {number} userId - The target user's ID
-   * @param {string} newState - The target identity_state (PENDING, ACTIVE, etc.)
-   * @param {number} actorId - The user performing the action (for audit)
-   * @param {string} reason - Human-readable reason for the change
+   * createUser: Atomic Creation with Initial Audit Entry
+   * @param {Object} userData - User metadata (email, name, wallet, password_hash, role)
+   * @returns {Object} The created user
    */
-  async updateIdentityState(userId, newState, actorId, reason) {
+  async createUser(userData) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Lock the row to prevent race conditions during long FSM checks
-      // and ensure we are reading the latest state for the trigger
-      const lockResult = await client.query(
-        'SELECT identity_state, is_human_verified FROM users WHERE id = $1 FOR UPDATE',
-        [userId]
-      );
-
-      if (lockResult.rowCount === 0) {
-        throw new Error(`User with ID ${userId} not found`);
+      // 🛡️ [CONSTRAINT_HARMONY]
+      // Database requires is_human_verified = true for ACTIVE state
+      if (userData.identity_state === 'ACTIVE') {
+        userData.is_human_verified = true;
       }
 
-      // 2. Supply session metadata for the trigger (MANDATORY)
-      // These are local to the transaction and required by fn_identity_lifecycle_steward
-      await client.query('SET LOCAL app.user_id = $1', [actorId]);
-      await client.query('SET LOCAL app.reason = $2', [reason]);
+      // 1. Create the user record
+      const fields = Object.keys(userData);
+      const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
+      const values = Object.values(userData);
 
-      // 3. Perform the update
-      // The trigger 'trg_enforce_identity_lifecycle' will intercept this,
-      // validate against the FSM, check is_human_verified, and log the audit history.
+      const insertQuery = `
+        INSERT INTO users (${fields.join(', ')}) 
+        VALUES (${fields.map((f, i) => f === 'identity_state' ? `$${i+1}::identity_lifecycle` : `$${i+1}`).join(', ')}) 
+        RETURNING id, email, wallet_address, role, identity_state
+      `;
+      
+      const res = await client.query(insertQuery, values);
+      const user = res.rows[0];
+
+      // 2. Log Initial State Transition (NULL -> ACTIVE)
+      // Every user created is 'ACTIVE' by default in the new MVP model
       await client.query(
-        'UPDATE users SET identity_state = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-        [newState, userId]
+        `INSERT INTO user_state_history (user_id, from_state, to_state, reason, changed_by) 
+         VALUES ($1, $2, $3::identity_lifecycle, $4, $5)`,
+        [user.id, null, 'ACTIVE', 'INITIAL_REGISTRATION', 0] // 0 = SYSTEM
       );
 
       await client.query('COMMIT');
-      logger.info(`Identity state updated for user ${userId} to ${newState} by actor ${actorId}`);
-      
-      return true;
+      logger.info('USER_CREATED', { email: user.email, userId: user.id, state: 'ACTIVE' });
+      return user;
     } catch (err) {
       await client.query('ROLLBACK');
-      logger.error(`Failed to update identity state for user ${userId}: ${err.message}`);
-      
-      // Propagate the trigger's RAISE EXCEPTION message to the caller
+      logger.error('USER_CREATION_FAILED', { error: err.message }, err);
       throw err;
     } finally {
       client.release();
@@ -58,19 +58,142 @@ class UserService {
   }
 
   /**
-   * Helper to fetch current user state
+   * promoteToNotary: Hardened Privilege Escalation
+   * @param {number} userId - Target user
+   * @param {Object} actor - The Admin performing the action
+   * @param {string} reason - Audit trail justification
    */
-  async getUserIdentity(userId) {
+  async promoteToNotary(userId, actor, reason) {
+    const client = await pool.connect();
     try {
-      const result = await pool.query(
-        'SELECT id, username, email, identity_state, is_human_verified, role FROM users WHERE id = $1',
+      await client.query('BEGIN');
+
+      // 🛡️ [GUARD_1] Lock and Verify Role Consistency
+      const userRes = await client.query(
+        'SELECT id, role, identity_state::text FROM users WHERE id = $1 FOR UPDATE',
         [userId]
       );
-      return result.rows[0];
+      if (userRes.rowCount === 0) throw new Error('User not found');
+      const user = userRes.rows[0];
+
+      // 🛡️ [GUARD_2] Prevent Double-Promotion & Admin Conflict
+      if (user.role === 'notary') {
+        throw new Error('User is already a Notary.');
+      }
+      if (user.role === 'admin') {
+        throw new Error('Administrators cannot be demoted/assigned to Notary role via this path.');
+      }
+
+      // 1. Update Role & Sync Status (Atomic Authority)
+      await client.query(
+        `UPDATE users 
+         SET role = 'notary', 
+             role_tx_status = 'initiated',
+             role_retry_count = 0,
+             role_status_updated_at = NOW(),
+             updated_at = NOW() 
+         WHERE id = $1`,
+        [userId]
+      );
+
+      // 2. Log Escalation
+      await client.query(
+        `INSERT INTO user_role_history (user_id, from_role, to_role, reason, changed_by) 
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userId, user.role, 'notary', reason || 'NOTARY_APPROVAL', actor ? actor.id : 0]
+      );
+
+      await client.query('COMMIT');
+      logger.info('ROLE_ESCALATION', { userId, oldRole: user.role, newRole: 'notary', actorId: actor ? actor.id : 0 });
+      return true;
     } catch (err) {
-      logger.error(`Error fetching user identity: ${err.message}`);
+      await client.query('ROLLBACK');
+      logger.error('PROMOTION_FAILED', { userId, error: err.message });
       throw err;
+    } finally {
+      client.release();
     }
+  }
+
+  async updateIdentityState(userId, newState, actor, reason) {
+    const VALID_STATES = ['PENDING', 'ACTIVE', 'REJECTED', 'SUSPENDED'];
+    if (!VALID_STATES.includes(newState)) {
+      throw new Error(`Invalid target state: ${newState}`);
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Lock and Audit Current State
+      const lockRes = await client.query(
+        'SELECT identity_state::text, role FROM users WHERE id = $1 FOR UPDATE',
+        [userId]
+      );
+      if (lockRes.rowCount === 0) throw new Error('User not found');
+      
+      const oldState = lockRes.rows[0].identity_state;
+      if (oldState === newState) {
+        await client.query('COMMIT');
+        return true;
+      }
+
+      // 2. FSM & Role Enforcement
+      const isSystem = !actor;
+      const isAdmin = actor && Number(actor.role) === 3;
+      const isSelf = actor && Number(actor.id) === Number(userId);
+
+      // BLOCK: Rejected/Suspended -> Pending (must be fixed by Admin first)
+      if (newState === 'PENDING' && (oldState === 'REJECTED' || oldState === 'SUSPENDED')) {
+        throw new Error(`Transition from ${oldState} to PENDING is restricted to Admin reactivation first.`);
+      }
+
+      // ROLE GUARD: Only Admin can set ACTIVE, REJECTED, or SUSPENDED
+      const restrictedStates = ['ACTIVE', 'REJECTED', 'SUSPENDED'];
+      if (restrictedStates.includes(newState) && !isAdmin && !isSystem) {
+        throw new Error(`State ${newState} can only be set by an Administrator.`);
+      }
+
+      // 3. Update State
+      await client.query(
+        `UPDATE users 
+         SET identity_state = $1::identity_lifecycle, 
+             is_human_verified = CASE WHEN $1::text = 'ACTIVE' THEN true ELSE is_human_verified END,
+             updated_at = NOW() 
+         WHERE id = $2`,
+        [newState, userId]
+      );
+
+      // 4. Log Transition
+      await client.query(
+        `INSERT INTO user_state_history (user_id, from_state, to_state, reason, changed_by) 
+         VALUES ($1, $2::identity_lifecycle, $3::identity_lifecycle, $4, $5)`,
+        [userId, oldState, newState, reason || 'SYSTEM_SYNC', actor ? actor.id : 0]
+      );
+
+      await client.query('COMMIT');
+      logger.info('IDENTITY_TRANSITION', { 
+        userId, 
+        oldState, 
+        newState, 
+        actorId: actor ? actor.id : 0 
+      });
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error('IDENTITY_UPDATE_FAILED', { userId, newState, error: err.message }, err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getUserIdentity(userId) {
+    const result = await pool.query(
+      'SELECT id, username, email, identity_state, is_human_verified, role FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rows[0];
   }
 }
 

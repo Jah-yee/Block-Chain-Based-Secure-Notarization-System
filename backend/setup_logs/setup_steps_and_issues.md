@@ -56,5 +56,15 @@
 - Issue: PowerShell does not support `<` for input redirection. Fixed by using `Get-Content ... | docker exec -i ...`.
 - Verified tables with `docker exec -it bbsns_postgres psql -U bbsns_user -d bbsns_db -c "\dt"`.
 
+### 10. Desktop Auth Restoration & Hardening
+- Actions:
+  - Resolved Multi-Process Handshake Stalemate (Auth Polling mismatch).
+  - Hardened Configuration Authority with deterministic SHA256 checksums and Salt parity.
+  - Implemented `build-isolated.ps1` for production distribution hygiene.
+  - Synchronized `ConfigAuthority.tsx` to act as a passive subscriber to Main Process updates.
+- Issues:
+  - Initial handshake failed due to process isolation. Fixed by IPC API synchronization.
+  - Checksum mismatch on production. Fixed by hardcoding authoritative salt.
+
 ## Summary
-All backend setup steps, issues, and fixes are logged here for future reference and reproducibility.
+All setup steps, system restoration phases, and technical hardening milestones are logged here. The system is currently in a STABLE verified state.

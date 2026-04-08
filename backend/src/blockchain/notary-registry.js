@@ -73,4 +73,4 @@ const registerNotaryOnChain = async (walletAddress) => {
     }
 };
 
-module.exports = { registerNotaryOnChain };
+module.exports = { registerNotaryOnChain, attachNotaryRegistry };

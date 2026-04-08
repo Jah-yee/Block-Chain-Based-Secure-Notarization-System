@@ -166,15 +166,27 @@ async function apiRequest(endpoint: string, options: RequestOptions = {}) {
     try {
         const response = await fetch(url, config);
 
+        // 🛡️ [AUTH] Handle Authentication Failures (Logout Required)
         if (response.status === 401 || response.status === 426) {
             const errorData = await response.json().catch(() => ({}));
-            // Force logout on unauthorized
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('bbs_unauthorized'));
             }
             return Promise.reject({
-                status: 401,
+                status: response.status,
                 message: errorData.error || 'Unauthorized'
+            });
+        }
+
+        // 🛡️ [PERMISSION] Handle Authorization Failures (No Logout)
+        if (response.status === 403) {
+            const errorData = await response.json().catch(() => ({}));
+            // We DO NOT trigger bbs_unauthorized here. 
+            // We want the user to stay logged in but see a restricted state.
+            return Promise.reject({
+                status: 403,
+                message: errorData.error || 'Forbidden: Insufficient privileges',
+                detail: errorData.detail
             });
         }
 

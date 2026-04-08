@@ -37,6 +37,8 @@ interface WalletContextType {
     isLoading: boolean
     error: string | null
     liveBalances: LiveBalances
+    isRestricted: boolean
+    restrictionDetail: string | null
     refreshBalances: () => Promise<void>
     connectWallet: () => Promise<void>
     logout: () => void
@@ -55,6 +57,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const [chainId, setChainId] = useState<number | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [isRestricted, setIsRestricted] = useState(false)
+    const [restrictionDetail, setRestrictionDetail] = useState<string | null>(null)
 
     // Live balances state (initialized from cached balances)
     const [liveBalances, setLiveBalances] = useState<LiveBalances>({
@@ -70,6 +74,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             // 1. Fetch cached balances from backend
             const data = await apiClient.get('/api/tokens/balance');
             setBalances(data);
+            
+            // Clear any previous restrictions on successful fetch
+            setIsRestricted(false);
+            setRestrictionDetail(null);
 
             // 2. Fetch truly LIVE balances from MetaMask if connected
             if (typeof window !== "undefined" && window.ethereum && connectedAccount) {
@@ -107,6 +115,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             }
         } catch (err: any) {
             console.error("Balance refresh failed:", err);
+            // Handle Authorization vs Authentication
+            if (err.status === 403) {
+                setIsRestricted(true);
+                setRestrictionDetail(err.detail || err.message);
+                // We DON'T clear user state here. We stay logged in but restricted.
+            } else if (err.status === 401) {
+                // Should be handled by global interceptor, but fallback:
+                setUser(null);
+            }
         }
     }
 
@@ -299,6 +316,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             isLoading,
             error,
             liveBalances,
+            isRestricted,
+            restrictionDetail,
             refreshBalances,
             connectWallet,
             logout

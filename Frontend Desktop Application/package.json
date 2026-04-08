@@ -1,6 +1,6 @@
 {
       "name": "bbsns-desktop-application",
-      "version": "0.1.0",
+      "version": "1.0.1",
       "private": true,
       "dependencies": {
             "@radix-ui/react-accordion": "^1.2.3",
@@ -29,6 +29,7 @@
             "@radix-ui/react-toggle": "^1.1.2",
             "@radix-ui/react-toggle-group": "^1.1.2",
             "@radix-ui/react-tooltip": "^1.1.8",
+            "axios": "^1.7.9",
             "class-variance-authority": "^0.7.1",
             "clsx": "*",
             "cmdk": "^1.1.1",
@@ -70,43 +71,36 @@
             "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3001 && electron .\"",
             "dist": "npm run build && electron-builder",
             "dist-win": "npm run build && electron-builder --win",
-            "dist-linux": "npm run build && electron-builder --linux",
-            "package-win": "npm run build && electron-packager . \"BBSNS Desktop Application\" --platform=win32 --arch=x64 --out=dist/portable --overwrite --icon=assets/icon.ico --ignore=\"(dist|\\.git|\\.vscode|.electron-builder-cache|node_modules_old)\" "
+            "package-win": "npm run build && electron-packager . \"BBSNS Admin Console\" --platform=win32 --arch=x64 --out=dist-portable --overwrite --icon=assets/icon.ico"
       },
       "build": {
-            "extraResources": [
-                  {
-                        "from": "public/config.json",
-                        "to": "config.json"
-                  }
-            ],
-            "appId": "com.bbsns.notarization",
-            "productName": "BBSNS Desktop Application",
+            "appId": "com.bbsns.desktop",
+            "productName": "BBSNS Desktop Console",
+            "copyright": "Copyright © 2026 BBSNS Project",
             "directories": {
-                  "output": "dist"
+                  "output": "dist-electron"
             },
             "files": [
                   "build/**/*",
                   "main.js",
                   "preload.js",
-                  "Remote Auth/dist_final/**/*",
-                  "node_modules/**/*",
-                  "!public/config.json"
+                  "package.json",
+                  "assets/**/*",
+                  "node_modules/**/*"
             ],
             "win": {
                   "target": [
-                        "nsis",
-                        "portable"
+                        "nsis"
                   ],
-                  "icon": "assets/icon.ico"
-            },
-            "linux": {
-                  "target": "AppImage",
-                  "icon": "assets/icon.png"
+                  "icon": "assets/icon.ico",
+                  "artifactName": "BBSNS-Desktop-Setup.exe"
             },
             "nsis": {
                   "oneClick": false,
-                  "allowToChangeInstallationDirectory": true
+                  "allowToChangeInstallationDirectory": true,
+                  "createDesktopShortcut": true,
+                  "createStartMenuShortcut": true,
+                  "shortcutName": "BBSNS Desktop"
             }
       }
 }

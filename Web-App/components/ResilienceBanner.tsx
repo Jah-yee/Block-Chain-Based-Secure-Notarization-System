@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
+import { useWalletSession } from '@/hooks/use-wallet-session';
 
 const ResilienceBanner: React.FC = () => {
     const [mode, setMode] = useState<'LIVE' | 'DEGRADED' | 'STALE' | 'EMERGENCY' | null>(null);
+    const { isRestricted, restrictionDetail } = useWalletSession();
 
     useEffect(() => {
         const handleConfigLoaded = (e: any) => {
@@ -14,9 +16,39 @@ const ResilienceBanner: React.FC = () => {
         return () => window.removeEventListener('bbs_config_loaded', handleConfigLoaded);
     }, []);
 
+    // Priority 1: Restricted Identity (Authorization Failure)
+    if (isRestricted) {
+        return (
+            <div style={{
+                width: '100%',
+                padding: '8px 16px',
+                textAlign: 'center',
+                fontSize: '14px',
+                fontWeight: 600,
+                zIndex: 9999,
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                backgroundColor: '#FFF1F2',
+                color: '#E11D48',
+                borderBottom: '1px solid #FDA4AF'
+            }}>
+                <span style={{ fontSize: '16px' }}>🛡️</span>
+                <strong>Account Restricted:</strong> {restrictionDetail || 'Verification required for full access.'}
+            </div>
+        );
+    }
+
+    // Priority 2: Infrastructure Resilience
     if (!mode || mode === 'LIVE') return null;
 
     const bannerStyles: Record<string, React.CSSProperties> = {
+// ... rest of component
         container: {
             width: '100%',
             padding: '8px 16px',
