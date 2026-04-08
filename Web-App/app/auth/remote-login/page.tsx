@@ -115,45 +115,50 @@ function RemoteLoginContent() {
     // STEP 4: Authorize — sign challenge, call backend
     // ─────────────────────────────────────────────
     const handleAuthorize = async () => {
-        if (!challenge || !user?.wallet_address) return
+        if (!sessionId || !challenge) return
 
-        if (typeof window === "undefined" || !(window as any).ethereum) {
-            toast({
-                title: "MetaMask Not Found",
-                description: "Please install MetaMask to authorize the desktop session.",
-                variant: "destructive"
-            })
-            return
-        }
-
+        console.log("🚀 [RemoteAuth] Step 1: Initiating Authorization...")
         setStatus("signing")
+        
         try {
+            // 🛡️ [SECURITY] Hardened Wallet Re-Connection Insurance
+            if (typeof window === "undefined" || !(window as any).ethereum) throw new Error("MetaMask not found.")
+            
             const { ethers } = await import("ethers")
             const provider = new ethers.BrowserProvider((window as any).ethereum)
-            const accounts = await provider.send("eth_requestAccounts", [])
+            console.log("🚀 [RemoteAuth] Step 2: Requesting Accounts...")
+            await provider.send("eth_requestAccounts", [])
+            
             const signer = await provider.getSigner()
             const connectedAddress = await signer.getAddress()
+            console.log(`🚀 [RemoteAuth] Step 3: Connected to ${connectedAddress}`)
 
-            // Ensure the MetaMask account matches the registered admin wallet
-            if (user && connectedAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
-                throw new Error(
-                    `Wrong wallet connected. Please switch to: ${user.wallet_address.substring(0, 6)}...${user.wallet_address.substring(38)}`
-                )
-            }
-
+            console.log("🚀 [RemoteAuth] Step 4: Signing Challenge...")
             const signature = await signer.signMessage(challenge)
+            console.log("🚀 [RemoteAuth] Step 5: Signature obtained. Sending to server...")
 
-            await apiClient.post("/api/auth/remote/authorize", {
-                sessionId,
-                walletAddress: accounts[0],
-                signature
+            const API_BASE = "https://api.bbsns.online"
+            const authResponse = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionId,
+                    walletAddress: connectedAddress,
+                    signature
+                })
             })
 
-            setStatus("authorized")
+            if (!authResponse.ok) {
+                const errorData = await authResponse.json()
+                throw new Error(errorData.error || "Authorization failed on server")
+            }
+
+            console.log("🚀 [RemoteAuth] Step 6: Authorization SUCCESS!")
             toast({
                 title: "Desktop Session Authorized",
                 description: "Your desktop app is now logged in. This window will close in 3 seconds."
             })
+            setStatus("authorized")
             setTimeout(() => { if (typeof window !== "undefined") window.close() }, 3000)
         } catch (err: any) {
             console.error("[RemoteLogin] Authorize error:", err)

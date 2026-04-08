@@ -174,11 +174,11 @@ export default function App() {
   }, [config]);
 
   const recoverSession = async () => {
-    console.log("[SESSION] Initializing recovery flow...");
+    console.log("[SESSION] Initializing hardened recovery flow...");
     try {
-      // 1. Check System Activation Status
-      const status = await api.request("/api/auth/system-status");
-      const { activated } = status;
+      // 1. Check System Activation Status (Public API)
+      const systemStatus = await api.request("/api/auth/system-status");
+      const { activated } = systemStatus;
       setIsSystemActivated(activated);
 
       if (!activated) {
@@ -187,21 +187,29 @@ export default function App() {
         return;
       }
 
-      // 2. Attempt Session Recovery if token exists
-      const token = localStorage.getItem("bbsns_token");
-      if (!token) {
+      // 2. Check for OS-level secure session via Main Process
+      const hasSession = await (window as any).electronAPI.auth.checkSession();
+      if (!hasSession) {
+        console.log("[SESSION] No secure vault found.");
         setIsRecovering(false);
         return;
       }
 
-      const userData = await api.getMe();
+      // 3. Fetch Identity via Proxy (Main Process injects token)
+      const userData = await (window as any).electronAPI.api.call("/api/auth/me");
+      if (!userData || !userData.user) {
+         setIsRecovering(false);
+         return;
+      }
+
+      const userProfile = userData.user;
       const ROLE_MAP: Record<string | number, string> = {
         1: 'owner', 2: 'notary', 3: 'admin',
         'admin': 'admin', 'notary': 'notary', 'owner': 'owner'
       };
 
-      const normalizedRole = ROLE_MAP[userData.role] || (userData.role && typeof userData.role === 'string' ? userData.role.toLowerCase() : "none");
-      setUser({ ...userData, role: normalizedRole });
+      const normalizedRole = ROLE_MAP[userProfile.role] || (userProfile.role && typeof userProfile.role === 'string' ? userProfile.role.toLowerCase() : "none");
+      setUser({ ...userProfile, role: normalizedRole });
 
       if (normalizedRole === "admin") {
         setAppState("admin-app");
@@ -212,18 +220,37 @@ export default function App() {
       pollAlerts();
     } catch (err: any) {
       console.error("[SESSION] Recovery Error:", err.message);
-      if (err.status === 401 || err.status === 403) {
-        localStorage.removeItem("bbsns_token");
-      }
       setRecoveryError(err.message);
     }
     setIsRecovering(false);
   };
 
+  useEffect(() => {
+    // 🛡️ [SECURITY] Listen for OS-level auth status changes (Success, Expiry, Force Logout)
+    if ((window as any).electronAPI?.auth) {
+        (window as any).electronAPI.auth.onStatusChanged((data: any) => {
+            console.log("[AUTH_STATUS_UPDATE]", data.status);
+            if (data.status === 'authorized') {
+                const userProfile = data.user;
+                const ROLE_MAP: Record<number, string> = { 1: 'owner', 2: 'notary', 3: 'admin' };
+                const normalizedRole = ROLE_MAP[userProfile.role as keyof typeof ROLE_MAP] || 'none';
+                
+                setUser({ ...userProfile, role: normalizedRole });
+                setAppState(normalizedRole === 'admin' ? 'admin-app' : 'notary-app');
+                setAdminScreen('dashboard');
+            } else if (data.status === 'unauthorized' || data.status === 'expired') {
+                setUser(null);
+                setAppState('role-selection');
+                setRecoveryError(data.status === 'expired' ? 'Session expired. Please re-authenticate.' : null);
+            }
+        });
+    }
+  }, []);
+
   const pollAlerts = async () => {
     try {
-      const { count } = await api.getGovernanceAlertCount();
-      setAlertCount(count);
+      const response = await (window as any).electronAPI.api.call("/api/governance/alerts/count");
+      setAlertCount(response.count);
     } catch (err) {
       console.warn("[ALERTS] Failed to poll counts");
     }
@@ -248,8 +275,8 @@ export default function App() {
     setNotaryScreen("dashboard");
   };
 
-  const handleLogoutConfirm = () => {
-    localStorage.removeItem("bbsns_token");
+  const handleLogoutConfirm = async () => {
+    await (window as any).electronAPI.auth.logout();
     setLogoutDialogOpen(false);
     setAppState("role-selection");
     setUser(null);

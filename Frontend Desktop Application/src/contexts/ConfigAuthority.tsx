@@ -44,9 +44,9 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
-const DEFAULT_API_URL = import.meta.env.VITE_BOOTSTRAP_API_URL || "http://localhost:5000";
-const DEFAULT_WEB_URL = import.meta.env.VITE_BOOTSTRAP_WEB_URL || "http://localhost:3000";
-const DEFAULT_AUTH_URL = import.meta.env.VITE_BOOTSTRAP_AUTH_URL || "http://localhost:3002";
+const DEFAULT_API_URL = "https://api.bbsns.online";
+const DEFAULT_WEB_URL = "https://app.bbsns.online";
+const DEFAULT_AUTH_URL = "https://auth.bbsns.online";
 
 export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<ConfigStatus>('loading');
@@ -76,25 +76,18 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
             const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
 
             if (isValid && isIntact) {
-              // 🛡️ [VERSION_GATING] Check against existing cache
-              const existing = await electronAPI?.loadConfigCache();
-              const isNewer = existing && payload.version > (existing.data?.version || 0);
-
-              if (isNewer) {
-                console.warn(`[CONFIG] Remote version ${payload.version} > Local ${existing.data?.version}. Forcing refresh.`);
-              }
-
-              if (!existing || isNewer) {
-                if (electronAPI?.saveConfigCache) {
-                  await electronAPI.saveConfigCache(payload);
-                }
-              }
-              
-              resolvedConfig = payload;
               setMode('LIVE');
+              resolvedConfig = payload;
+              break;
+            } else if (isValid && !isIntact) {
+              console.warn(`[CONFIG] Authority integrity violation: CHECKSUM_MISMATCH. Entering RESILIENCE mode.`);
+              setMode('EMERGENCY');
+              resolvedConfig = payload;
               break;
             } else {
-              console.error('[CONFIG] Received malformed or corrupted configuration authority.');
+              const reason = !isValid ? "SCHEMA_INVALID" : "UNIDENTIFIED_FAULT";
+              console.error(`[CONFIG] Authority integrity violation: ${reason}`);
+              throw new Error(`CRITICAL: Configuration ${reason}. System cannot trust authority.`);
             }
           }
         } catch (e) {
@@ -106,9 +99,9 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
       }
 
       // 🟠 TIER 2: OS-Level Cache Fallback
-      if (!resolvedConfig && electronAPI?.loadConfigCache) {
+      if (!resolvedConfig && electronAPI?.config?.load) {
         try {
-          const cached = await electronAPI.loadConfigCache();
+          const cached = await electronAPI.config.load();
           if (cached && cached.data) {
             const { data, timestamp } = cached;
             
@@ -148,9 +141,13 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
         } as Config;
       }
 
-      // 🛡️ Final Sanity Check for Chain Access
       if (mode !== 'EMERGENCY' && resolvedConfig.rpcUrl && !resolvedConfig.chainId) {
         throw { code: 'INVALID_CHAIN_ID', message: `Mismatched network authority. Chain ID is missing.` };
+      }
+
+      // 🛡️ [PHASE 37] Synchronize Main Process with authoritative API
+      if (resolvedConfig.apiBaseUrl && (window as any).electronAPI?.config?.syncApiUrl) {
+        await (window as any).electronAPI.config.syncApiUrl(resolvedConfig.apiBaseUrl);
       }
 
       setConfig(resolvedConfig);

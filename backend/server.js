@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { ethers } = require("ethers");
 const DB = require("./src/db/index");
 const Storage = require("./src/services/storage.service");
@@ -24,7 +25,25 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  // 1. Startup Guard & Authoritative Config Handshake (SSoT)
+  // 1. 🐘 Initialize Database Pool (PHASE 2 - HARDENED)
+  try {
+    DB.init();
+    console.log("   ✅ Database Pool initialized with vaulted credentials.");
+  } catch (dbErr) {
+    console.error("❌ CRITICAL: Database initialization failure:", dbErr.message);
+    process.exit(1);
+  }
+
+  // 2. 📦 Initialize Storage Service (PHASE 3 - HARDENED)
+  try {
+    Storage.init();
+    console.log("   ✅ Storage Service initialized for cloud operations.");
+  } catch (storageErr) {
+    console.error("❌ CRITICAL: Storage initialization failure:", storageErr.message);
+    process.exit(1);
+  }
+
+  // 3. Startup Guard & Authoritative Config Handshake (SSoT)
   const StartupGuard = require("./src/services/startup-guard.service");
   
   try {
@@ -41,24 +60,6 @@ async function bootstrap() {
   } catch (err) {
     console.error("❌ CRITICAL: StartupGuard Failure. Environment is compromised or misconfigured.");
     console.error(err.message);
-    process.exit(1);
-  }
-
-  // 2. 🐘 Initialize Database Pool (PHASE 2 - HARDENED)
-  try {
-    DB.init();
-    console.log("   ✅ Database Pool initialized with vaulted credentials.");
-  } catch (dbErr) {
-    console.error("❌ CRITICAL: Database initialization failure:", dbErr.message);
-    process.exit(1);
-  }
-
-  // 3. 📦 Initialize Storage Service (PHASE 3 - HARDENED)
-  try {
-    Storage.init();
-    console.log("   ✅ Storage Service initialized for cloud operations.");
-  } catch (storageErr) {
-    console.error("❌ CRITICAL: Storage initialization failure:", storageErr.message);
     process.exit(1);
   }
 

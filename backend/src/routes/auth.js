@@ -22,7 +22,19 @@ const JWT_EXPIRY_SECONDS = 12 * 60 * 60;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidUUID = (str) => UUID_REGEX.test(str);
 
-const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../../middleware/actor');
+// 🛡️ [SECURITY] Authoritative Cookie Configuration
+// sameSite: 'none' and secure: true are REQUIRED for cross-subdomain auth (app vs api)
+// path: '/' ensures the cookie is cleared from the root, not just the /auth prefix
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true, 
+  sameSite: 'none',
+  path: '/'
+};
+
+const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../middleware/actor');
+const { requireSystemActivated } = require('../middleware/activation');
+const UserService = require('../services/UserService');
 
 // Hardened Rate Limiter: IP + Wallet + Endpoint binding with cooldown escalation
 const distributedRateLimiter = require('../utils/rate-limiter');
@@ -214,14 +226,21 @@ router.post('/genesis/onboard', allowPublic, simpleRateLimiter(10, 3600000), asy
     if (Number(adminCount) !== 1) return res.status(403).json({ error: 'Genesis window closed' });
     if (Number(userRole) !== 3) return res.status(403).json({ error: 'Unauthorized role' });
 
-    // 5. Create Profile
+    // 5. Create Profile using UserService for atomic audit entry
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
     const nationalIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
-    await pool.query(
-      `INSERT INTO users (name, email, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [fullName, (email || '').toLowerCase().trim(), normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWalletAddress, 'ACTIVE']
-    );
+    
+    await UserService.createUser({
+      name: fullName,
+      email: (email || '').toLowerCase().trim(),
+      wallet_address: normalizedWalletAddress,
+      role: 'admin',
+      is_human_verified: true,
+      national_id_hash: nationalIdHash,
+      password_hash: 'ADMIN_WEB3_ONLY',
+      username: normalizedWalletAddress,
+      identity_state: 'ACTIVE'
+    });
 
     res.json({ success: true, message: 'Genesis Admin Onboarded Successfully' });
   } catch (error) {
@@ -268,13 +287,16 @@ router.post('/notary/onboard', allowPublic, simpleRateLimiter(5, 3600000), async
 
     if (Number(liveRole) !== 2) return res.status(403).json({ error: 'Not authorized role' });
 
-    // 4. Create Profile
+    // 4. Create Profile via UserService
     await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
-    await pool.query(
-      `INSERT INTO users (name, wallet_address, role, kyc_verified, password_hash, identity_state) 
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [fullName, normalizedWalletAddress, 'notary', true, 'NOTARY_WEB3_ONLY', 'ACTIVE']
-    );
+    await UserService.createUser({
+      name: fullName,
+      wallet_address: normalizedWalletAddress,
+      role: 'notary',
+      is_human_verified: true,
+      password_hash: 'NOTARY_WEB3_ONLY',
+      identity_state: 'ACTIVE'
+    });
 
     res.json({ success: true, message: 'Notary profile created successfully' });
   } catch (error) {
@@ -334,16 +356,20 @@ router.post('/login', allowPublic, async (req, res) => {
 
       if (liveBanned) return res.status(403).json({ error: 'Account is banned on-chain' });
 
-      // Auto-Sync Admin
+      // Auto-Sync Admin via UserService
       if (!user && Number(liveRoleValue) === 3) {
         console.log(`[SECURITY] Auto-Syncing Admin | wallet=${normalizedWalletAddress}`);
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
-        const insertRes = await pool.query(
-          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-          ['Genesis Admin', normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWalletAddress, 'ACTIVE']
-        );
-        user = insertRes.rows[0];
+        user = await UserService.createUser({
+          name: 'Genesis Admin',
+          wallet_address: normalizedWalletAddress,
+          role: 'admin',
+          is_human_verified: true,
+          national_id_hash: nationalIdHash,
+          password_hash: 'ADMIN_WEB3_ONLY',
+          username: normalizedWalletAddress,
+          identity_state: 'ACTIVE'
+        });
       }
     } catch (chainErr) {
       console.error("[LOGIN_CHAIN_ERROR]", chainErr.message);
@@ -370,7 +396,13 @@ router.post('/login', allowPublic, async (req, res) => {
 
     // 5. Success
     const token = await signZeroTrustToken(user, normalizedWalletAddress);
-    res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 12*60*60*1000, sameSite: 'lax' });
+    
+    // Set secure cross-origin session cookie
+    res.cookie('token', token, { 
+      ...COOKIE_OPTIONS, 
+      maxAge: 12 * 60 * 60 * 1000 
+    });
+
     res.json({
       message: 'Login successful',
       user: { id: user.id, email: user.email, walletAddress: normalizedWalletAddress, role: Number(liveRoleValue), identity_state: user.identity_state },
@@ -383,10 +415,11 @@ router.post('/login', allowPublic, async (req, res) => {
   }
 });
 
-// POST /auth/logout - Clear Session
-router.post('/logout', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), (req, res) => {
-  res.clearCookie('token');
-  res.json({ message: 'Logged out successfully' });
+// POST /auth/logout - Clear Session (Idempotent & Public)
+// allowPublic ensures users TRAPPED in a restricted state can still clear their session.
+router.post('/logout', allowPublic, (req, res) => {
+  res.clearCookie('token', COOKIE_OPTIONS);
+  res.status(200).json({ success: true, message: 'Logged out successfully' });
 });
 
 // GET /auth/me - Profile Source of Truth
@@ -407,16 +440,20 @@ router.get('/me', allowPublic, async (req, res) => {
         [normalizedWallet]
       );
 
-      let user = result.rows.length > 0 ? result.rows[0] : null;
+      let user = result.rows.length > 0 ? userResult.rows[0] : null;
 
       if (!user && decoded.role === 3) {
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
-        const insertResult = await pool.query(
-          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, username, identity_state) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-          ['Genesis Admin', normalizedWallet, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', normalizedWallet, 'ACTIVE']
-        );
-        user = insertResult.rows[0];
+        user = await UserService.createUser({
+          name: 'Genesis Admin',
+          wallet_address: normalizedWallet,
+          role: 'admin',
+          is_human_verified: true,
+          national_id_hash: nationalIdHash,
+          password_hash: 'ADMIN_WEB3_ONLY',
+          username: normalizedWallet,
+          identity_state: 'ACTIVE'
+        });
       }
 
       if (!user) return res.json({ user: null });
@@ -432,12 +469,14 @@ router.get('/me', allowPublic, async (req, res) => {
 
 // ================= REMOTE AUTH (Desktop App Support) ==================
 
-const { requireSystemActivated } = require('../../middleware/activation');
+const { requireUnpaused } = require('../middleware/circuit-breaker');
 
 router.post('/remote/session', allowPublic, requireSystemActivated, async (req, res) => {
   try {
     const { device_id } = req.body;
-    const challenge = `BBSNS-LOGIN-${Math.random().toString(36).substring(2, 15)}`;
+    if (!device_id) return res.status(400).json({ error: 'device_id is required' });
+
+    const challenge = `BBSNS-LOGIN-${crypto.randomBytes(16).toString('hex')}`;
     const expires_at = new Date(Date.now() + 10 * 60 * 1000); 
 
     const result = await pool.query(
@@ -447,7 +486,7 @@ router.post('/remote/session', allowPublic, requireSystemActivated, async (req, 
 
     res.json({ sessionId: result.rows[0].id });
   } catch (error) {
-    console.error('Remote session error:', error);
+    console.error('[AUTH] Remote session creation failed.');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -466,9 +505,9 @@ router.get('/remote/status/:sessionId', allowPublic, async (req, res) => {
       return res.json({ status: 'expired' });
     }
 
-    res.json({ status: session.status, challenge: session.challenge, wallet_address: session.wallet_address, token: session.token });
+    res.json({ status: session.status, challenge: session.challenge, wallet_address: session.wallet_address, one_time_code: session.one_time_code });
   } catch (error) {
-    console.error('Remote status error:', error);
+    console.error('[AUTH] Remote status retrieval failed.');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -489,9 +528,7 @@ router.post('/remote/authorize', allowPublic, requireSystemActivated, simpleRate
     const normalizedWalletAddress = walletAddress.toLowerCase();
     let recoveredAddress;
     try {
-      if (signature === 'DIRECT_TX_CONFIRMED') {
-        recoveredAddress = normalizedWalletAddress;
-      } else if (session.challenge.includes('"domain"') && session.challenge.includes('"message"')) {
+      if (session.challenge.includes('"domain"') && session.challenge.includes('"message"')) {
         const payload = JSON.parse(session.challenge);
         recoveredAddress = ethers.verifyTypedData(payload.domain, payload.types, payload.message, signature);
       } else {
@@ -503,37 +540,114 @@ router.post('/remote/authorize', allowPublic, requireSystemActivated, simpleRate
 
     if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) return res.status(401).json({ error: 'Address mismatch' });
 
-    const userResult = await pool.query('SELECT id, wallet_address, role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
-    let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
+    // 🛡️ [SECURITY] ONE-TIME CODE GENERATION (NO JWT IN POLL)
+    const oneTimeCode = crypto.randomBytes(32).toString('hex');
+    const codeExpiry = new Date(Date.now() + 60 * 1000); // 60s TTL
 
-    try {
-      const config = await ConfigService.getConfig();
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
-      const [roleData, isBanned] = await Promise.all([registry.getUserRole(normalizedWalletAddress), registry.isBanned(normalizedWalletAddress)]);
+    await pool.query(
+      "UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, one_time_code = $2, code_expires_at = $3, authorized_at = NOW() WHERE id = $4", 
+      [normalizedWalletAddress, oneTimeCode, codeExpiry, sessionId]
+    );
 
-      if (isBanned) return res.status(403).json({ error: 'Banned' });
-      if (!user && Number(roleData) === 3) {
-        const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
-        const insertResult = await pool.query(
-          `INSERT INTO users (name, wallet_address, role, kyc_verified, national_id_hash, password_hash, identity_state) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-          ['Genesis Admin', normalizedWalletAddress, 'admin', true, nationalIdHash, 'ADMIN_WEB3_ONLY', 'ACTIVE']
-        );
-        user = insertResult.rows[0];
-      }
-      if (!user) return res.status(404).json({ error: 'Account not found' });
-      user.role = Number(roleData);
-    } catch(err) {
-      return res.status(503).json({ error: 'Zero-Trust check failed' });
+    res.json({ message: 'Authorized successfully. Returning to app...' });
+  } catch (error) {
+    console.error('[REMOTE_AUTHORIZE_FATAL]', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 🛡️ [SECURITY] Hardened Atomic Token Exchange (Transactional with Row Lock)
+router.post('/remote/exchange', allowPublic, requireSystemActivated, simpleRateLimiter(5, 60000), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { sessionId, code, device_id } = req.body;
+    if (!sessionId || !code || !device_id) return res.status(400).json({ error: 'Missing exchange markers' });
+
+    await client.query('BEGIN');
+
+    // 1. [VALIDATE FIRST] SELECT FOR UPDATE: Lock the session row to prevent micro-races
+    const sessionRes = await client.query(
+      `SELECT wallet_address, code_consumed, code_expires_at 
+       FROM remote_auth_sessions 
+       WHERE id::text = $1 AND one_time_code = $2 AND device_id = $3
+       FOR UPDATE`,
+      [sessionId, code, device_id]
+    );
+
+    if (sessionRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.warn(`[SECURITY] Exchange attempt REJECTED: Invalid markers or Device Mismatch.`);
+      return res.status(403).json({ error: 'Invalid exchange code' });
     }
 
+    const { wallet_address, code_consumed, code_expires_at } = sessionRes.rows[0];
+
+    // 2. Validate session state
+    if (code_consumed) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Code already consumed' });
+    }
+    if (new Date(code_expires_at) < new Date()) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Code expired' });
+    }
+
+    const normalizedWalletAddress = wallet_address.toLowerCase();
+
+    // 3. User Presence & On-Chain Authority Check
+    const userRes = await client.query('SELECT id, wallet_address, role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
+    let user = userRes.rows.length > 0 ? userRes.rows[0] : null;
+
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
+    
+    const [roleData, isBanned] = await Promise.all([
+      registry.getUserRole(normalizedWalletAddress), 
+      registry.isBanned(normalizedWalletAddress)
+    ]);
+
+    if (isBanned) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Banned' });
+    }
+
+    // Auto-Sync Admin Profile if missing
+    if (!user && Number(roleData) === 3) {
+      const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
+      user = await UserService.createUser({
+        name: 'Genesis Admin',
+        wallet_address: normalizedWalletAddress,
+        role: 'admin',
+        is_human_verified: true,
+        national_id_hash: nationalIdHash,
+        password_hash: 'ADMIN_WEB3_ONLY',
+        identity_state: 'ACTIVE'
+      });
+    }
+
+    if (!user) {
+      await client.query('ROLLBACK');
+      console.warn(`[EXCHANGE_FAIL] Account not found for ${normalizedWalletAddress}. Rolling back.`);
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    // 4. [MUTATE SECOND] Consume code now that ALL validations passed
+    await client.query('UPDATE remote_auth_sessions SET code_consumed = TRUE WHERE id::text = $1', [sessionId]);
+
     const token = await signZeroTrustToken(user, normalizedWalletAddress);
-    await pool.query("UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, token = $2, authorized_at = NOW() WHERE id = $3", [normalizedWalletAddress, token, sessionId]);
-    res.json({ message: 'Authorized successfully' });
+
+    // 5. Persist token and COMMIT
+    await client.query("UPDATE remote_auth_sessions SET token = $1 WHERE id::text = $2", [token, sessionId]);
+    await client.query('COMMIT');
+
+    res.json({ token, user: { id: user.id, walletAddress: normalizedWalletAddress, role: Number(roleData) } });
   } catch (error) {
-    console.error('[REMOTE_AUTH_FATAL]', error);
+    if (client) await client.query('ROLLBACK');
+    console.error('[REMOTE_EXCHANGE_FATAL]', error);
     res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (client) client.release();
   }
 });
 

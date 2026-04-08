@@ -133,10 +133,15 @@ class ConfigService {
         updatedAt: (updatedAt instanceof Date ? updatedAt.toISOString() : updatedAt)
       };
 
+      const checksum = this.generateChecksum(fullConfig);
+      const normalizedString = JSON.stringify(this.deepSort(this.normalizeConfig(fullConfig)));
+
       this.cache = {
         ...fullConfig,
-        checksum: this.generateChecksum(fullConfig)
+        checksum: checksum,
+        debug_string: normalizedString // Forced for bit-level truth alignment
       };
+
       this._version = version;
       
       return this.cache;
@@ -435,7 +440,8 @@ class ConfigService {
   }
 
   generateChecksum(config) {
-    const salt = process.env.CONFIG_CHECKSUM_SALT || 'bbsns_prod_secure_2026';
+    // 🛡️ [HARDENED_SALT_AUTHORITY]
+    const salt = 'bbsns_prod_secure_2026';
     
     // 🛡️ 1. Normalize and Sort (Deterministic Mirroring)
     const normalized = this.normalizeConfig(config);

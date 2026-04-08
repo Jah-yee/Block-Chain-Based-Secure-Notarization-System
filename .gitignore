@@ -148,3 +148,27 @@ hardhat.config.js.locked
 # --- OS Exclusions ---
 .DS_Store
 Thumbs.db
+
+# --- Security & Hygiene Exclusions ---
+*.pem
+*.key
+*.pub
+*.dump
+*.sql
+*.zip
+*.tar.gz
+tmp/
+dist-electron/
+dist-vite/
+e2e_test.txt
+backend/set_debug_trust.js
+backend/surgical_db_patch.js
+backend/test_*.js
+backend/verify_*.js
+backend/verify_*.sql
+backend/update_db.js
+backend_stability_v2.zip
+notarydb_backup.dump
+remote-auth.tar.gz
+web-app-v*.tar.gz
+web-app.tar.gz
