@@ -63,7 +63,7 @@ export function Settings({ }: SettingsProps) {
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">Current application version</p>
                     </div>
                     <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px] font-black uppercase tracking-widest">
-                      v1.0.0
+                      v27.8.20
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between p-4 hover:bg-muted/10 transition-colors">

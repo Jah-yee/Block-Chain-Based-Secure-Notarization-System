@@ -10,7 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         checkSession: () => ipcRenderer.invoke('auth:check-session'),
         logout: () => ipcRenderer.invoke('auth:logout'),
         getDeviceId: () => ipcRenderer.invoke('auth:get-device-id'),
-        onStatusChanged: (callback) => ipcRenderer.on('auth:status-changed', (event, data) => callback(data))
+        getSession: () => ipcRenderer.invoke('auth:get-session'),
+        onStatusChanged: (callback) => ipcRenderer.on('auth:status-changed', (event, data) => callback(data)),
+        triggerRecovery: () => ipcRenderer.invoke('auth:trigger-recovery')
     },
     config: {
         save: (data) => ipcRenderer.invoke('config:save', data),

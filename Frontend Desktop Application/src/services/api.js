@@ -48,6 +48,25 @@ const api = {
         throw error;
     }
 
+    if (typeof window !== 'undefined' && window.electronAPI?.api?.call) {
+        const method = (options.method || 'GET').toUpperCase();
+        console.log(`[API] Authoritative Bridge → ${method} ${endpoint}`);
+        
+        let data = null;
+        if (options.body) {
+            try {
+                data = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+            } catch (e) {
+                data = options.body;
+            }
+        }
+
+        // 🛡️ [SECURITY] Hardened Path: Bridge is now the ONLY authority.
+        // No fallback to fetch() to ensure zero-trust logic remains consistent.
+        return await window.electronAPI.api.call(endpoint, method, data);
+    }
+
+    // 🛡️ [LEGACY] Fallback Path (localStorage)
     const token = localStorage.getItem('bbsns_token');
     const headers = {
       'Content-Type': 'application/json',
@@ -78,7 +97,7 @@ const api = {
   },
 
   async getMe() {
-    const res = await this.request('/me');
+    const res = await this.request('/api/auth/me');
     const user = res.user;
     if (user && user.role) {
       user.role = ROLE_MAP[user.role] || (typeof user.role === 'string' ? user.role.toLowerCase() : "");
@@ -103,11 +122,18 @@ const api = {
   },
 
   async getDocumentFile(id) {
+    await ensureConfig();
+    const endpoint = `/api/documents/${id}/file`;
+
+    // 🛡️ [SECURITY] Route through bridge if available (Mandatory Authority)
+    if (typeof window !== 'undefined' && window.electronAPI?.api?.call) {
+        return await window.electronAPI.api.call(endpoint, 'GET');
+    }
+
     const token = localStorage.getItem('bbsns_token');
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-    await ensureConfig();
-    const response = await fetch(`${api.baseUrl}/api/documents/${id}/file`, { headers });
+    const response = await fetch(`${api.baseUrl}${endpoint}`, { headers });
     if (!response.ok) {
       throw new Error("Failed to fetch file");
     }
@@ -179,6 +205,10 @@ const api = {
 
   async rejectNotaryApplication(id) {
     return this.request(`/api/notaries/applications/${id}/reject`, { method: 'POST' });
+  },
+
+  async resendNotaryActivation(id) {
+    return this.request(`/api/notaries/applications/${id}/resend-activation`, { method: 'POST' });
   },
 
   async getMultiSigTransactions() {

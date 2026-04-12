@@ -232,12 +232,13 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
         if (timerRef.current) clearTimeout(timerRef.current)
         timerRef.current = setTimeout(() => {
             if (isCameraActiveRef.current) {
+                console.log("[LIVENESS] Session timeout (20s) reached.")
                 stopCamera()
                 setSessionExpired(true)
                 sessionExpiredRef.current = true
-                setError("Session expired. Please retry for security.")
+                setError("Verification timed out (20s). Please try again in a well-lit area.")
             }
-        }, 60000)
+        }, 20000) // 🛡️ [Hardening 2.9C-A] Reduced from 60s to 20s
     }
 
     const startLivenessLoop = async () => {
@@ -349,8 +350,8 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
                                 } catch (err) {
                                     console.error("[LIVENESS] Extraction error:", err)
                                     setIsVerifying(false)
-                                    setError("Extraction failed. Please retry.")
-                                    stopCamera()
+                                    setError("Descriptor extraction failed. Please ensure your face is fully visible.")
+                                    stopCamera() // 🛡️ [Step 5] Stop camera on failure
                                 }
                             }
                         } else {

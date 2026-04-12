@@ -90,14 +90,14 @@ async function handleEvent(userId, type, documentId = null, meta = {}) {
 /**
  * assignNotary
  * Selects a notary via weighted random selection (or bootstrap direct).
- * Uses pre-computed effective_reputation — never recomputes here.
- *
+ * 
+ * DESIGN CHANGE (V3): Now returns a rich result object for failure management.
+ * 
  * @param {number} documentId - ID of the document to assign
- * @returns {number|null} assigned notary user_id, or null on failure
+ * @returns {Promise<{success: boolean, notaryId?: number, error_type?: string, message?: string}>}
  */
 async function assignNotary(documentId) {
   try {
-    // Correction 8: Eligible notaries must be active, non-banned notaries
     const notaryRes = await pool.query(
       `SELECT id, effective_reputation 
        FROM users 
@@ -111,30 +111,23 @@ async function assignNotary(documentId) {
 
     if (notaries.length === 0) {
       console.warn(`[ASSIGNMENT] No eligible notaries available | docId=${documentId}`);
-      return null;
+      return { success: false, error_type: 'NO_ELIGIBLE_NOTARIES', message: 'No active notaries found in registry' };
     }
 
     let selectedNotary;
 
-    // Phase 9 / Bootstrap Mode: fewer than 3 notaries
     if (notaries.length < 3) {
-      // Correction 3: Random selection, not lowest ID
       selectedNotary = notaries[Math.floor(Math.random() * notaries.length)];
-      console.log(`[ASSIGNMENT] Bootstrap mode | notaries=${notaries.length} | selected=${selectedNotary.id} | docId=${documentId}`);
+      console.log(`[ASSIGNMENT] Bootstrap mode | selected=${selectedNotary.id} | docId=${documentId}`);
     } else {
-      // Normal Mode: Weighted random by effective_reputation
-      // Safeguard S1: Clamp any negative reputation to 0
       const weights = notaries.map(n => Math.max(0, parseFloat(n.effective_reputation) || 0));
       const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
       if (totalWeight === 0) {
-        // Correction 2: All weights zero → fallback to equal random
         selectedNotary = notaries[Math.floor(Math.random() * notaries.length)];
-        console.log(`[ASSIGNMENT] Equal-random fallback (all rep=0) | selected=${selectedNotary.id} | docId=${documentId}`);
       } else {
-        // Perform weighted random selection
         let rand = Math.random() * totalWeight;
-        selectedNotary = notaries[notaries.length - 1]; // fallback to last
+        selectedNotary = notaries[notaries.length - 1]; 
         for (let i = 0; i < notaries.length; i++) {
           rand -= weights[i];
           if (rand <= 0) {
@@ -142,32 +135,33 @@ async function assignNotary(documentId) {
             break;
           }
         }
-        console.log(`[ASSIGNMENT] Weighted selection | selected=${selectedNotary.id} | rep=${selectedNotary.effective_reputation} | docId=${documentId}`);
       }
     }
 
-    // Safeguard S4: Race condition guard — only assign if still unassigned
+    // Safeguard S4: Race condition guard
     const updateRes = await pool.query(
       `UPDATE documents 
-       SET notary_id = $1, submission_state = 'assigned', updated_at = NOW()
+       SET notary_id = $1, 
+           submission_state = 'assigned', 
+           assignment_state = 'assigned',
+           assignment_retry_count = 0,
+           last_assignment_error = NULL,
+           updated_at = NOW()
        WHERE id = $2 AND notary_id IS NULL
        RETURNING id`,
       [selectedNotary.id, documentId]
     );
 
     if (updateRes.rowCount === 0) {
-      // Another process assigned this doc first — abort silently
-      console.warn(`[ASSIGNMENT] Race condition: doc already assigned | docId=${documentId}`);
-      return null;
+      return { success: false, error_type: 'ALREADY_ASSIGNED', message: 'Document already assigned by another process' };
     }
 
     console.log(`[ASSIGNMENT] SUCCESS | docId=${documentId} → notaryId=${selectedNotary.id}`);
-    return selectedNotary.id;
+    return { success: true, notaryId: selectedNotary.id };
 
   } catch (err) {
-    // Correction 7: Failure leaves document in 'pending', never throws
-    console.error(`[ASSIGNMENT] assignNotary failed | docId=${documentId} | error=${err.message}`);
-    return null;
+    console.error(`[ASSIGNMENT_CRITICAL] docId=${documentId} | error=${err.message}`);
+    return { success: false, error_type: 'TECHNICAL_ERROR', message: err.message };
   }
 }
 

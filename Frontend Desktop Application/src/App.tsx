@@ -138,11 +138,15 @@ export default function App() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  console.log('[IPC LISTENER READY]');
+  console.log("--- [DEBUG] CHECKPOINT 0: FORENSIC V27.8.20 ---");
+  console.log("--- [DEBUG] CHECKPOINT 0: APP V27.8.20 DETECTED ---");
   const [isRecovering, setIsRecovering] = useState(true);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [isSystemActivated, setIsSystemActivated] = useState<boolean | null>(null);
   const [alertCount, setAlertCount] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isUpgrading, setIsUpgrading] = useState(false);
   
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem("bbsns_dark_mode");
@@ -162,7 +166,7 @@ export default function App() {
 
   useEffect(() => {
     // Reset URL to clean state
-    if (window.location.pathname !== "/") {
+    if (window.location.protocol !== "file:" && window.location.pathname !== "/") {
       window.history.replaceState(null, "", "/");
     }
 
@@ -174,7 +178,7 @@ export default function App() {
   }, [config]);
 
   const recoverSession = async () => {
-    console.log("[SESSION] Initializing hardened recovery flow...");
+    console.log("[SESSION] Initializing hardened recovery flow (getSession)...");
     try {
       // 1. Check System Activation Status (Public API)
       const systemStatus = await api.request("/api/auth/system-status");
@@ -187,29 +191,28 @@ export default function App() {
         return;
       }
 
-      // 2. Check for OS-level secure session via Main Process
-      const hasSession = await (window as any).electronAPI.auth.checkSession();
-      if (!hasSession) {
-        console.log("[SESSION] No secure vault found.");
+      // 2. Fetch session from main process bridge (Secondary Authority)
+      const session = await (window as any).electronAPI.auth.getSession();
+      
+      if (!session || !session.authenticated) {
+        console.log("[SESSION] No authenticated session found in OS vault.");
         setIsRecovering(false);
         return;
       }
 
-      // 3. Fetch Identity via Proxy (Main Process injects token)
-      const userData = await (window as any).electronAPI.api.call("/api/auth/me");
-      if (!userData || !userData.user) {
-         setIsRecovering(false);
-         return;
-      }
-
-      const userProfile = userData.user;
+      const userProfile = session.user || {};
       const ROLE_MAP: Record<string | number, string> = {
         1: 'owner', 2: 'notary', 3: 'admin',
         'admin': 'admin', 'notary': 'notary', 'owner': 'owner'
       };
 
       const normalizedRole = ROLE_MAP[userProfile.role] || (userProfile.role && typeof userProfile.role === 'string' ? userProfile.role.toLowerCase() : "none");
-      setUser({ ...userProfile, role: normalizedRole });
+      
+      setUser({ 
+        ...userProfile, 
+        role: normalizedRole,
+        zeroTrustStatus: session.zeroTrustStatus || 'DEGRADED' 
+      });
 
       if (normalizedRole === "admin") {
         setAppState("admin-app");
@@ -229,23 +232,46 @@ export default function App() {
     // 🛡️ [SECURITY] Listen for OS-level auth status changes (Success, Expiry, Force Logout)
     if ((window as any).electronAPI?.auth) {
         (window as any).electronAPI.auth.onStatusChanged((data: any) => {
-            console.log("[AUTH_STATUS_UPDATE]", data.status);
+            // [TRACE 5] IPC Received
+            console.log('[STEP 5] IPC_RECEIVED', data);
+            
             if (data.status === 'authorized') {
-                const userProfile = data.user;
-                const ROLE_MAP: Record<number, string> = { 1: 'owner', 2: 'notary', 3: 'admin' };
-                const normalizedRole = ROLE_MAP[userProfile.role as keyof typeof ROLE_MAP] || 'none';
+                const userProfile = data.user || {};
                 
-                setUser({ ...userProfile, role: normalizedRole });
-                setAppState(normalizedRole === 'admin' ? 'admin-app' : 'notary-app');
+                // 🛡️ [SECURITY] Hardened Role Mapping (Accepts string or number)
+                const ROLE_MAP: Record<string | number, string> = { 
+                    1: 'owner', 2: 'notary', 3: 'admin',
+                    'admin': 'admin', 'notary': 'notary', 'owner': 'owner'
+                };
+                const normalizedRole = ROLE_MAP[userProfile.role] || 'none';
+                
+                const finalState = {
+                    appState: normalizedRole === 'admin' ? 'admin-app' : (normalizedRole === 'notary' ? 'notary-app' : 'role-selection'),
+                    user: { ...userProfile, role: normalizedRole }
+                };
+                
+                // [TRACE 6] UI State Update
+                console.log('[STEP 6] APP_STATE_UPDATE', finalState);
+                
+                setUser({
+                    ...finalState.user,
+                    zeroTrustStatus: data.zeroTrustStatus || 'VERIFIED'
+                });
+                setAppState(finalState.appState as any);
                 setAdminScreen('dashboard');
-            } else if (data.status === 'unauthorized' || data.status === 'expired') {
+
+            } else if (data.status === 'unauthorized' || data.status === 'expired' || data.status === 'failed') {
+                console.warn('[AUTH_FAULT]', data.error || data.status);
                 setUser(null);
                 setAppState('role-selection');
-                setRecoveryError(data.status === 'expired' ? 'Session expired. Please re-authenticate.' : null);
+                setRecoveryError(data.error || (data.status === 'expired' ? 'Session expired. Please re-authenticate.' : null));
             }
+            
+            // [SELF-HEALING] Clear upgrade state on any status push
+            setIsUpgrading(false);
         });
     }
-  }, []);
+}, []);
 
   const pollAlerts = async () => {
     try {
@@ -285,7 +311,6 @@ export default function App() {
   if (configError) {
     return (
       <div className="min-h-screen bg-[#07090e] flex items-center justify-center p-4">
-        <ResilienceBanner mode={mode} onRetry={retry} />
         <div className="max-w-md w-full bg-[#0a0d14] border border-red-500/20 rounded-2xl p-8 text-center space-y-4 shadow-2xl">
           <ShieldAlert className="w-16 h-16 text-red-500 mx-auto" />
           <h1 className="text-2xl font-bold text-white italic">Protocol Error</h1>
@@ -312,6 +337,70 @@ export default function App() {
 
   return (
     <div className="relative">
+      {user && user.zeroTrustStatus === 'DEGRADED' && (
+          <div style={{
+            background: 'linear-gradient(90deg, #ff9800, #f44336)',
+            color: 'white',
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '600',
+            textAlign: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+            zIndex: 9999,
+            transition: 'all 0.3s ease'
+          }}>
+            <span style={{ fontSize: '18px' }}>⚠️</span> 
+            <span>SECURITY DEGRADED: Blockchain authority unreachable during login. High-risk actions restricted.</span>
+            
+            <div style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
+                <button 
+                  disabled={isUpgrading}
+                  onClick={async () => {
+                    setIsUpgrading(true);
+                    try {
+                        await (window as any).electronAPI.auth.triggerRecovery();
+                    } catch (e) {
+                        setIsUpgrading(false);
+                    }
+                  }}
+                  style={{
+                    background: isUpgrading ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
+                    border: '1px solid rgba(255,255,255,0.4)',
+                    color: 'white',
+                    padding: '2px 12px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: isUpgrading ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {isUpgrading ? <RefreshCw className="animate-spin" size={12} /> : "RETRY NOW"}
+                </button>
+
+                <button 
+                  onClick={() => setLogoutDialogOpen(true)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: 'white',
+                    padding: '2px 12px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  LOGOUT
+                </button>
+            </div>
+          </div>
+        )}
       <ResilienceBanner mode={mode} onRetry={retry} />
       
       {appState === "initialize-system" && (
@@ -386,7 +475,7 @@ export default function App() {
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
           <main className="flex-1 overflow-auto">
-            {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} />}
+            {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
             {adminScreen === "manage-notaries" && <ManageNotaries />}
             {adminScreen === "governance" && <Governance role="admin" user={user} />}
             {adminScreen === "system-logs" && <SystemLogs />}

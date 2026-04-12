@@ -1,10 +1,6 @@
-const { Pool } = require('pg');
+const pool = require('../db/index');
 const { ethers } = require('ethers');
-require('dotenv').config({ override: true });
-
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-});
+const ConfigService = require('../services/config.service');
 
 const contractABI = [
     "function getDocument(bytes32 docHash) external view returns (address notary, uint256 timestamp, uint8 status, bool exists)",
@@ -17,20 +13,22 @@ async function reconcile() {
     console.log(`[RECONCILER] Starting Gated Integrity sync at ${new Date().toISOString()}`);
 
     try {
+        // 1. Authoritative Configuration Resolution
+        const config = await ConfigService.getConfig();
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const contractAddress = config.contracts.documentRegistry;
+
+        if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
+             throw new Error("FATAL: DOCUMENT_REGISTRY_ADDRESS not configured in SSoT. Reconciler skipping cycle.");
+        }
+        
+        const contract = new ethers.Contract(contractAddress, contractABI, provider);
         const client = await pool.connect();
 
-        // 1. Fetch documents in flight (submitted but not confirmed)
+        // 🛡️ RECOVERY: Define missing inFlightDocs query
         const inFlightDocs = await client.query(
-            "SELECT id, file_hash, filename, approval_tx_hash, submission_state FROM documents WHERE submission_state = 'submitted_to_blockchain' AND chain_confirmed = false AND is_deleted = false"
+            "SELECT id, filename, file_hash, approval_tx_hash FROM documents WHERE submission_state = 'pending' AND is_deleted = false AND approval_tx_hash IS NOT NULL"
         );
-
-        const provider = new ethers.JsonRpcProvider(process.env.BNB_TESTNET_RPC_URL);
-        // STRICT INVARIANT: No fallback. Must be explicitly configured.
-        const contractAddress = process.env.DOCUMENT_REGISTRY_ADDRESS;
-        if (!contractAddress) {
-            throw new Error("FATAL: DOCUMENT_REGISTRY_ADDRESS is not configured. Reconciler cannot verify on-chain state.");
-        }
-        const contract = new ethers.Contract(contractAddress, contractABI, provider);
 
         for (const doc of inFlightDocs.rows) {
             try {

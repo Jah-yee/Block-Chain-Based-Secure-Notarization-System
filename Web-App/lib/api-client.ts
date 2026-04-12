@@ -225,3 +225,5 @@ export const apiClient = {
         return endpoint.startsWith('http') ? endpoint : `${BACKEND_URL}${endpoint}`;
     }
 };
+
+export default apiClient;

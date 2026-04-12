@@ -651,7 +651,7 @@ ALTER TABLE notary_applications DROP CONSTRAINT IF EXISTS notary_applications_st
 
 ALTER TABLE notary_applications 
 ADD CONSTRAINT notary_applications_status_check 
-CHECK (status IN ('pending', 'APPLIED', 'KYC_VERIFIED', 'approved', 'rejected'));
+CHECK (status IN ('pending', 'APPLIED', 'KYC_VERIFIED', 'approved', 'rejected', 'activated'));
 
 -- Ensure current rows are valid (though they should be)
 UPDATE notary_applications SET status = 'APPLIED' WHERE status = 'pending';

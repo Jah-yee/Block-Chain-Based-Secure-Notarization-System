@@ -153,7 +153,11 @@ class StorageService {
     }
 }
 
-module.exports = {
-    init,
-    provider: new StorageService()
-};
+// Instantiate the singleton service
+const storageService = new StorageService();
+
+// Attach the init method to the instance for system-wide bootstrapping
+storageService.init = init;
+
+// Export ONLY the usable instance to resolve previous TypeErrors
+module.exports = storageService;

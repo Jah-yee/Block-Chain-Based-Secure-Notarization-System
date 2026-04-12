@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { ethers } = require("ethers");
-const { requirePrivilege, ROLES, RISK_LEVELS } = require("../../middleware/actor");
+const { requirePrivilege, ROLES, RISK_LEVELS } = require("../middleware/actor");
 const ConfigService = require("../services/config.service");
 
 // Middleware to ensure user is loaded
@@ -62,10 +62,16 @@ router.get("/balance", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVEL
 
         res.json({
             wallet: walletAddress,
-            ntk: ntkBalance,
-            ntkr: ntkrBalance,
-            internalNtkr: internalNtkr, // Internal DB-stored NTKR
-            bnb: bnbBalance
+            balances: {
+                ntk: ntkBalance,
+                ntkr: ntkrBalance,
+                internalNtkr: internalNtkr,
+                bnb: bnbBalance
+            },
+            contracts: {
+                ntk: ntkAddress,
+                ntkr: ntkrAddress
+            }
         });
     } catch (err) {
         console.error("Token balance fetch failed:", err);

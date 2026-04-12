@@ -29,10 +29,12 @@ export function SystemLogs() {
     setIsLoading(true);
     try {
       const data = await api.getSystemLogs();
-      setLogs(data);
+      // 🛡️ [SECURITY] Hardened array access to prevent renderer crash
+      setLogs(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      console.error(err);
+      console.error("[SYSTEM_LOGS_FAIL]", err);
       toast.error("Failed to load system audit logs");
+      setLogs([]); // 🛡️ Maintain stable state on failure
     } finally {
       setIsLoading(false);
     }
@@ -42,7 +44,8 @@ export function SystemLogs() {
     fetchLogs();
   }, []);
 
-  const filteredLogs = logs.filter((log) => {
+  const filteredLogs = (Array.isArray(logs) ? logs : []).filter((log) => {
+    if (!log) return false;
     if (filterType === "all") return true;
     return (log.action?.toLowerCase() || "").includes(filterType.toLowerCase());
   }).filter((log) =>
@@ -52,10 +55,10 @@ export function SystemLogs() {
   );
 
   const getStatusBadge = (status: string) => {
-    const isSuccess = status.toUpperCase() === 'SUCCESS';
+    const isSuccess = (status || "").toUpperCase() === 'SUCCESS';
     return (
       <Badge variant="outline" className={`${isSuccess ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border-rose-500/20'} uppercase tracking-widest text-[9px] font-black`}>
-        {status}
+        {status || "UNKNOWN"}
       </Badge>
     );
   };
@@ -66,10 +69,10 @@ export function SystemLogs() {
     const rows = filteredLogs.map(log => [
       log.id,
       new Date(log.timestamp).toLocaleString(),
-      log.actor,
-      log.action,
-      log.details,
-      log.status,
+      log.actor || "SYSTEM",
+      log.action || "N/A",
+      log.details || "",
+      log.status || "UNKNOWN",
       log.tx_hash || ""
     ]);
 
@@ -167,17 +170,17 @@ export function SystemLogs() {
                     </TableCell>
                     <TableCell className="align-top py-3">
                       <div className="flex items-center gap-2">
-                        <div className={`shrink-0 h-6 w-6 rounded-full ${log.actor.startsWith('0x') ? 'bg-muted' : 'bg-primary/20'} flex items-center justify-center text-[10px] font-black ${log.actor.startsWith('0x') ? 'text-muted-foreground' : 'text-primary'}`}>
-                          {log.actor.substring(0, 2).toUpperCase()}
+                        <div className={`shrink-0 h-6 w-6 rounded-full ${(log.actor || "").startsWith('0x') ? 'bg-muted' : 'bg-primary/20'} flex items-center justify-center text-[10px] font-black ${(log.actor || "").startsWith('0x') ? 'text-muted-foreground' : 'text-primary'}`}>
+                          {(log.actor || "SY").substring(0, 2).toUpperCase()}
                         </div>
-                        <span className="text-[12px] font-bold text-foreground truncate max-w-[140px]" title={log.actor}>
-                          {log.actor.startsWith('0x') ? `${log.actor.slice(0, 6)}...${log.actor.slice(-4)}` : log.actor}
+                        <span className="text-[12px] font-bold text-foreground truncate max-w-[140px]" title={log.actor || "System Entity"}>
+                          {(log.actor || "").startsWith('0x') ? `${log.actor.slice(0, 6)}...${log.actor.slice(-4)}` : (log.actor || "System Authority")}
                         </span>
                       </div>
                     </TableCell>
                     <TableCell className="align-top py-3">
                       <Badge variant="secondary" className="bg-muted/50 text-[9px] font-black text-muted-foreground border-none px-2 whitespace-nowrap">
-                        {log.action.replace('_', ' ')}
+                        {(log.action || "EVENT").replace('_', ' ')}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-[12px] text-muted-foreground font-medium align-top py-3">
@@ -214,9 +217,9 @@ export function SystemLogs() {
             <div className="flex items-center justify-between border-b border-border pb-6">
               <div>
                 <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-2">Transaction Proof</p>
-                <DialogTitle className="text-3xl font-black">{selectedLog?.action.replace(/_/g, ' ')}</DialogTitle>
+                <DialogTitle className="text-3xl font-black">{(selectedLog?.action || "EVENT").replace(/_/g, ' ')}</DialogTitle>
                 <DialogDescription className="text-muted-foreground text-[10px] uppercase font-bold tracking-widest mt-1">
-                  Technical audit details for system event #{selectedLog?.id}
+                  Technical audit details for system event #{selectedLog?.id || "0"}
                 </DialogDescription>
               </div>
               {selectedLog && getStatusBadge(selectedLog.status)}

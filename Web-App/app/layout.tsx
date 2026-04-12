@@ -1,6 +1,5 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { Analytics } from "@vercel/analytics/react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { WalletProvider } from "@/hooks/use-wallet-session"
 import { Toaster } from "@/components/ui/toaster"
@@ -40,7 +39,6 @@ export default function RootLayout({
                         </Suspense>
                     </ConfigBarrier>
                 </ConfigProvider>
-                <Analytics />
             </body>
         </html>
     )

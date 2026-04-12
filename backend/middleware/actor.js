@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
-const pool = require('../src/db/index.js');
-const ConfigService = require('../src/services/config.service');
+const pool = require('../db/index.js');
+const ConfigService = require('../services/config.service');
 
 const ROLES = {
   NONE: 0,
@@ -17,7 +17,7 @@ const RISK_LEVELS = {
 // Zero-Trust Role Normalization
 const normalizeRole = (role) => {
   if (typeof role === 'number') return role;
-  const ROLE_MAP = { 'none': 0, 'owner': 1, 'notary': 2, 'admin': 3 };
+  const ROLE_MAP = { 'none': 0, 'user': 1, 'owner': 1, 'notary': 2, 'admin': 3 };
   const normalized = ROLE_MAP[String(role).toLowerCase()];
   return normalized !== undefined ? normalized : 0;
 };
@@ -217,6 +217,14 @@ function requirePrivilege(config) {
         console.error(`[AUTH_ERROR] Live check failed for ${address}:`, err.message);
         return res.status(503).json({ error: 'Service Unavailable: Authority Verification Failed' });
       }
+    } else {
+        // 7. JWT Authority (Fresh & Risk Low) - Actor from Token
+        req.actor = { 
+            id: decoded.id, 
+            address, 
+            role: normalizeRole(decoded.role), 
+            isDegraded: false 
+        };
     }
 
     // 8. Eligibility Enforcement

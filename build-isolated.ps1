@@ -4,11 +4,13 @@
 
 $ErrorActionPreference = "Stop" 
 $SourceDir = $PSScriptRoot + "\Frontend Desktop Application"
-$TargetDir = "C:\BBSNS_DEPLOY"
+$TargetDir = "D:\BBSNS_DEPLOY"
 $AppDir = "$TargetDir\Frontend Desktop Application"
 
 Write-Host "`n====================================================" -ForegroundColor Magenta
 Write-Host "🚀 BBSNS DESKTOP CONSOLE - ISOLATION BUILD (v1.5)" -ForegroundColor Magenta
+Write-Host "  [*] SOURCE: $SourceDir" -ForegroundColor Gray
+Write-Host "  [*] TARGET: $TargetDir" -ForegroundColor Gray
 Write-Host "====================================================`n" -ForegroundColor Magenta
 
 # [STEP 1] Initialization
@@ -16,7 +18,7 @@ Write-Host "[STEP 1] INITIALIZING CLEAN WORKSPACE..." -ForegroundColor Cyan
 Write-Host "  [*] Terminating locking processes (Safety Protocol)..." -ForegroundColor Gray
 Stop-Process -Name "BBSNS Desktop Console" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
-Write-Host "  [-] Purging stale C:\BBSNS_DEPLOY folder..." -ForegroundColor Gray
+Write-Host "  [-] Purging stale D:\BBSNS_DEPLOY folder..." -ForegroundColor Gray
 if (Test-Path $TargetDir) {
     $oldPref = $ErrorActionPreference; $ErrorActionPreference = "Continue"
     Remove-Item -Recurse -Force $TargetDir -ErrorAction SilentlyContinue
@@ -35,7 +37,7 @@ Write-Host "  [OK] Workspace: $AppDir" -ForegroundColor Green
 
 # [STEP 2] Migrating Source
 Write-Host "`n[STEP 2] MIGRATING SOURCE..." -ForegroundColor Cyan
-$Whitelist = @("src", "public", "assets", "package.json", "main.js", "preload.js", "index.html", "vite.config.ts", "tailwind.config.js", "tsconfig.json", "tsconfig.node.json", ".env.production")
+$Whitelist = @("src", "public", "assets", "Remote Auth", "package.json", "main.js", "preload.js", "index.html", "vite.config.ts", "tailwind.config.js", "tsconfig.json", "tsconfig.node.json", "tsconfig.app.json", ".env.production")
 foreach ($item in $Whitelist) {
     if (Test-Path "$SourceDir\$item") { Copy-Item -Path "$SourceDir\$item" -Destination $AppDir -Recurse -Force }
 }
@@ -58,7 +60,7 @@ Write-Host "  [*] Resolving FULL dependency tree (Force Include Dev)..." -Foregr
 $ErrorActionPreference = $oldPref
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [FAIL] npm install failed." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] npm install failed." -ForegroundColor Red; exit 1
 }
 Write-Host "  [OK] Toolchain installed." -ForegroundColor Green
 
@@ -73,13 +75,13 @@ $BuilderBin = Get-ChildItem -Path "node_modules" -Filter "cli.js" -Recurse -Erro
 if ($ViteBin) {
     Write-Host "  [OK] Vite found at: $ViteBin" -ForegroundColor Green
 } else {
-    Write-Host "  [FAIL] Vite binary NOT found. Check devDependencies in package.json." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] Vite binary NOT found. Check devDependencies in package.json." -ForegroundColor Red; exit 1
 }
 
 if ($BuilderBin) {
     Write-Host "  [OK] Builder found at: $BuilderBin" -ForegroundColor Green
 } else {
-    Write-Host "  [FAIL] Electron-builder NOT found." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] Electron-builder NOT found." -ForegroundColor Red; exit 1
 }
 
 # [STEP 5] UI Build
@@ -94,7 +96,7 @@ $env:VITE_ENV_AUTHORITY = "PRODUCTION"
 
 & node $ViteBin build
 if ($LASTEXITCODE -ne 0 -or !(Test-Path "build\index.html")) {
-    Write-Host "  [FAIL] UI Build failed." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] UI Build failed." -ForegroundColor Red; exit 1
 }
 Write-Host "  [OK] Assets generated." -ForegroundColor Green
 
@@ -102,7 +104,7 @@ Write-Host "  [OK] Assets generated." -ForegroundColor Green
 Write-Host "`n[STEP 6] GENERATING INSTALLER (BUILDER DISCOVERY)..." -ForegroundColor Cyan
 & node $BuilderBin --win
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [FAIL] Installer build failed." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] Installer build failed." -ForegroundColor Red; exit 1
 }
 
 # [STEP 7] Artifact Validation
@@ -113,8 +115,7 @@ if (Test-Path $ArtifactPath) {
     Write-Host "  [SUCCESS] Professional Setup Generated! ($Size MB)" -ForegroundColor Green
     Write-Host "  [MATCH] artifactName: BBSNS-Desktop-Setup.exe" -ForegroundColor Gray
 } else {
-    Write-Host "  [FAIL] Artifact missing." -ForegroundColor Red; pause; exit 1
+    Write-Host "  [FAIL] Artifact missing." -ForegroundColor Red; exit 1
 }
 
 Write-Host "`n✅ PROTOCOL COMPLETE." -ForegroundColor Magenta
-pause

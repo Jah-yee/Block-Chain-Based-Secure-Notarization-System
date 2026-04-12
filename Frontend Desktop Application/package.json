@@ -1,6 +1,6 @@
 {
       "name": "bbsns-desktop-application",
-      "version": "1.0.1",
+      "version": "27.8.20",
       "private": true,
       "dependencies": {
             "@radix-ui/react-accordion": "^1.2.3",
@@ -71,7 +71,7 @@
             "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3001 && electron .\"",
             "dist": "npm run build && electron-builder",
             "dist-win": "npm run build && electron-builder --win",
-            "package-win": "npm run build && electron-packager . \"BBSNS Admin Console\" --platform=win32 --arch=x64 --out=dist-portable --overwrite --icon=assets/icon.ico"
+            "package-win": "npm run build && electron-packager . \"BBSNS Admin Console\" --platform=win32 --arch=x64 --out=dist-portable --overwrite --icon=assets/blocklogo.ico"
       },
       "build": {
             "appId": "com.bbsns.desktop",
@@ -92,7 +92,7 @@
                   "target": [
                         "nsis"
                   ],
-                  "icon": "assets/icon.ico",
+                  "icon": "assets/blocklogo.ico",
                   "artifactName": "BBSNS-Desktop-Setup.exe"
             },
             "nsis": {

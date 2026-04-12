@@ -13,7 +13,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
-const { requirePrivilege, ROLES, RISK_LEVELS } = require('../../middleware/actor');
+const { requirePrivilege, ROLES, RISK_LEVELS } = require('../middleware/actor');
 const reputationService = require('../services/reputation.service');
 
 // ─────────────────────────────────────────────────────

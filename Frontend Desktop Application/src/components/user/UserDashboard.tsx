@@ -20,10 +20,12 @@ export function UserDashboard() {
         setLoading(true);
         try {
             const docs = await api.getDocuments();
-            setDocuments(docs);
+            // 🛡️ [SECURITY] Hardened array access to prevent renderer crash
+            setDocuments(Array.isArray(docs) ? docs : []);
         } catch (err: any) {
-            console.error(err);
+            console.error("[USER_DASH_FAIL]", err);
             toast.error("Failed to load documents");
+            setDocuments([]); // 🛡️ Maintain stable state on failure
         } finally {
             setLoading(false);
         }
@@ -111,7 +113,7 @@ export function UserDashboard() {
                                             <div className="flex items-center gap-2">
                                                 <Hash size={14} className="text-emerald-500" />
                                                 <span className="text-muted-foreground font-mono text-xs selectable">
-                                                    {doc.file_hash.substring(0, 16)}...
+                                                    {(doc.file_hash || "0x...").substring(0, 16)}...
                                                 </span>
                                             </div>
                                         </TableCell>

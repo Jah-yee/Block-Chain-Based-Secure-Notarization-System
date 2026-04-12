@@ -2,6 +2,7 @@ const pool = require("../db/index");
 const { ethers } = require("ethers");
 const lockService = require("../services/lock.service");
 const ConfigService = require("../services/config.service");
+const SyncLogger = require("../services/SyncLogger");
 const { Logger, SIGNALS, ERROR_TYPES, ERROR_STAGES } = require("../services/logger.service");
 const logger = new Logger('RECONCILIATION_WORKER');
 require("dotenv").config();
@@ -10,10 +11,8 @@ let cyclesSinceLastSummary = 0;
 const SUMMARY_INTERVAL_CYCLES = 10;
 
 /**
- * Reconciliation Worker
- * 
- * Goal: Eliminate state drift by settling 'submitted_to_blockchain' transactions
- * into 'confirmed' (chain_confirmed = true) or 'failed' states.
+ * Reconciliation Worker: The Authoritative Judge
+ * Responsibility: Final settlement for all blockchain-bound tasks.
  */
 async function reconcile() {
     if (process.env.STOP_WORKERS === 'true') {
@@ -21,217 +20,164 @@ async function reconcile() {
         return;
     }
 
-    const lockId = 1001; // RECONCILIATION
+    const lockId = 1001; 
     if (!(await lockService.tryLock(lockId))) {
-        console.log("🔄 [RECONCILIATION] Skip: Another instance is reconcilling.");
         return;
     }
 
-    const startTime = Date.now();
     try {
         const { provider, contract } = await require("../blockchain/connection").connectBNB();
-
-        // --- PHASE 0: Backlog Metrics (Observability) ---
-        const backlogRes = await pool.query(`
-            SELECT 
-                COUNT(*) FILTER (WHERE tx_status = 'initiated') as pending_count,
-                COUNT(*) FILTER (WHERE tx_status = 'pending') as processing_count,
-                COUNT(*) FILTER (WHERE tx_status = 'failed') as failed_count
-            FROM documents 
-            WHERE chain_confirmed = false AND is_deleted = false
-        `);
-        const metrics = backlogRes.rows[0];
-        logger.heartbeat(metrics);
-
-        // --- PHASE 0.1: Periodic System Health Summary (Phase 7) ---
-        cyclesSinceLastSummary++;
-        if (cyclesSinceLastSummary >= SUMMARY_INTERVAL_CYCLES) {
-            const healthRes = await pool.query(`
-                SELECT 
-                    COUNT(*) FILTER (WHERE retry_count > 5) as high_retry_count,
-                    COUNT(*) FILTER (WHERE tx_status = 'initiated' AND (NOW() - processing_started_at) > interval '30 minutes') as stuck_count
-                FROM documents 
-                WHERE chain_confirmed = false
-            `);
-            logger.info('SYSTEM_HEALTH_SUMMARY', { 
-                ...metrics, 
-                ...healthRes.rows[0],
-                worker_uptime_ms: process.uptime() * 1000 
-            });
-            cyclesSinceLastSummary = 0;
-        }
-
-        // --- PHASE 1: Reconcile Notarization Actions (Hardened) ---
-        const docResult = await pool.query(`
-            SELECT id, idempotency_key, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
-            FROM documents 
-            WHERE (tx_status IN ('initiated', 'pending') OR submission_state = 'submitted_to_blockchain')
-            AND chain_confirmed = false
-            AND is_deleted = false
-        `);
-
-        logger.info('RECONCILIATION_CYCLE_STARTED', { count: docResult.rows.length });
-        for (const doc of docResult.rows) {
-            try {
-                const docHash = doc.idempotency_key || doc.file_hash;
-                if (!docHash) continue;
-                const docHashBytes = docHash.startsWith('0x') ? docHash : `0x${docHash}`;
-
-                // 1. BLIND ON-CHAIN VERIFICATION (Universal Safety)
-                const blindCheckStart = Date.now();
-                const onChainData = await contract.getDocument(docHashBytes);
-                const blindCheckDuration = Date.now() - blindCheckStart;
-                
-                if (onChainData.exists && Number(onChainData.status) > 0) {
-                    logger.signal('RECOVERY_TRIGGERED', { 
-                        id: doc.id, 
-                        correlation_id: doc.correlation_id,
-                        reason: 'Blind on-chain check matched',
-                        duration_ms: blindCheckDuration
-                    });
-                    await pool.query(
-                        "UPDATE documents SET chain_confirmed = true, storage_state = 'NOTARIZED', tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
-                        [doc.id]
-                    );
-                    logger.info('TX_CONFIRMED', {
-                        id: doc.id,
-                        correlation_id: doc.correlation_id,
-                        previous_state: doc.tx_status,
-                        new_state: 'confirmed',
-                        duration_ms: blindCheckDuration
-                    });
-                    // Trigger storage cleanup
-                    await cleanupStorage(doc);
-                    continue;
-                }
-
-                // 2. RECEIPT-BASED RECONCILIATION
-                if (doc.tx_hash) {
-                    const receiptCheckStart = Date.now();
-                    const receipt = await provider.getTransactionReceipt(doc.tx_hash);
-                    const receiptCheckDuration = Date.now() - receiptCheckStart;
-
-                    if (receipt) {
-                        if (receipt.status === 1) {
-                            await pool.query(
-                                "UPDATE documents SET chain_confirmed = true, storage_state = 'NOTARIZED', tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
-                                [doc.id]
-                            );
-                            logger.info('TX_CONFIRMED', {
-                                id: doc.id,
-                                correlation_id: doc.correlation_id,
-                                tx_hash: doc.tx_hash,
-                                previous_state: doc.tx_status,
-                                new_state: 'confirmed',
-                                duration_ms: receiptCheckDuration
-                            });
-                            await cleanupStorage(doc);
-                        } else {
-                            logger.error('TX_FAILED', {
-                                id: doc.id,
-                                correlation_id: doc.correlation_id,
-                                error_type: ERROR_TYPES.CONTRACT,
-                                error_stage: ERROR_STAGES.CONFIRMATION,
-                                previous_state: doc.tx_status,
-                                new_state: 'failed',
-                                duration_ms: receiptCheckDuration
-                            }, new Error("Transaction reverted on-chain"));
-                            await pool.query(
-                                "UPDATE documents SET tx_status = 'failed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
-                                [doc.id]
-                            );
-                        }
-                        continue;
-                    }
-                }
-
-                // 3. STALE TASK RECOVERY
-                const isStale = doc.processing_started_at && (new Date() - new Date(doc.processing_started_at)) > 15 * 60 * 1000;
-                if (isStale) {
-                    logger.signal('TASK_STUCK', { 
-                        id: doc.id, 
-                        correlation_id: doc.correlation_id, 
-                        state: doc.tx_status,
-                        started_at: doc.processing_started_at
-                    });
-                    if (!doc.tx_hash) {
-                        await pool.query(
-                            "UPDATE documents SET tx_status = 'failed', last_error = $1, updated_at = NOW(), status_updated_at = NOW() WHERE id = $2",
-                            [JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.RECOVERY, message: 'Task stuck in initiated state with no TX' }), doc.id]
-                        );
-                    }
-                }
-
-            } catch (innerErr) {
-                console.error(`   ⚠️ Error reconciling Document ${doc.id}:`, innerErr.message);
-            }
-        }
-
-        // --- PHASE 2: Reconcile User Identity Sync (Hardened) ---
-        const userResult = await pool.query(`
-            SELECT id, wallet_address, tx_hash, tx_status, identity_state, processing_started_at 
-            FROM users 
-            WHERE (tx_status IN ('initiated', 'pending') OR identity_state = 'ONCHAIN_PENDING')
-        `);
-
-        console.log(`🔎 Found ${userResult.rows.length} users requiring hardened reconciliation.`);
-
         const config = await ConfigService.getConfig();
         const identityABI = ["function getUserRole(address) view returns (uint8)"];
         const identityRegistry = new ethers.Contract(config.contracts.notaryRegistry, identityABI, provider);
 
-        for (const user of userResult.rows) {
+        // --- PHASE 1: Notarization Reconciliation ---
+        const docResult = await pool.query(`
+            SELECT id, idempotency_key, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
+            FROM documents 
+            WHERE (tx_status IN ('initiated', 'pending') OR submission_state = 'submitted_to_blockchain')
+              AND chain_confirmed = false AND is_deleted = false
+        `);
+
+        for (const doc of docResult.rows) {
             try {
-                // 1. BLIND ON-CHAIN VERIFICATION
-                console.log(`⏳ Blind-checking role for User ${user.wallet_address}...`);
-                const liveRole = await identityRegistry.getUserRole(user.wallet_address);
-                
-                if (Number(liveRole) > 0) {
-                    console.log(`   ✅ Confirmed via On-Chain State: User ${user.wallet_address}`);
+                const docHash = doc.idempotency_key;
+                if (!docHash) continue;
+                const docHashBytes = docHash.startsWith('0x') ? docHash : `0x${docHash}`;
+
+                // 1. BLIND ON-CHAIN CHECK (Self-Heal)
+                const onChainData = await contract.getDocument(docHashBytes);
+                if (onChainData.exists && Number(onChainData.status) > 0) {
                     await pool.query(
-                        "UPDATE users SET identity_state = 'ACTIVE', tx_status = 'confirmed', updated_at = NOW() WHERE id = $1",
-                        [user.id]
+                        "UPDATE documents SET chain_confirmed = true, tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
+                        [doc.id]
                     );
+                    await SyncLogger.logEvent({
+                        userId: doc.id, syncType: 'notarization', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
+                        statusBefore: doc.tx_status, statusAfter: 'confirmed', metadata: { reason: 'onchain_match' }
+                    });
+                    await cleanupStorage(doc);
                     continue;
                 }
 
-                // 2. RECEIPT-BASED RECONCILIATION
-                if (user.tx_hash) {
-                    console.log(`   ⏳ Checking receipt for hash: ${user.tx_hash}`);
-                    const receipt = await provider.getTransactionReceipt(user.tx_hash);
+                // 2. RECEIPT CHECK
+                if (doc.tx_hash) {
+                    const receipt = await provider.getTransactionReceipt(doc.tx_hash);
                     if (receipt) {
-                        if (receipt.status === 1) {
-                            await pool.query(
-                                "UPDATE users SET identity_state = 'ACTIVE', tx_status = 'confirmed', updated_at = NOW() WHERE id = $1",
-                                [user.id]
-                            );
-                        } else {
-                            await pool.query(
-                                "UPDATE users SET tx_status = 'failed', updated_at = NOW() WHERE id = $1",
-                                [user.id]
-                            );
-                        }
+                        const isSuccess = receipt.status === 1;
+                        const statusAfter = isSuccess ? 'confirmed' : 'failed';
+                        await pool.query(
+                            "UPDATE documents SET chain_confirmed = $1, tx_status = $2, updated_at = NOW(), status_updated_at = NOW() WHERE id = $3",
+                            [isSuccess, statusAfter, doc.id]
+                        );
+                        await SyncLogger.logEvent({
+                            userId: doc.id, syncType: 'notarization', 
+                            eventType: isSuccess ? SyncLogger.EVENTS.TX_CONFIRMED : SyncLogger.EVENTS.TX_FAILED,
+                            statusBefore: doc.tx_status, statusAfter, txHash: doc.tx_hash
+                        });
+                        if (isSuccess) await cleanupStorage(doc);
                         continue;
                     }
                 }
-
-                // 3. STALE TASK RECOVERY
-                const isStale = user.processing_started_at && (new Date() - new Date(user.processing_started_at)) > 15 * 60 * 1000;
-                if (isStale && !user.tx_hash) {
-                    console.warn(`   ⚠️ Stale 'initiated' sync found for User ${user.wallet_address}. Resetting to failed.`);
-                    await pool.query(
-                        "UPDATE users SET tx_status = 'failed', updated_at = NOW() WHERE id = $1",
-                        [user.id]
-                    );
-                }
-            } catch (userErr) {
-                console.error(`   ⚠️ Error reconciling User ${user.id}:`, userErr.message);
+            } catch (innerErr) {
+                console.error(`[RECON] Notarization error for ${doc.id}:`, innerErr.message);
             }
         }
 
-        // --- PHASE 3: Reconcile NTKR Transactions ---
+        // --- PHASE 2: Identity Sync Reconciliation ---
+        const userResult = await pool.query(`
+            SELECT id, wallet_address, tx_hash, tx_status, retry_count, manual_retry_count
+            FROM users 
+            WHERE tx_status IN ('processing', 'initiated', 'pending', 'retrying')
+              AND (tx_status IS NULL OR tx_status != 'confirmed')
+        `);
+
+        for (const user of userResult.rows) {
+            try {
+                // 1. BLIND ON-CHAIN CHECK
+                const liveRole = await identityRegistry.getUserRole(user.wallet_address);
+                if (Number(liveRole) > 0) {
+                    await pool.query(
+                        "UPDATE users SET tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
+                        [user.id]
+                    );
+                    await SyncLogger.logEvent({
+                        userId: user.id, syncType: 'identity', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
+                        statusBefore: user.tx_status, statusAfter: 'confirmed', metadata: { reason: 'already_registered' }
+                    });
+                    continue;
+                }
+
+                // 2. RECEIPT CHECK
+                if (user.tx_hash) {
+                    const receipt = await provider.getTransactionReceipt(user.tx_hash);
+                    if (receipt) {
+                        const isSuccess = receipt.status === 1;
+                        const statusAfter = isSuccess ? 'confirmed' : 'failed';
+                        await pool.query(
+                            "UPDATE users SET tx_status = $1, updated_at = NOW(), status_updated_at = NOW() WHERE id = $2",
+                            [statusAfter, user.id]
+                        );
+                        await SyncLogger.logEvent({
+                            userId: user.id, syncType: 'identity', 
+                            eventType: isSuccess ? SyncLogger.EVENTS.TX_CONFIRMED : SyncLogger.EVENTS.TX_FAILED,
+                            statusBefore: user.tx_status, statusAfter, txHash: user.tx_hash
+                        });
+                    }
+                }
+            } catch (userErr) {
+                console.error(`[RECON] Identity error for ${user.id}:`, userErr.message);
+            }
+        }
+
+        // --- PHASE 3: Role Promotion Reconciliation ---
+        const roleResult = await pool.query(`
+            SELECT id, wallet_address, role_tx_hash, role_tx_status, role_retry_count, role_manual_retry_count
+            FROM users 
+            WHERE role_tx_status IN ('processing', 'initiated', 'pending', 'retrying')
+              AND (role_tx_status IS NULL OR role_tx_status != 'confirmed')
+        `);
+
+        for (const user of roleResult.rows) {
+            try {
+                // 1. BLIND ON-CHAIN CHECK
+                const liveRole = await identityRegistry.getUserRole(user.wallet_address);
+                if (Number(liveRole) >= 2) {
+                    await pool.query(
+                        "UPDATE users SET role_tx_status = 'confirmed', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $1",
+                        [user.id]
+                    );
+                    await SyncLogger.logEvent({
+                        userId: user.id, syncType: 'role', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
+                        statusBefore: user.role_tx_status, statusAfter: 'confirmed', metadata: { reason: 'already_notary' }
+                    });
+                    continue;
+                }
+
+                // 2. RECEIPT CHECK
+                if (user.role_tx_hash) {
+                    const receipt = await provider.getTransactionReceipt(user.role_tx_hash);
+                    if (receipt) {
+                        const isSuccess = receipt.status === 1;
+                        const statusAfter = isSuccess ? 'confirmed' : 'failed';
+                        await pool.query(
+                            "UPDATE users SET role_tx_status = $1, updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $2",
+                            [statusAfter, user.id]
+                        );
+                        await SyncLogger.logEvent({
+                            userId: user.id, syncType: 'role', 
+                            eventType: isSuccess ? SyncLogger.EVENTS.TX_CONFIRMED : SyncLogger.EVENTS.TX_FAILED,
+                            statusBefore: user.role_tx_status, statusAfter, txHash: user.role_tx_hash
+                        });
+                    }
+                }
+            } catch (roleErr) {
+                console.error(`[RECON] Role error for ${user.id}:`, roleErr.message);
+            }
+        }
+
     } catch (err) {
-        console.error("❌ Reconciliation Worker Error:", err.message);
+        console.error("❌ Reconciliation Master Error:", err.message);
     } finally {
         await lockService.unlock(1001);
     }

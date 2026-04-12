@@ -21,13 +21,20 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
   useEffect(() => {
     if ((window as any).electronAPI?.auth) {
       (window as any).electronAPI.auth.onStatusChanged((data: any) => {
+        // [TRACE 5] IPC Received (AdminLogin)
+        console.log('[STEP 5] IPC_RECEIVED (AdminLogin)', data);
+        
         if (data.status === "authorized") {
+          // [TRACE 6] Local State Update (AdminLogin)
+          console.log('[STEP 6] LOCAL_STATE_UPDATE (AdminLogin)', data.status);
+          
           setStatus("authorized");
           toast.success("Login Successful!");
           onLogin();
         } else if (data.status === "expired" || data.status === "failed") {
+          console.error('[AUTH_FAULT] (AdminLogin)', data.error || data.status);
           setStatus("expired");
-          setError("Session expired or authorization failed.");
+          setError(data.error || "Session expired or authorization failed.");
         }
       });
     }

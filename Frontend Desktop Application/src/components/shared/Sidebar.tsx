@@ -62,11 +62,11 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       {!isCollapsed && (
         <div className="p-4 mx-4 mt-6 bg-background border border-border rounded-xl flex items-center gap-3 shadow-lg shadow-black/20">
           <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary font-bold shrink-0">
-            {user?.name?.slice(0, 1).toUpperCase() || "U"}
+            {(user?.name || "U").slice(0, 1).toUpperCase()}
           </div>
           <div className="overflow-hidden">
             <p className="text-sm font-semibold text-foreground truncate">{user?.name || "Loading..."}</p>
-            <p className="text-[10px] text-muted-foreground truncate font-mono">{user?.wallet_address?.slice(0, 6)}...{user?.wallet_address?.slice(-4)}</p>
+            <p className="text-[10px] text-muted-foreground truncate font-mono">{(user?.wallet_address || "0x00...000").slice(0, 6)}...{(user?.wallet_address || "0000").slice(-4)}</p>
           </div>
         </div>
       )}

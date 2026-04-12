@@ -4,8 +4,9 @@ import * as React from "react"
 import { useEffect, useRef, useState } from "react"
 import * as faceapi from "@vladmandic/face-api"
 import { Button } from "@/components/ui/button"
-import { Camera, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react"
+import { Camera, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { motion, AnimatePresence } from "framer-motion"
 
 interface LivenessCheckProps {
   onComplete: (descriptor: number[]) => void
@@ -33,12 +34,11 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
         setStatus("verifying")
         startVerification()
       } else {
-        // If component unmounted during load, stop stream immediately
         stream.getTracks().forEach(t => t.stop())
       }
     } catch (err: any) {
       console.error("Camera/Model Error:", err)
-      setError(err.message || "Could not access camera.")
+      setError(err.message || "Access to camera denied or failed.")
       setStatus("error")
     }
   }
@@ -46,7 +46,6 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
   const startVerification = async () => {
     let count = 0
     const interval = setInterval(async () => {
-      // 1. Safety check: Component mounted and video ready?
       if (!videoRef.current || !videoRef.current.srcObject) {
         clearInterval(interval)
         return
@@ -59,7 +58,7 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
           .withFaceDescriptor()
 
         if (detection) {
-          count += 20
+          count += 10
           setProgress(count)
 
           if (count >= 100) {
@@ -67,82 +66,132 @@ export function LivenessCheck({ onComplete }: LivenessCheckProps) {
             setStatus("success")
             onComplete(Array.from(detection.descriptor))
 
-            // 2. Safe cleanup: Ensure ref is still valid before accessing property
             if (videoRef.current && videoRef.current.srcObject) {
               const stream = videoRef.current.srcObject as MediaStream
               stream.getTracks().forEach(t => t.stop())
             }
           }
         } else {
-          count = Math.max(0, count - 10)
+          count = Math.max(0, count - 5)
           setProgress(count)
         }
       } catch (e) {
         // Suppress errors during unmount/detection
       }
-    }, 500)
+    }, 300)
 
-    // Cleanup interval on unmount
     return () => clearInterval(interval)
   }
 
   return (
-    <div className="space-y-4">
-      <div className="relative aspect-video rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+    <div className="w-full flex flex-col items-center justify-center min-h-[250px] relative">
+      <AnimatePresence mode="wait">
         {status === "idle" && (
-          <Button onClick={startCamera} className="gap-2">
-            <Camera size={18} /> Enable Camera
-          </Button>
+          <motion.div 
+            key="idle"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="flex flex-col items-center gap-6"
+          >
+            <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20">
+              <Camera size={32} />
+            </div>
+            <Button 
+                onClick={startCamera} 
+                className="h-12 px-8 font-bold uppercase tracking-widest bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 rounded-xl"
+            >
+              Enable Sensor
+            </Button>
+          </motion.div>
         )}
 
         {(status === "loading" || status === "verifying") && (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover grayscale brightness-75 transition-all"
-          />
-        )}
+          <motion.div 
+            key="active"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="w-full h-full absolute inset-0 rounded-[2.5rem] overflow-hidden"
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className={cn(
+                "w-full h-full object-cover transition-all duration-1000",
+                status === "loading" ? "blur-xl" : "grayscale opacity-80"
+              )}
+            />
+            
+            {status === "loading" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-sm z-20">
+                    <Loader2 className="w-10 h-10 text-primary animate-spin mb-4" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-white/60">Initializing...</span>
+                </div>
+            )}
 
-        {status === "verifying" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <div className="w-48 h-48 border-2 border-primary/50 border-dashed rounded-full animate-[spin_10s_linear_infinite] mb-4" />
-            <div className="bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-primary/20 flex flex-col items-center">
-              <span className="text-xs font-bold text-primary uppercase tracking-widest mb-1">Scanning Face...</span>
-              <div className="w-32 h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
+            {status === "verifying" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                {/* Scanner Frame */}
+                <div className="relative w-48 h-48">
+                    <div className="absolute inset-0 border-2 border-primary/40 rounded-full animate-ping" />
+                    <div className="absolute inset-0 border border-primary/20 rounded-full" />
+                    <div className="absolute inset-[-4px] border-t-2 border-primary rounded-full animate-[spin_3s_linear_infinite]" />
+                </div>
+
+                <div className="mt-8 bg-slate-950/80 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/5 flex flex-col items-center shadow-2xl">
+                  <span className="text-[10px] font-bold text-primary uppercase tracking-[0.2em] mb-3">Analyzing Neural Matrix</span>
+                  <div className="w-40 h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]"
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </motion.div>
         )}
 
         {status === "success" && (
-          <div className="flex flex-col items-center gap-3 animate-in zoom-in-95 duration-300">
-            <div className="w-16 h-16 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
-              <CheckCircle2 size={32} />
+          <motion.div 
+            key="success"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col items-center gap-4"
+          >
+            <div className="w-20 h-20 rounded-[2rem] bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20 shadow-[0_0_40px_rgba(16,185,129,0.1)]">
+              <ShieldCheck size={48} className="animate-in zoom-in-50 duration-500" />
             </div>
-            <span className="text-lg font-bold text-emerald-400">Identity Verified</span>
-          </div>
+            <div className="text-center">
+                <h3 className="text-lg font-bold text-white uppercase tracking-wider">Identity Match</h3>
+                <p className="text-xs text-emerald-400 font-medium tracking-tight">Biometric Signature Secured</p>
+            </div>
+          </motion.div>
         )}
 
         {status === "error" && (
-          <div className="p-6 text-center space-y-3">
-            <AlertCircle className="mx-auto text-rose-500" size={48} />
-            <p className="text-sm text-slate-400">{error}</p>
-            <Button variant="outline" size="sm" onClick={startCamera}>
-              <RefreshCw size={14} className="mr-2" /> Try Again
+          <motion.div 
+            key="error"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center gap-6 p-6 text-center"
+          >
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 flex items-center justify-center text-rose-500 border border-rose-500/20">
+                <AlertCircle size={32} />
+            </div>
+            <div className="space-y-1">
+                <p className="text-sm font-bold text-white uppercase tracking-tighter">Connection Failed</p>
+                <p className="text-xs text-slate-500">{error}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={startCamera} className="border-white/10 hover:bg-white/5 rounded-xl h-10 px-6">
+              <RefreshCw size={14} className="mr-2" /> Re-link Sensor
             </Button>
-          </div>
+          </motion.div>
         )}
-      </div>
-
-      <p className="text-[10px] text-slate-500 text-center uppercase tracking-tighter">
-        {status === "verifying" ? "Stay still and look directly at the sensor" : "Secure biometric bridge active"}
-      </p>
+      </AnimatePresence>
     </div>
   )
 }

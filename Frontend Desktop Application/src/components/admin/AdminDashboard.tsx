@@ -6,22 +6,24 @@ import { EventRecorder } from "./Cockpit/EventRecorder";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "../ui/button";
 
-export function AdminDashboard() {
-  const [user, setUser] = useState<any>(null);
+export function AdminDashboard({ onNavigate, isDarkMode, user: initialUser }: { onNavigate?: (s: string) => void; isDarkMode?: boolean; user?: any }) {
+  const [user, setUser] = useState<any>(initialUser || null);
   const [stuckCount, setStuckCount] = useState(0);
   const [isCritical, setIsCritical] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!initialUser);
 
   const fetchSystemData = useCallback(async () => {
     setIsLoading(true);
     try {
       // 1. Fetch Identity via Proxy (Main Process injects token)
       const userData = await (window as any).electronAPI.api.call("/api/auth/me");
-      setUser(userData?.user);
+      setUser(userData?.user || null);
 
       // 2. Fetch Sync Health for Action Panel
       const health = await (window as any).electronAPI.api.call("/api/system/sync/health");
-      const summary = health.summary || {};
+      
+      // 🛡️ [PROTECTION] Defend against non-object responses or missing summary
+      const summary = health?.summary || {};
       
       const totalStuck = (Number(summary.stuck_identity_processing) || 0) + (Number(summary.stuck_role_processing) || 0);
       setStuckCount(totalStuck);
@@ -59,7 +61,7 @@ export function AdminDashboard() {
   }
 
   return (
-    <div className="flex-1 bg-[#07090e] h-screen flex flex-col relative overflow-hidden">
+    <div className="flex-1 bg-[#07090e] flex flex-col relative">
       {/* 1. Auth Status Bar (Persistent System Truth) */}
       <AuthStatusBar user={user} isLocked={false} />
 
@@ -67,7 +69,14 @@ export function AdminDashboard() {
         {/* Header Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none select-none">ADMIN COCKPIT</h1>
+            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none select-none flex items-center gap-4">
+              ADMIN COCKPIT
+              {user?.zeroTrustStatus === 'DEGRADED' && (
+                <span className="text-[10px] bg-red-500/20 text-red-500 border border-red-500/50 px-2 py-0.5 rounded animate-pulse">
+                  DEGRADED MODE
+                </span>
+              )}
+            </h1>
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.4em] mt-2 italic shadow-emerald-500/10">BBSNS protocol control system node _1</p>
           </div>
           <div className="flex items-center gap-4">
@@ -93,12 +102,16 @@ export function AdminDashboard() {
 
           {/* 4. Action Decision Panel (Remediation) */}
           <div className="lg:col-span-1">
-             <ActionPanel stuckCount={stuckCount} isCritical={isCritical} />
+             <ActionPanel 
+               stuckCount={stuckCount} 
+               isCritical={isCritical} 
+               isDegraded={user?.zeroTrustStatus === 'DEGRADED'} 
+             />
           </div>
         </div>
 
-        {/* 5. Trust Boundary Overlay (Fail-Closed Visibility) */}
-        {(!user || isCritical && !isLoading && !user) && (
+        {/* 5. Trust Boundary Overlay (Only show if not loading and user is missing) */}
+        {(!isLoading && !user) && (
           <div className="absolute inset-0 bg-[#07090e]/80 backdrop-blur-2xl z-50 flex items-center justify-center p-8 animate-in fade-in duration-700">
             <div className="max-w-md w-full text-center space-y-6">
                 <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-center justify-center mx-auto mb-4 animate-pulse">

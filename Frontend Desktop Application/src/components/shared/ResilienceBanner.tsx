@@ -37,19 +37,23 @@ export const ResilienceBanner: React.FC<ResilienceBannerProps> = ({ mode, onRetr
   if (!config) return null;
 
   return (
-    <div className={`fixed top-0 left-0 w-full z-[10000] border-b ${config.bg} ${config.border} backdrop-blur-md px-4 py-2 flex items-center justify-center gap-3 shadow-lg animate-in slide-in-from-top duration-300`}>
-      <div className={config.text}>{config.icon}</div>
-      <span className={`text-[11px] font-bold uppercase tracking-wider ${config.text}`}>
-        {config.message}
-      </span>
-      {(mode === 'STALE' || mode === 'EMERGENCY') && (
-        <button 
-          onClick={onRetry}
-          className={`ml-2 px-3 py-1 rounded-full text-[10px] font-black uppercase border transition-all hover:scale-105 active:scale-95 flex items-center gap-1 ${config.text} ${config.border}`}
-        >
-          <RefreshCw className="w-3 h-3" /> Reconnect
-        </button>
-      )}
+    <div className={`fixed bottom-6 right-6 z-[10000] animate-in fade-in slide-in-from-bottom-5 duration-500`}>
+      <div className={`flex items-center gap-3 px-4 py-2 rounded-full border shadow-2xl backdrop-blur-xl ${config.bg} ${config.border}`}>
+        <div className={config.text}>{config.icon}</div>
+        <span className={`text-[10px] font-black uppercase tracking-widest ${config.text}`}>
+          {config.message}
+        </span>
+        
+        {(mode === 'STALE' || mode === 'EMERGENCY' || mode === 'DEGRADED') && (
+          <button 
+            onClick={onRetry}
+            className={`ml-2 px-3 py-1 rounded-full text-[9px] font-black uppercase border transition-all hover:brightness-125 active:scale-95 flex items-center gap-1 ${config.text} ${config.border} bg-white/5`}
+          >
+            <RefreshCw className={`w-3 h-3 ${mode === 'EMERGENCY' ? 'animate-pulse' : ''}`} /> 
+            {mode === 'EMERGENCY' ? 'RECONNECT NOW' : 'SYNC'}
+          </button>
+        )}
+      </div>
     </div>
   );
 };

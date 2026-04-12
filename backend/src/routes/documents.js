@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
-const { requirePrivilege, ROLES, RISK_LEVELS } = require('../../middleware/actor');
-const { requireSystemActivated } = require('../../middleware/activation');
+const { requirePrivilege, ROLES, RISK_LEVELS } = require('../middleware/actor');
+const { uploadLimiter } = require('../middleware/rate-limit');
+const { requireSystemActivated } = require('../middleware/activation');
 const { documentCreateSchema, documentUpdateSchema } = require('../utils/validation');
 const multer = require('multer');
 const crypto = require('crypto');
@@ -20,9 +21,10 @@ const ConfigService = require('../services/config.service');
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024 // Default 10MB
+    fileSize: 25 * 1024 * 1024 // 25MB Limit (BBSNS Production Hardening)
   }
 });
+
 
 // Function to sanitize document response (exclude internal fields)
 function sanitizeDocument(doc) {
@@ -47,6 +49,8 @@ function sanitizeDocument(doc) {
     type: (doc.storage_key || '').split('.').pop() || null,
     status: derivedStatus,
     submission_state: doc.submission_state,
+    assignment_state: doc.assignment_state || 'pending',
+    last_assignment_error: doc.last_assignment_error || null,
     chain_confirmed: doc.chain_confirmed,
     notary_id: doc.notary_id,
     notary_wallet: doc.notary_wallet || null,
@@ -74,7 +78,7 @@ function uuidToBytes32(uuid) {
 // ─── POST /api/documents/initiate ─────────────────────────────────────────
 // STEP 1: Receive file, hash it, create upload intent, return payment params.
 // Document is NOT created here — only after on-chain burn is verified.
-router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), memoryUpload.single('file'), async (req, res) => {
+router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
   try {
     const actor = req.actor;
     if (!actor)    return res.status(401).json({ error: 'Actor header required' });
@@ -90,16 +94,17 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
     const cost     = category === 1 ? 5 : 1;
     const costWei  = (BigInt(cost) * 1000000000000000000n).toString();
 
-    // 3. Server-side SHA-256 hash authority (from buffer)
     const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
     const filename = req.body.filename || req.file.originalname;
+
+    let storage_key = null;
+    let filepath = null;
 
     // 3. Reject duplicate file hashes
     const existing = await pool.query(
       'SELECT id FROM documents WHERE file_hash=$1 AND is_deleted=false', [fileHash]
     );
     if (existing.rows.length > 0) {
-      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
       return res.status(409).json({ error: 'This document has already been notarized.' });
     }
 
@@ -111,9 +116,6 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
     }
 
     const intentId = crypto.randomUUID();
-    let storage_key = null;
-    let filepath = null;
-
     // 5. STORAGE DECISION: S3 vs Local (Zero-Downtime Migration Support)
     const isS3Configured = !!process.env.AWS_S3_BUCKET;
 
@@ -368,15 +370,23 @@ router.get('/intent/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LE
   } catch (err) { res.status(500).json({ error: 'Failed to fetch intent' }); }
 });
 
+const maintenanceService = require('../services/maintenance.service');
+
 router.get('/', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
   console.error('[DEBUG_DOCS] Hit GET /documents');
   try {
     if (!req.actor) return res.status(401).json({ error: 'Actor header required' });
 
+    const role = Number(req.actor.role);
+
+    // 🛡️ [SURVIVAL] Opportunistic Reconciliation
+    // Trigger a fire-and-forget healing pass for orphaned assignments
+    if (role === ROLES.ADMIN || role === ROLES.NOTARY) {
+        maintenanceService.triggerPassiveReconciliation();
+    }
+
     let query;
     let params = [];
-
-    const role = Number(req.actor.role);
 
     if (role === ROLES.ADMIN) {
       query = `SELECT d.*, u.wallet_address as notary_wallet 
@@ -775,11 +785,12 @@ async function handleDocumentPatch(req, res) {
       const notaryAddressInContext = actor.address || actor.wallet_address;
       const nonceFromContract = await contract.nonces(notaryAddressInContext);
       
+      const config = await ConfigService.getConfig();
       const domain = {
-        name: "BBSNS_Protocol",
+        name: "BBSNS_DocumentRegistry",
         version: "1",
-        chainId: Number(process.env.CHAIN_ID || 97),
-        verifyingContract: process.env.DOCUMENT_REGISTRY_ADDRESS
+        chainId: config.chainId,
+        verifyingContract: config.contracts.documentRegistry
       };
 
       const types = {

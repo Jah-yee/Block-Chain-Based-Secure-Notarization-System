@@ -4,6 +4,9 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 
+// [SECURITY] Device Identity Cache (Fast Retrieval)
+let deviceIdCache = null;
+
 /**
  * 🩺 [OBSERVABILITY] Structured Logger
  * Implements [TIMESTAMP] [LEVEL] [CONTEXT] message pattern with 5MB rotation guard.
@@ -26,9 +29,7 @@ function log(level, context, message) {
 }
 
 // 🛡️ [SECURITY] authoritative API Configuration
-let API_BASE_URL = app.isPackaged 
-  ? 'https://api.bbsns.online' 
-  : 'https://api.bbsns.online'; // 🛡️ Hardened fallback to secure production for restoration
+let API_BASE_URL = 'https://api.bbsns.online'; // Production Source of Truth
 
 log("INFO", "SYSTEM_BOOT", `App initialized (Packaged: ${app.isPackaged})`);
 
@@ -43,22 +44,34 @@ process.on('unhandledRejection', (reason) => {
 });
 
 function getPersistentDeviceId() {
+    if (deviceIdCache) {
+        log("INFO", "SECURITY", "Device ID retrieved from memory cache.");
+        return deviceIdCache;
+    }
+
     const userDataPath = app.getPath('userData');
     const deviceIdPath = path.join(userDataPath, '.device_id');
     
+    let deviceId = null;
     if (fs.existsSync(deviceIdPath)) {
         try {
             const encryptedId = fs.readFileSync(deviceIdPath);
-            return safeStorage.decryptString(encryptedId);
+            deviceId = safeStorage.decryptString(encryptedId);
         } catch (e) {
             log("ERROR", "SECURITY_FAULT", "Vault Corruption detected. Regenerating identity.");
         }
     }
 
-    const newId = crypto.randomUUID();
-    const encryptedId = safeStorage.encryptString(newId);
-    fs.writeFileSync(deviceIdPath, encryptedId);
-    return newId;
+    if (!deviceId) {
+        deviceId = crypto.randomUUID();
+        const encryptedId = safeStorage.encryptString(deviceId);
+        fs.writeFileSync(deviceIdPath, encryptedId);
+        log("INFO", "SECURITY", "New Device ID generated and secured.");
+    }
+
+    deviceIdCache = deviceId;
+    log("INFO", "SECURITY", "Device ID handler invoked.");
+    return deviceId;
 }
 
 function saveSecureToken(token) {
@@ -69,6 +82,19 @@ function saveSecureToken(token) {
     const encryptedToken = safeStorage.encryptString(token);
     const tokenPath = path.join(app.getPath('userData'), '.vault');
     fs.writeFileSync(tokenPath, encryptedToken);
+    
+    log("INFO", "AUTH", `Token saved → length: ${token.length}`);
+    
+    // Immediate verification test
+    axios.get(`${API_BASE_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        timeout: 2000
+    }).then(res => {
+        log("INFO", "AUTH", `Test /me → status: ${res.status} (Verified)`);
+    }).catch(err => {
+        log("ERROR", "AUTH", `Initial verification /me failed: ${err.message}`);
+    });
+
     return true;
 }
 
@@ -84,33 +110,137 @@ function getSecureToken() {
     }
 }
 
+/**
+ * 🛡️ [SELF-HEALING] Auth Recovery State & Worker
+ * Responsibility: Periodically attempts to upgrade DEGRADED sessions to VERIFIED.
+ */
+let recoveryInterval = null;
+let currentBackoff = 30000; // Start at 30s
+let isRecoveryInProgress = false;
+
+async function attemptSecurityUpgrade() {
+    if (isRecoveryInProgress) return;
+    
+    const token = await getSecureToken();
+    if (!token) return stopAuthRecoveryWorker();
+
+    isRecoveryInProgress = true;
+    log("INFO", "RECOVERY", "Attempting background security upgrade...");
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/api/auth/remote/refresh-zero-trust`, {}, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 5000
+        });
+
+        const { status, token: newToken, user } = response.data;
+
+        if (status === 'VERIFIED') {
+            log("INFO", "RECOVERY", "✅ Security upgrade SUCCESS. Rotating token.");
+            saveSecureToken(newToken);
+            
+            if (mainWindow) {
+                mainWindow.webContents.send('auth:status-changed', {
+                    status: 'authorized',
+                    user,
+                    zeroTrustStatus: 'VERIFIED',
+                    message: "Security Authority Restored"
+                });
+            }
+            stopAuthRecoveryWorker();
+        } else if (status === 'REAUTH_REQUIRED' || status === 'BANNED') {
+            log("WARN", "RECOVERY", `Upgrade failed with FATAL status: ${status}. Terminating session.`);
+            handleUnauthorized();
+        } else {
+            // Still DEGRADED - increase backoff
+            currentBackoff = Math.min(currentBackoff * 2, 120000); // Max 120s
+            log("INFO", "RECOVERY", `Still DEGRADED. Next attempt in ${currentBackoff/1000}s`);
+            restartRecoveryTimer();
+        }
+        return status === 'VERIFIED';
+    } catch (err) {
+        log("ERROR", "RECOVERY", `Manual recovery attempt failed: ${err.message}`);
+        isRecoveryInProgress = false;
+        return false;
+    } finally {
+        isRecoveryInProgress = false;
+    }
+}
+
+function startAuthRecoveryWorker() {
+    if (recoveryInterval) return;
+    log("INFO", "RECOVERY", "Starting Auth Recovery Worker (Initial: 30s)");
+    currentBackoff = 30000;
+    restartRecoveryTimer();
+}
+
+function stopAuthRecoveryWorker() {
+    if (recoveryInterval) {
+        log("INFO", "RECOVERY", "Stopping Auth Recovery Worker");
+        clearTimeout(recoveryInterval);
+        recoveryInterval = null;
+    }
+}
+
+function restartRecoveryTimer() {
+    if (recoveryInterval) clearTimeout(recoveryInterval);
+    recoveryInterval = setTimeout(attemptSecurityUpgrade, currentBackoff);
+}
+
 function clearSecureToken() {
     const tokenPath = path.join(app.getPath('userData'), '.vault');
     if (fs.existsSync(tokenPath)) fs.unlinkSync(tokenPath);
 }
 
-const ALLOWED_ENDPOINTS = [
-    '/api/auth/me',
-    '/api/system/sync/health',
-    '/api/system/sync/events',
-    '/api/system/sync/retry',
-    '/api/governance/alerts/count',
-    '/api/notary/requests/pending',
-    '/api/notary/requests/approved',
-    '/api/notary/requests/details/'
+const ALLOWED_ROUTES = [
+    // 🔐 AUTH
+    { path: /^\/api\/auth\/system-status$/, methods: ["GET"] },
+    { path: /^\/api\/auth\/nonce$/, methods: ["POST"] },
+    { path: /^\/api\/auth\/me$/, methods: ["GET"] },
+
+    // 🏢 NOTARY FLOW
+    { path: /^\/api\/notaries\/applications$/, methods: ["GET", "POST"] },
+    { path: /^\/api\/notaries\/applications\/[\w-]+\/verify$/, methods: ["POST"] },
+    { path: /^\/api\/notaries\/applications\/[\w-]+\/approve$/, methods: ["POST"] },
+    { path: /^\/api\/notaries\/applications\/[\w-]+\/reject$/, methods: ["POST"] },
+    { path: /^\/api\/notaries$/, methods: ["GET"] },
+
+    // 📂 DOCUMENT FLOW
+    { path: /^\/api\/documents$/, methods: ["GET"] },
+    { path: /^\/api\/documents\/[\w-]+$/, methods: ["GET", "PATCH"] },
+    { path: /^\/api\/documents\/[\w-]+\/file$/, methods: ["GET"] },
+    { path: /^\/api\/documents\/[\w-]+\/signature-payload$/, methods: ["GET"] },
+
+    // ⚖️ GOVERNANCE (Dashboard Visibility)
+    { path: /^\/api\/governance\/proposals$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/multisig\/settings$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/alerts\/count$/, methods: ["GET"] },
+
+    // 👤 OWNER FLOW
+    { path: /^\/api\/documents\/initiate$/, methods: ["POST"] },
+    { path: /^\/api\/documents\/confirm$/, methods: ["POST"] }
 ];
 
-function isEndpointAllowed(endpoint) {
-    const cleanPath = path.normalize(endpoint).replace(/\\/g, '/');
-    return ALLOWED_ENDPOINTS.some(allowed => 
-        allowed.endsWith('/') ? cleanPath.startsWith(allowed) : cleanPath === allowed
+function validateRequest(endpoint, method) {
+    const cleanMethod = (method || 'GET').toUpperCase();
+    
+    // 1. Normalize Path (Remove query params, decode URI)
+    const parsed = new URL(endpoint, "http://localhost");
+    const cleanPath = decodeURIComponent(parsed.pathname).replace(/\\/g, '/');
+
+    // 2. Reject Suspicious Input
+    if (cleanPath.includes("..")) return false;
+
+    // 3. Match against Whitelist
+    return ALLOWED_ROUTES.some(route => 
+        route.path.test(cleanPath) && route.methods.includes(cleanMethod)
     );
 }
 
 async function authenticatedRequest(endpoint, method = 'GET', data = null) {
-    if (!isEndpointAllowed(endpoint)) {
-        log("WARN", "SECURITY", `Blocked unauthorized access attempt to: ${endpoint}`);
-        throw new Error('ACCESS_DENIED');
+    if (!validateRequest(endpoint, method)) {
+        log("WARN", "SECURITY_VIOLATION", `Background worker blocked: ${method} ${endpoint}`);
+        throw { code: "ACCESS_DENIED", message: "Unauthorized API access attempt" };
     }
 
     const token = await getSecureToken();
@@ -196,8 +326,10 @@ async function loadConfigCache() {
 }
 
 let pollingInterval = null;
+let currentTraceId = null;
 async function startAuthFlow() {
-    log("INFO", "AUTH_HANDSHAKE", "Initiating remote handshake with " + API_BASE_URL);
+    currentTraceId = Date.now().toString();
+    log("INFO", "AUTH_HANDSHAKE", `[TRACE ${currentTraceId}] Initiating remote handshake with ${API_BASE_URL}`);
     try {
         const response = await axios.post(`${API_BASE_URL}/api/auth/remote/session`, {
             device_id: getPersistentDeviceId()
@@ -222,26 +354,74 @@ async function startAuthFlow() {
         pollingInterval = setInterval(async () => {
             try {
                 const url = `${API_BASE_URL}/api/auth/remote/status/${sessionId}`;
-                log("DEBUG", "AUTH_POLL", `Checking: ${url}`);
                 const pollRes = await axios.get(url);
-                const { status, code: one_time_code } = pollRes.data;
                 
+                // [TRACE 1] Polling Response
+                log("INFO", "AUTH_TRACE", `[STEP 1] POLL_RESPONSE: ${JSON.stringify(pollRes.data)}`);
+                
+                const { status, one_time_code } = pollRes.data;
+                
+                if (status === 'authorized') {
+                    // [TRACE 2] Authorization Detected
+                    log("INFO", "AUTH_TRACE", `[STEP 2] AUTH_DETECTED: session=${sessionId}`);
+                }
+
+                if (status === 'authorized' && !one_time_code) {
+                    log("ERROR", "AUTH_TRACE", `[FAULT] authorized state but missing one_time_code`);
+                }
+
                 if (status === 'authorized' && one_time_code) {
-                    log("INFO", "AUTH_POLL", `Authorized! Exchanging code with: ${API_BASE_URL}`);
+                    log("INFO", "AUTH_TRACE", `[STEP 3A] CALLING_EXCHANGE: code=${one_time_code.substring(0,8)}...`);
                     clearInterval(pollingInterval);
                     pollingInterval = null;
-                    const exchangeRes = await axios.post(`${API_BASE_URL}/api/auth/remote/exchange`, {
-                        sessionId, code: one_time_code, device_id: getPersistentDeviceId()
-                    });
-                    saveSecureToken(exchangeRes.data.token);
-                    log("INFO", "AUTH", "Remote Handshake Successful. Token persisted.");
-                    if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status: 'authorized', user: exchangeRes.data.user });
+
+                    try {
+                        const exchangeRes = await axios.post(`${API_BASE_URL}/api/auth/remote/exchange`, {
+                            sessionId, code: one_time_code, device_id: getPersistentDeviceId()
+                        });
+                        
+                        // [TRACE 3B] Exchange Success
+                        log("INFO", "AUTH_TRACE", `[STEP 3B] EXCHANGE_SUCCESS: user_id=${exchangeRes.data.user?.id}`);
+                        
+                        saveSecureToken(exchangeRes.data.token);
+                        const ipcPayload = { 
+                            status: 'authorized', 
+                            user: exchangeRes.data.user, 
+                            zeroTrustStatus: exchangeRes.data.zeroTrustStatus,
+                            walletVerificationPending: exchangeRes.data.walletVerificationPending,
+                            traceId: currentTraceId 
+                        };
+                        
+                        // [SELF-HEALING] Start recovery worker if session is degraded
+                        if (exchangeRes.data.zeroTrustStatus === 'DEGRADED') {
+                            startAuthRecoveryWorker();
+                        }
+                        
+                        // [TRACE 4] IPC Send
+                        log("INFO", "AUTH_TRACE", `[STEP 4] IPC_SENDING: ${JSON.stringify(ipcPayload)}`);
+                        if (mainWindow) mainWindow.webContents.send('auth:status-changed', ipcPayload);
+
+                    } catch (exErr) {
+                        const errDetail = exErr.response ? `HTTP_${exErr.response.status}_${JSON.stringify(exErr.response.data)}` : exErr.message;
+                        log("ERROR", "AUTH_TRACE", `[STEP 3C] EXCHANGE_FAILURE: ${errDetail}`);
+                        
+                        // Report failure back to UI
+                        if (mainWindow) mainWindow.webContents.send('auth:status-changed', { 
+                            status: 'failed', 
+                            error: `Exchange Failed: ${errDetail}`,
+                            traceId: currentTraceId 
+                        });
+                    }
+
                 } else if (status === 'expired') {
                     clearInterval(pollingInterval);
-                    log("WARN", "AUTH", "Remote Handshake Expired.");
+                    log("WARN", "AUTH_TRACE", "Remote Handshake Expired.");
                     if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status: 'expired' });
                 }
             } catch (pollErr) { 
+                if (pollErr.response && pollErr.response.status === 429) {
+                    log("ERROR", "API_THROTTLE", "Rate limited on /auth/status");
+                }
                 log("ERROR", "AUTH", `Polling link degraded: ${pollErr.message}`); 
             }
         }, 2000);
@@ -293,6 +473,7 @@ app.whenReady().then(() => {
   createWindow();
   ipcMain.handle('auth:start', startAuthFlow);
   ipcMain.handle('auth:check-session', async () => !!(await getSecureToken()));
+  ipcMain.handle('auth:trigger-recovery', async () => attemptSecurityUpgrade());
   ipcMain.handle('auth:logout', async () => handleUnauthorized());
   ipcMain.on('open-external', (event, url) => shell.openExternal(url));
   ipcMain.handle('config:save', async (event, data) => saveConfigCache(data));
@@ -304,6 +485,135 @@ app.whenReady().then(() => {
         return true;
     }
     return false;
+  });
+
+  // 🛡️ [SECURITY] Device Identity Bridge
+  ipcMain.handle('auth:get-device-id', async () => getPersistentDeviceId());
+  
+  // 🛡️ [SECURITY] authoritative Session Authority
+  // Pull API for renderer to recover identity without localStorage
+  ipcMain.handle('auth:get-session', async () => {
+    log("INFO", "AUTH", "Session retrieval (auth:get-session) initiated by renderer.");
+    const token = await getSecureToken();
+    
+    if (!token) {
+        log("INFO", "AUTH", "No token in vault. Returning unauthenticated.");
+        return { authenticated: false };
+    }
+
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 1500 // Protocol mandated fast-path
+        });
+        
+        const user = response.data.user;
+        const zeroTrustStatus = response.data.zeroTrustStatus ?? "DEGRADED";
+        
+        log("INFO", "AUTH", `Session retrieval success for user: ${user.id}`);
+        return { authenticated: true, user, zeroTrustStatus };
+    } catch (err) {
+        const status = err.response ? err.response.status : "NETWORK_ERROR";
+        log("ERROR", "AUTH", `Session recovery failed [${status}]: ${err.message}`);
+        return { authenticated: false };
+    }
+  });
+
+  // 🛡️ [SECURITY] Authenticated API Bridge
+  // Re-routes renderer requests through the main process to inject secure tokens
+  ipcMain.handle('api:call', async (event, endpoint, method = 'GET', data = null) => {
+    const cleanMethod = (method || 'GET').toUpperCase();
+
+    // 🛡️ [SECURITY] Hardened Path Enforcement (Phase 1.1)
+    if (!validateRequest(endpoint, cleanMethod)) {
+        const parsed = new URL(endpoint, "http://localhost");
+        const tokenExists = !!(await getSecureToken());
+        
+        // 🚀 [BYPASS] Allow critical bridge-path for public heartbeat/nonce/handshake without tokens
+        const PUBLIC_ROUTES = [
+            '/api/auth/system-status', 
+            '/api/auth/nonce',
+            '/api/auth/remote/session',
+            '/api/auth/remote/exchange',
+            '/api/auth/remote/authorize',
+            '/api/auth/remote/status',
+            '/api/auth/remote/verify',
+            '/api/auth/remote/callback'
+        ];
+        const isPublicRequest = PUBLIC_ROUTES.includes(parsed.pathname);
+
+        if (!isPublicRequest) {
+            const logData = {
+                request: { raw: endpoint, clean: parsed.pathname, method: cleanMethod },
+                session: { authenticated: tokenExists },
+                severity: "HIGH"
+            };
+            log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access Attempt: ${JSON.stringify(logData)}`);
+            
+            throw { 
+                code: "ACCESS_DENIED", 
+                message: "Unauthorized API access attempt" 
+            };
+        }
+    }
+
+    log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint}`);
+    
+    try {
+        const token = await getSecureToken();
+        const parsed = new URL(endpoint, "http://localhost");
+        const PUBLIC_ROUTES = [
+            '/api/auth/system-status', 
+            '/api/auth/nonce',
+            '/api/auth/remote/session',
+            '/api/auth/remote/exchange',
+            '/api/auth/remote/authorize',
+            '/api/auth/remote/status',
+            '/api/auth/remote/verify',
+            '/api/auth/remote/callback'
+        ];
+        const isPublicRequest = PUBLIC_ROUTES.includes(parsed.pathname);
+
+        if (!token && !isPublicRequest) {
+            log("WARN", "API_BRIDGE", `NO_TOKEN for protected path: ${endpoint}`);
+            const error = new Error('UNAUTHORIZED');
+            error.response = { status: 401 };
+            throw error;
+        }
+
+        const headers = { 
+            'Content-Type': 'application/json'
+        };
+
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+        const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+        const fullUrl = `${cleanBase}${cleanEndpoint}`;
+
+        const axiosConfig = { method: cleanMethod, url: fullUrl, headers, timeout: 5000 };
+
+        if (cleanMethod !== 'GET' && data) {
+            axiosConfig.data = data;
+        }
+
+        const response = await axios(axiosConfig);
+        log("INFO", "API_BRIDGE", `← ${response.status} ${endpoint}`);
+        return response.data;
+    } catch (error) {
+        const status = error.response ? error.response.status : 'NETWORK_ERROR';
+        let detail = error.message;
+        
+        // 🧪 [FORENSIC] Log response body for deep analysis of backend failures (500/503)
+        if (error.response && error.response.data) {
+            detail += ` | Body: ${JSON.stringify(error.response.data).slice(0, 300)}`;
+        }
+        
+        log("ERROR", "API_BRIDGE", `← ${status} ${endpoint} | Error: ${detail}`);
+        throw error;
+    }
   });
 });
 

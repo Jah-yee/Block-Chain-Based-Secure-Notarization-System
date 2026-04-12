@@ -39,8 +39,9 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                 api.getMe()
             ]);
 
-            setRequests(docs);
-            setUserWallet(user.wallet_address);
+            // 🛡️ [SECURITY] Hardened array access to prevent renderer crash
+            setRequests(Array.isArray(docs) ? docs : []);
+            setUserWallet(user?.wallet_address || "");
 
             // Fetch live NTK balance
             if (user.wallet_address) {
@@ -89,19 +90,19 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     const stats = [
         {
             label: "Pending Requests",
-            value: requests.filter(r => r.status === "pending").length,
+            value: (Array.isArray(requests) ? requests : []).filter(r => r.status === "pending").length,
             icon: FileText,
             color: "yellow",
         },
         {
             label: "Approved",
-            value: requests.filter(r => r.status === "approved").length,
+            value: (Array.isArray(requests) ? requests : []).filter(r => r.status === "approved").length,
             icon: CheckCircle,
             color: "emerald",
         },
         {
             label: "Rejected",
-            value: requests.filter(r => r.status === "rejected").length,
+            value: (Array.isArray(requests) ? requests : []).filter(r => r.status === "rejected").length,
             icon: XCircle,
             color: "red",
         },
@@ -132,9 +133,9 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     };
 
     // Filter requests based on prop
-    const displayedRequests = filterStatus
-        ? requests.filter(r => r.status === filterStatus)
-        : requests;
+    const displayedRequests = (Array.isArray(requests) ? requests : []).filter(r => 
+        filterStatus ? r.status === filterStatus : true
+    );
 
     return (
         <div className="flex-1 bg-background overflow-auto">

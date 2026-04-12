@@ -2,68 +2,70 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/index.js");
 const { hashPassword } = require("../utils/password.js");
-const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../../middleware/actor.js");
-const { requireSystemActivated } = require("../../middleware/activation.js");
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middleware/actor.js");
+const { requireSystemActivated } = require("../middleware/activation.js");
+const UserService = require("../services/UserService");
 
 const multer = require("multer");
 const upload = multer({ 
     storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB Limit (KYC Hardening)
 });
 
-// Validation functions
-function validateEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
 
-function validatePassword(password) {
-  return password && password.length >= 8;
-}
-
-function validateWallet(walletAddress) {
-  const walletRegex = /^0x[a-fA-F0-9]{40}$/;
-  return walletRegex.test(walletAddress);
-}
+const { userSchema, validateBody } = require("../utils/validation.js");
+const { ethers } = require('ethers');
 
 // REGISTER User (public)
-router.post("/register", allowPublic, requireSystemActivated, upload.single('nationalIdFile'), async (req, res) => {
-  // Multer populates req.body with text fields and req.file with the file
+router.post("/register", allowPublic, requireSystemActivated, upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
+  // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   
-  // Align Frontend vs Backend field names
-  const name = body.name || body.fullName;
+  const name = body.fullName; // userSchema ensures this exists and matches regex
   const email = body.email;
-  const walletAddress = body.walletAddress;
   const password = body.password;
   const nationalId = body.nationalId || body.nationalIdText;
   const signature = body.signature || body.wallet_nonce;
   
+  if (!signature) {
+    return res.status(400).json({ status: 'error', error: 'Cryptographic signature is required' });
+  }
+
   // Handle faceDescriptor (may be stringified JSON from FormData)
   let faceDescriptor = body.faceDescriptor;
   if (typeof faceDescriptor === 'string') {
     try { faceDescriptor = JSON.parse(faceDescriptor); } catch (e) { console.error("JSON parse failed for descriptor", e); }
   }
 
-  console.log("[REGISTER_DEBUG] Received registration request:", { ...body, password: '[REDACTED]', faceDescriptor: '...', hasFile: !!req.file });
+  console.log("[REGISTER_DEBUG] Standardized input received. Initiating Signature Recovery...");
 
-  if (!name || !email || !walletAddress || !password) {
-    console.error("[REGISTER_DEBUG] VALDIATION FAILED: Missing required fields", { name:!!name, email:!!email, wallet:!!walletAddress, pass:!!password });
-    return res.status(400).json({ error: 'name, email, walletAddress, and password are required' });
+  let recoveredWallet;
+  try {
+    // 🛡️ [Hardening] Derive wallet address ONLY from signature as per Validation Contract
+    // 1. Fetch valid nonce
+    const nonceResult = await pool.query(
+      "SELECT nonce FROM wallet_nonces WHERE LOWER(wallet_address) = LOWER($1) AND used_at IS NULL AND expiry > NOW() ORDER BY created_at DESC LIMIT 1",
+      [body.walletAddress] // We use the provided wallet as a HINT to find the nonce, but signature is the AUTHORITY.
+    );
+
+    if (nonceResult.rows.length === 0) {
+      return res.status(401).json({ status: 'error', error: 'Authentication challenge expired or not found' });
+    }
+
+    const nonce = nonceResult.rows[0].nonce;
+    const message = `Login request for BBSNS: ${nonce}`;
+    recoveredWallet = ethers.verifyMessage(message, signature).toLowerCase();
+
+    // 2. Validate recovered address matches the hint (if provided) or fulfills ERC-20 format
+    if (body.walletAddress && recoveredWallet !== body.walletAddress.toLowerCase()) {
+      return res.status(401).json({ status: 'error', error: 'Identity mismatch: Signature does not match public key' });
+    }
+  } catch (err) {
+    console.error("[REGISTER_DEBUG] Signature verification crashed:", err);
+    return res.status(401).json({ status: 'error', error: 'Signature verification failed' });
   }
 
-  // Validate inputs
-  if (!validateEmail(email)) {
-    return res.status(400).json({ error: 'Invalid email format' });
-  }
-  if (!validatePassword(password)) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters long' });
-  }
-  if (!validateWallet(walletAddress)) {
-    return res.status(400).json({ error: 'Invalid wallet address format' });
-  }
-
-  const normalizedWalletAddress = walletAddress.toLowerCase();
+  const normalizedWalletAddress = recoveredWallet;
 
   // Check if email or wallet exists
   const existing = await pool.query(
@@ -83,25 +85,22 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
   console.log("[REGISTER_DEBUG] Data hashed. Inserting into DB...");
 
   try {
-    const result = await pool.query(
-      'INSERT INTO users (username, name, email, wallet_address, password_hash, national_id_hash, face_descriptor, wallet_nonce, role, liveness_status, kyc_verified, identity_state) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, name, email, wallet_address, created_at, role, liveness_status, identity_state',
-      [
-        email, 
-        name, 
-        email, 
-        normalizedWalletAddress, 
-        password_hash, 
-        national_id_hash, 
-        JSON.stringify(faceDescriptor), 
-        signature, 
-        'user', 
-        'pass',
-        true,
-        'PENDING'
-      ]
-    );
+    const user = await UserService.createUser({
+      username: email.toLowerCase().trim(),
+      name,
+      email: email.toLowerCase().trim(),
+      wallet_address: normalizedWalletAddress,
+      password_hash,
+      national_id_hash,
+      face_descriptor: JSON.stringify(faceDescriptor),
+      wallet_nonce: signature,
+      role: 'user',
+      is_human_verified: true,
+      identity_state: 'ACTIVE'
+    });
+
     console.log("[REGISTER_DEBUG] Registration successful for:", email);
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(user);
   } catch (err) {
     console.error("[REGISTER_DEBUG] FATAL REGISTRATION ERROR:", err);
     if (err.code === '23505') {
@@ -116,20 +115,8 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // CREATE User (Admin only)
-router.post("/", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
-  const { username, name, email, password, wallet_address, role } = req.body;
-  if (!name || !email || !password || !wallet_address) {
-    return res.status(400).json({ error: 'name, email, password, and wallet_address are required' });
-  }
-  if (!validateEmail(email)) {
-    return res.status(400).json({ error: 'Invalid email format' });
-  }
-  if (!validatePassword(password)) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters long' });
-  }
-  if (!validateWallet(wallet_address)) {
-    return res.status(400).json({ error: 'Invalid wallet address format' });
-  }
+router.post("/", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), validateBody(userSchema), async (req, res) => {
+  const { username, fullName: name, email, password, walletAddress: wallet_address, role } = req.body;
   try {
     const normalizedWalletAddress = wallet_address.toLowerCase();
     // Check for duplicate email or wallet

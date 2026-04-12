@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
 import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint } from "lucide-react";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
 const GENESIS_ACTIVATION_ADDRESS = import.meta.env.VITE_GENESIS_ACTIVATION_ADDRESS;
 const GENESIS_NFT_ADDRESS = import.meta.env.VITE_GENESIS_NFT_ADDRESS;
 
@@ -299,8 +299,15 @@ function App() {
         }
       } else {
         // STANDARD LOGIN
+        console.log(`[AUTH] Attempting Standard Authorize for sessionId: ${sessionId}`);
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const signer = await provider.getSigner();
+        const address = await signer.getAddress();
         const signature = await signer.signMessage(challenge);
-        const res = await fetch(`${BACKEND_URL}/api/auth/remote/authorize`, {
+
+        // 🛡️ Always use absolute URL for remote auth (Bypass potential path misinterpretation)
+        const API_BASE = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
+        const res = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, walletAddress: address, signature })

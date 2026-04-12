@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/index");
-const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../../middleware/actor.js");
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middleware/actor.js");
 const { ethers } = require("ethers");
 const path = require("path");
 const ConfigService = require("../services/config.service");
@@ -166,13 +166,17 @@ router.get("/multisig/settings", requirePrivilege({ minRole: ROLES.OWNER, risk: 
         res.json(settings);
     } catch (err) {
         console.error("Blockchain Fetch Error:", err);
-        // Return resilient default to prevent frontend crash
+        const config = await ConfigService.getConfig();
+        // 🛡️ [SECURITY] ENFORCE STRICT CONTRACT: Never return undefined keys
         res.json({
-            address: process.env.GOVERNANCE_CONTRACT_ADDRESS || "Error",
+            address: config?.contracts?.multisig || "0x0",
             threshold: 0,
             timelockDelay: 0,
             signers: [],
-            error: "Failed to fetch live settings: " + err.message
+            status: "degraded",
+            error: `Authority sync failed: ${err.message}`,
+            network: "BNB Smart Chain Testnet",
+            explorer: `https://testnet.bscscan.com/address/${config?.contracts?.multisig}`
         });
     }
 });
@@ -196,7 +200,7 @@ router.get("/multisig/transactions", requirePrivilege({ minRole: ROLES.OWNER, ri
         `);
 
         // Map database fields to the expected blockchain-like format
-        const transactions = result.rows.map(row => ({
+        const transactions = (result.rows || []).map(row => ({
             index: row.index,
             submissionTime: Math.floor(new Date(row.submissionTime).getTime() / 1000),
             numConfirmations: row.numConfirmations || 0,
@@ -205,7 +209,13 @@ router.get("/multisig/transactions", requirePrivilege({ minRole: ROLES.OWNER, ri
 
         res.json({ transactions });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("[GOVERNANCE_TX_FAIL] Resilient failure fallback:", err.message);
+        // 🛡️ [SECURITY] Return safe empty state instead of 500 to keep UI alive
+        res.json({ 
+            transactions: [],
+            status: "degraded",
+            error: "Telemetry stream interrupted"
+        });
     }
 });
 

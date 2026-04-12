@@ -162,8 +162,8 @@ function GovernanceHealthWidget({ settings }: { settings: SystemSettings | null 
                     <Shield className="h-3 w-3 text-primary/20" />
                 </div>
                 <div className="flex items-baseline gap-1">
-                    <span className="text-xl font-black text-primary">{settings.threshold}</span>
-                    <span className="text-[10px] font-bold text-primary/40 uppercase">/ {settings.signers.length} Signers</span>
+                    <span className="text-xl font-black text-primary">{settings.threshold || 0}</span>
+                    <span className="text-[10px] font-bold text-primary/40 uppercase">/ {Array.isArray(settings?.signers) ? settings.signers.length : 0} Signers</span>
                 </div>
             </div>
 
@@ -219,9 +219,16 @@ export function Governance({ role, user }: GovernanceProps) {
     const fetchSystemSettings = async () => {
         try {
             const data = await api.getMultiSigSettings()
-            setSystemSettings(data)
+            // 🛡️ [RESILIENCE] Accept 'degraded' state as valid data shape or check for keys
+            if (data && typeof data === 'object' && (data.address || data.status === 'degraded')) {
+                setSystemSettings(data)
+            } else {
+                console.warn("[GOV_WARN] MultiSig settings returned invalid data shape:", data);
+                setSystemSettings(null);
+            }
         } catch (err) {
             console.error("Fetch System Settings Error:", err)
+            setSystemSettings(null);
         }
     }
 
@@ -229,12 +236,18 @@ export function Governance({ role, user }: GovernanceProps) {
         setIsLoading(true)
         try {
             const data = await api.getProposals()
+            
+            // 🛡️ [SECURITY] Hardened array access to prevent renderer crash
+            const proposalsArray = Array.isArray(data) ? data : [];
 
             // Try to enrich with on-chain transaction data
             try {
                 const multisigData = await api.getMultiSigTransactions()
-                const enriched = data.map((p: any) => {
-                    const tx = multisigData.transactions.find((t: any) => t.index === p.on_chain_tx_index)
+                const txArray = Array.isArray(multisigData?.transactions) ? multisigData.transactions : [];
+                
+                const enriched = proposalsArray.map((p: any) => {
+                    if (!p) return p;
+                    const tx = txArray.find((t: any) => t.index === p.on_chain_tx_index)
                     if (tx) {
                         return {
                             ...p,
@@ -248,11 +261,12 @@ export function Governance({ role, user }: GovernanceProps) {
                 setProposals(enriched)
             } catch (e) {
                 console.warn("Could not enrich with multisig data:", e)
-                setProposals(data)
+                setProposals(proposalsArray)
             }
         } catch (err) {
             console.error("Fetch Proposals Error:", err)
             toast.error("Failed to load proposals")
+            setProposals([]) // 🛡️ Maintain stable state on failure
         } finally {
             setIsLoading(false)
         }
@@ -263,7 +277,12 @@ export function Governance({ role, user }: GovernanceProps) {
         fetchSystemSettings()
 
         if (role === 'admin') {
-            api.getNotaries().then(setAllNotaries).catch(console.error)
+            api.getNotaries()
+                .then(data => setAllNotaries(Array.isArray(data) ? data : []))
+                .catch(err => {
+                    console.error("[GOV_NOTARIES_FAIL]", err);
+                    setAllNotaries([]);
+                });
         }
 
         const timer = setInterval(() => {
@@ -624,7 +643,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <div className="space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Safe Threshold</p>
-                                            <p className="text-xl font-black text-primary">{systemSettings.threshold} <span className="text-xs text-primary/40">OF {systemSettings.signers.length}</span></p>
+                                            <p className="text-xl font-black text-primary">{systemSettings.threshold || 0} <span className="text-xs text-primary/40">OF {Array.isArray(systemSettings.signers) ? systemSettings.signers.length : 0}</span></p>
                                         </div>
                                         <div className="space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Timelock Delay</p>
@@ -633,9 +652,9 @@ export function Governance({ role, user }: GovernanceProps) {
                                         <div className="md:col-span-2 space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Signer Signatures</p>
                                             <div className="flex flex-wrap gap-1">
-                                                {systemSettings.signers.map((s, i) => (
+                                                {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => (
                                                     <Badge key={i} variant="secondary" className="bg-primary/10 text-[9px] font-mono border-none text-primary/70 selectable">
-                                                        {s.slice(0, 6)}...{s.slice(-4)}
+                                                        {(s || "").slice(0, 6)}...{(s || "").slice(-4)}
                                                     </Badge>
                                                 ))}
                                             </div>

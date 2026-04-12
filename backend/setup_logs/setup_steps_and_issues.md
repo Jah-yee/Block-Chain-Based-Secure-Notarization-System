@@ -56,15 +56,13 @@
 - Issue: PowerShell does not support `<` for input redirection. Fixed by using `Get-Content ... | docker exec -i ...`.
 - Verified tables with `docker exec -it bbsns_postgres psql -U bbsns_user -d bbsns_db -c "\dt"`.
 
-### 10. Desktop Auth Restoration & Hardening
+### 10. Desktop Auth Restoration & Hardening (M-02, M-10, M-15)
 - Actions:
-  - Resolved Multi-Process Handshake Stalemate (Auth Polling mismatch).
-  - Hardened Configuration Authority with deterministic SHA256 checksums and Salt parity.
-  - Implemented `build-isolated.ps1` for production distribution hygiene.
-  - Synchronized `ConfigAuthority.tsx` to act as a passive subscriber to Main Process updates.
+  - **M-02 (Config Boot)**: Resolved Desktop App params fetching loop.
+  - **M-10 (Authority Sync)**: Enabled deterministic sync across all contexts.
+  - **M-15 (Cross-Domain Token)**: Verified shared session Recognize via Remote Auth.
 - Issues:
-  - Initial handshake failed due to process isolation. Fixed by IPC API synchronization.
-  - Checksum mismatch on production. Fixed by hardcoding authoritative salt.
+  - Technical debt in `main.js` caused process isolation. Fixed via IPC.
 
 ## Summary
-All setup steps, system restoration phases, and technical hardening milestones are logged here. The system is currently in a STABLE verified state.
+The system is synchronized with the **Master Checklist**. M-02, M-10, and M-15 are verified STABLE. M-07 and M-14 are in development.

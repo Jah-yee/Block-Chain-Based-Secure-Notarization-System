@@ -31,20 +31,87 @@ const init = () => {
     return pool;
 };
 
-// 🛡️ [DATABASE_PROXY] Transparent Delegation to Internal Pool
+const dbContext = require('./context');
+
+// 🛡️ [UTILITY] Iron Sentinel: Non-bypassable Mutation Detector
+function detectMutation(query) {
+    if (!query) return false;
+    const sql = (typeof query === 'string' ? query : (query.text || '')).trim().toUpperCase();
+
+    // 1. Mandatory Multi-Statement Ban (Prevents silent bypass)
+    if (sql.includes(';')) {
+        throw new Error('MANDATORY_AUDIT_VIOLATION: Multi-statement queries are forbidden in BBSNS for security isolation.');
+    }
+
+    // 2. Mutation Intent Detection
+    const MUTATION_KEYWORDS = ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'ALTER', 'DROP', 'CREATE'];
+    return MUTATION_KEYWORDS.some(keyword => sql.startsWith(keyword));
+}
+
+/**
+ * 🛡️ [SECURITY] Re-Entrant Context Helper
+ * Responsibility: Establishes a Postgres session context with app.user_id and app.reason.
+ * Safety: Reuses existing context if present to prevent connection leaks / overrides.
+ */
+async function runWithContext({ userId, reason }, fn) {
+    const existingStore = dbContext.getStore();
+    if (existingStore) {
+        // [Safety] Already inside a context. Execute directly.
+        return await fn();
+    }
+
+    const client = await pool.connect();
+    try {
+        // Enforce Session State
+        await client.query("SELECT set_config('app.user_id', $1, true)", [String(userId)]);
+        await client.query("SELECT set_config('app.reason', $2, true)", [reason]);
+
+        // Execute function inside AsyncLocalStorage context
+        return await dbContext.run({ auditClient: client, userId, reason }, fn);
+    } finally {
+        client.release();
+    }
+}
+
+// 🛡️ [DATABASE_PROXY] Transparent Delegation to Internal Pool or Request-Scoped Client
 const dbProxy = new Proxy({}, {
     get: (target, prop) => {
+        // Whitelisted Management Methods
         if (prop === 'init') return init;
         if (prop === 'getPool') return () => pool;
+        if (prop === 'runWithContext') return runWithContext;
         if (prop === 'end') return () => pool ? pool.end() : Promise.resolve();
         
-        // Throw if called before initialization
-        if (!pool) {
-            console.error(`❌ [DATABASE_FATAL] Resource [${String(prop)}] accessed before DB initialization.`);
-            throw new Error(`DATABASE_NOT_INITIALIZED: Attempted to access property '${String(prop)}' before boot sequence.`);
+        const context = dbContext.getStore();
+        const activeClient = context?.auditClient;
+
+        // 🛡️ [ENFORCEMENT] The Sentinel Logic
+        const interceptedMethod = (prop === 'query' || prop === 'connect' || prop === 'getClient');
+        
+        if (interceptedMethod) {
+            return async function(...args) {
+                const query = args[0];
+                const isMutation = detectMutation(query);
+
+                // 🚩 FAIL-FAST: Mutations MUST have an audit context
+                if (isMutation && !activeClient) {
+                    console.error(`[SECURITY] AUDIT BLOCKED | reason=MANDATORY_AUDIT_MISSING | query=${JSON.stringify(query)}`);
+                    throw new Error('MANDATORY_AUDIT_ERROR: Attempted to modify database without an active audit context.');
+                }
+
+                // If we have a context, use the context's client
+                if (activeClient) {
+                    return activeClient[prop](...args);
+                }
+
+                // Fallback: Bootstrap READ (e.g. SELECT) without context
+                if (!pool) throw new Error('DATABASE_NOT_INITIALIZED');
+                return pool[prop](...args);
+            };
         }
 
-        // Delegate to the actual PG Pool instance
+        // Delegate other properties (like pool events) to the raw pool
+        if (!pool) return undefined;
         const val = pool[prop];
         return typeof val === 'function' ? val.bind(pool) : val;
     }

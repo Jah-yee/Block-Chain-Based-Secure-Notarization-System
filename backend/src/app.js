@@ -57,40 +57,31 @@ app.use(correlationMiddleware);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
-// --- HARDENED CORS CONFIG (PHASE 4) ---
+// --- HARDENED CORS CONFIG (PHASE 4.1) ---
 app.use(cookieParser());
 
 const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(o => o);
 
-// Add authoritative production domain fallbacks
-if (process.env.NODE_ENV === 'production' || corsOrigins.length === 0) {
-  corsOrigins.push('https://app.bbsns.online', 'https://api.bbsns.online');
-}
-
-// Add local development origins if not in production or if explicitly requested
-if (process.env.NODE_ENV !== 'production') {
-  corsOrigins.push(
-    'http://localhost:3000', 
-    'http://localhost:5173', 
-    'http://localhost:3002',
-    'http://localhost:8080',
-    'http://localhost:8081',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:3002'
-  );
-
-  // Add Dynamic Production Origins from Environment (only in dev/test to avoid production clutter)
-  if (process.env.WEB_APP_URL) corsOrigins.push(process.env.WEB_APP_URL);
-  if (process.env.REMOTE_AUTH_URL) corsOrigins.push(process.env.REMOTE_AUTH_URL);
-  if (process.env.ADMIN_PORTAL_URL) corsOrigins.push(process.env.ADMIN_PORTAL_URL);
-}
-
+const isProductionMatcher = (origin) => {
+    if (!origin) return false;
+    // Allow any subdomain of bbsns.online
+    if (origin.endsWith('.bbsns.online') || origin === 'https://bbsns.online') return true;
+    return corsOrigins.includes(origin);
+};
 
 app.use(cors({
-	origin: corsOrigins,
-	credentials: true,
-	methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-	allowedHeaders: ['Content-Type', 'Authorization', 'X-Actor-Id']
+    origin: (origin, callback) => {
+        // Logic: Allow if (No Origin i.e. local fetch/curl) OR (Matches Production Pattern) OR (Not Production Environment)
+        if (!origin || isProductionMatcher(origin) || process.env.NODE_ENV !== 'production') {
+            callback(null, true);
+        } else {
+            console.warn(`[CORS_BLOCKED] Origin rejected: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Actor-Id', 'X-Correlation-Id']
 }));
 
 // Route Definitions

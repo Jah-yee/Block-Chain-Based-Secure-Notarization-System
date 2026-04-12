@@ -40,16 +40,62 @@ const UserService = require('../services/UserService');
 const distributedRateLimiter = require('../utils/rate-limiter');
 const simpleRateLimiter = distributedRateLimiter; // Alias for backward compatibility in this file
 
+/**
+ * 🛡️ [RESILIENCE] RPC Timeout Wrapper
+ * Prevents sequential blocking by enforcing a strict SLA on blockchain queries.
+ */
+const withTimeout = (promise, ms, label = "RPC_TIMEOUT") => {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      console.warn(`[${label}] Logic exceeded ${ms}ms limit.`);
+      reject(new Error(label));
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
+/**
+ * 🛡️ [RESILIENCE] Retry Logic with Exponential Backoff
+ */
+const executeWithRetry = async (fn, retries = 3, label = "EXECUTE") => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await withTimeout(fn(), 1500, `${label}_ATTEMPT_${i+1}`);
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      const delay = 200 * (i + 1);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+};
+
 // Zero-Trust JWT Helper
-async function signZeroTrustToken(user, walletAddress) {
+async function signZeroTrustToken(user, walletAddress, zeroTrustStatus = 'VERIFIED') {
   if (!user || !walletAddress) throw new Error("Missing user data for token signing");
   
-  try {
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || "https://data-seed-prebsc-1-s1.binance.org:8545");
-    const network = await provider.getNetwork();
-    const snapshotChainId = Number(network.chainId);
-    const snapshotBlock = await provider.getBlockNumber();
+  let snapshotBlock = 0;
+  let snapshotChainId = 0;
 
+  try {
+    const config = await ConfigService.getConfig();
+    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    
+    // Attempt resilient fetching of chain state
+    const chainState = await executeWithRetry(async () => {
+      const network = await provider.getNetwork();
+      const block = await provider.getBlockNumber();
+      return { chainId: Number(network.chainId), block: Number(block) };
+    }, 3, "JWT_CHAIN_SYNC");
+
+    snapshotChainId = chainState.chainId;
+    snapshotBlock = chainState.block;
+  } catch (err) {
+    console.warn(`[RESILIENCE_FALLBACK] Failed to fetch chain state for JWT. Defaulting to DEGRADED. Detail: ${err.message}`);
+    zeroTrustStatus = 'DEGRADED';
+  }
+
+  try {
     let numericRole = Number(user.role);
     if (isNaN(numericRole)) {
       const ROLE_MAP = { 'none': 0, 'user': 1, 'notary': 2, 'admin': 3 };
@@ -63,6 +109,7 @@ async function signZeroTrustToken(user, walletAddress) {
         role: Number(numericRole),
         snapshotBlock: Number(snapshotBlock),
         snapshotChainId: Number(snapshotChainId),
+        zeroTrustStatus, // 🛡️ [MANDATORY] embedded status
         issuedAt: Date.now()
       },
       getJWTSecret(),
@@ -147,23 +194,45 @@ router.get('/system-status', allowPublic, async (req, res) => {
     const config = await ConfigService.getConfig();
     const provider = new ethers.JsonRpcProvider(config.rpcUrl);
     
-    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)"], provider);
-    const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], provider);
+    // 🛡️ [RESILIENCE] Protected blockchain verification
+    let adminCount = 1; // Resilient default (Admin exists)
+    let activated = true; // Resilient default (System active)
+    let isChainUp = true;
 
-    const [adminCount, activated, dbUserResult] = await Promise.all([
-      registry.adminCount(),
-      genesisContract.activated(),
-      pool.query('SELECT COUNT(*) FROM users')
-    ]);
+    try {
+      const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)"], provider);
+      const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], provider);
+
+      const [chainAdminCount, chainActivated] = await Promise.all([
+        registry.adminCount().catch(() => 1n),
+        genesisContract.activated().catch(() => true)
+      ]);
+      adminCount = Number(chainAdminCount);
+      activated = !!chainActivated;
+    } catch (rpcErr) {
+      console.warn("[AUTH_WARN] RPC query failed for system-status:", rpcErr.message);
+      isChainUp = false;
+    }
+
+    // DB Check (Mandatory Authority)
+    const dbUserResult = await pool.query('SELECT COUNT(*) FROM users');
 
     res.json({ 
-      activated: !!activated, 
-      adminCount: Number(adminCount),
-      dbUserCount: parseInt(dbUserResult.rows[0].count)
+      activated, 
+      adminCount,
+      dbUserCount: parseInt(dbUserResult.rows[0].count),
+      status: isChainUp ? "ok" : "degraded",
+      health: { chain: isChainUp }
     });
   } catch (error) {
-    console.error('Status fetch error:', error);
-    res.status(503).json({ error: 'Chain connectivity issue' });
+    console.error('[AUTH_FATAL] Status resolution failed:', error);
+    // 🛡️ Fail-Safe Minimal Response to prevent App crash
+    res.status(200).json({ 
+        activated: true, 
+        status: "degraded", 
+        error: "Connectivity unstable",
+        dbUserCount: 0 
+    });
   }
 });
 
@@ -341,7 +410,7 @@ router.post('/login', allowPublic, async (req, res) => {
     const userResult = await pool.query('SELECT * FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
     let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
-    // 3. On-Chain Authority
+    // 3. On-Chain Authority & Activation Guard
     let liveRoleValue, liveBanned;
     try {
       const liveConfig = await ConfigService.getConfig();
@@ -355,6 +424,20 @@ router.post('/login', allowPublic, async (req, res) => {
       ]);
 
       if (liveBanned) return res.status(403).json({ error: 'Account is banned on-chain' });
+
+      // 🛡️ [Hardening 2.9C-A] Activation Guard for Notaries
+      if (Number(liveRoleValue) === 2) {
+        const appCheck = await pool.query(
+          "SELECT status, is_activated FROM notary_applications WHERE LOWER(wallet_address) = $1",
+          [normalizedWalletAddress]
+        );
+        if (appCheck.rows.length === 0 || appCheck.rows[0].status !== 'activated' || !appCheck.rows[0].is_activated) {
+          return res.status(403).json({ 
+            error: 'Activation required', 
+            details: appCheck.rows.length > 0 ? `Current state: ${appCheck.rows[0].status}` : 'No application found' 
+          });
+        }
+      }
 
       // Auto-Sync Admin via UserService
       if (!user && Number(liveRoleValue) === 3) {
@@ -377,6 +460,16 @@ router.post('/login', allowPublic, async (req, res) => {
     }
 
     if (!user) return res.status(404).json({ error: 'User profile not found' });
+    
+    // 🛡️ [Hardening 2.9C-A] Global Identity State Guard
+    // Only 'ACTIVE' users can proceed. Pending/Rejected/Suspended users are blocked at the perimeter.
+    if (user.identity_state !== 'ACTIVE') {
+      const errorMsg = user.identity_state === 'PENDING' ? 'Account activation required' : `Account is currently ${user.identity_state.toLowerCase()}`;
+      return res.status(403).json({ 
+        error: errorMsg,
+        state: user.identity_state 
+      });
+    }
 
     // 4. Identity Checks (Non-Admin)
     const isAdmin = Number(liveRoleValue) === 3;
@@ -422,6 +515,92 @@ router.post('/logout', allowPublic, (req, res) => {
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 });
 
+/**
+ * 🛡️ [Hardening 2.9C-A] Activation Authority
+ * Responsibility: Transitions approved application to activated status and provisions user credentials.
+ */
+router.post('/activate', allowPublic, async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Token and password are required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Validate Token & Expiry
+    const appRes = await client.query(
+      `SELECT * FROM notary_applications 
+       WHERE activation_token = $1 
+       AND activation_expires_at > NOW() 
+       AND is_activated = false`,
+      [token]
+    );
+
+    if (appRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Invalid or expired activation token' });
+    }
+
+    const app = appRes.rows[0];
+
+    // 2. Provision User (Lazy Creation)
+    const { hashPassword } = require('../utils/password');
+    const hashedPassword = await hashPassword(password);
+    
+    // Check if user already exists (Promotion case)
+    let userResult = await client.query('SELECT id FROM users WHERE LOWER(wallet_address) = $1', [app.wallet_address.toLowerCase()]);
+    let userId;
+
+    if (userResult.rows.length > 0) {
+      userId = userResult.rows[0].id;
+      // Promote existing user
+      await client.query(
+        "UPDATE users SET role = 'notary', password_hash = $1, identity_state = 'ACTIVE', updated_at = NOW() WHERE id = $2",
+        [hashedPassword, userId]
+      );
+    } else {
+      // Create new user
+      const userData = {
+        username: app.email,
+        name: app.full_name,
+        email: app.email,
+        password_hash: hashedPassword,
+        wallet_address: app.wallet_address.toLowerCase(),
+        national_id_hash: app.national_id_hash,
+        role: 'notary',
+        identity_state: 'ACTIVE',
+        is_human_verified: true
+      };
+      
+      const userRecord = await UserService.createUser(userData);
+      userId = userRecord.id;
+    }
+
+    // 3. Finalize Activation
+    await client.query(
+      `UPDATE notary_applications 
+       SET is_activated = true, 
+           status = 'activated', 
+           user_id = $1,
+           activation_token = NULL,
+           updated_at = NOW() 
+       WHERE id = $2`,
+      [userId, app.id]
+    );
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Account activated successfully. You can now log in.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[ACTIVATION_FATAL]', err);
+    res.status(500).json({ error: 'Activation failed internally' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /auth/me - Profile Source of Truth
 router.get('/me', allowPublic, async (req, res) => {
   try {
@@ -440,12 +619,13 @@ router.get('/me', allowPublic, async (req, res) => {
         [normalizedWallet]
       );
 
-      let user = result.rows.length > 0 ? userResult.rows[0] : null;
+      let user = result.rows.length > 0 ? result.rows[0] : null;
 
       if (!user && decoded.role === 3) {
         const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
         user = await UserService.createUser({
           name: 'Genesis Admin',
+          email: `${normalizedWallet}@bbsns.internal`,
           wallet_address: normalizedWallet,
           role: 'admin',
           is_human_verified: true,
@@ -457,7 +637,12 @@ router.get('/me', allowPublic, async (req, res) => {
       }
 
       if (!user) return res.json({ user: null });
-      res.json({ user });
+      res.json({ 
+        user: { 
+          ...user, 
+          zeroTrustStatus: decoded.zeroTrustStatus || 'VERIFIED' 
+        } 
+      });
     } catch (jwtErr) {
       return res.json({ user: null });
     }
@@ -593,35 +778,59 @@ router.post('/remote/exchange', allowPublic, requireSystemActivated, simpleRateL
     }
 
     const normalizedWalletAddress = wallet_address.toLowerCase();
-
-    // 3. User Presence & On-Chain Authority Check
-    const userRes = await client.query('SELECT id, wallet_address, role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
-    let user = userRes.rows.length > 0 ? userRes.rows[0] : null;
-
-    const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-    const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
+    let user = (await client.query('SELECT id, wallet_address, role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress])).rows[0];
     
-    const [roleData, isBanned] = await Promise.all([
-      registry.getUserRole(normalizedWalletAddress), 
-      registry.isBanned(normalizedWalletAddress)
-    ]);
+    let roleData = null;
+    let isBanned = false;
+    let zeroTrustStatus = 'VERIFIED';
 
-    if (isBanned) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Banned' });
+    try {
+      const config = await ConfigService.getConfig();
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
+      
+      const chainData = await executeWithRetry(async () => {
+        const [r, b] = await Promise.all([
+          registry.getUserRole(normalizedWalletAddress), 
+          registry.isBanned(normalizedWalletAddress)
+        ]);
+        return { role: Number(r), banned: !!b };
+      }, 3, "EXCHANGE_CHAIN_CHECK");
+
+      roleData = chainData.role;
+      isBanned = chainData.banned;
+
+      if (isBanned) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Banned' });
+      }
+    } catch (chainErr) {
+      console.warn(`[AUTH_WARN] RPC Unreachable during exchange. Falling back to DB authority for ${normalizedWalletAddress}. Detail: ${chainErr.message}`);
+      zeroTrustStatus = 'DEGRADED';
+      
+      // If we don't have a DB user and chain is down, we have to block as we can't even provision an admin
+      if (!user) {
+        await client.query('ROLLBACK');
+        return res.status(503).json({ error: 'Service Unavailable: Local identity missing and blockchain unreachable.' });
+      }
+      
+      // Use DB role as fallback
+      const ROLE_MAP = { 'none': 0, 'user': 1, 'notary': 2, 'admin': 3 };
+      roleData = ROLE_MAP[user.role] || (isNaN(Number(user.role)) ? 1 : Number(user.role));
     }
 
-    // Auto-Sync Admin Profile if missing
-    if (!user && Number(roleData) === 3) {
+    // Auto-Sync Admin Profile if missing (Only if VERIFIED or if we already have the user)
+    if (!user && zeroTrustStatus === 'VERIFIED' && Number(roleData) === 3) {
       const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
       user = await UserService.createUser({
         name: 'Genesis Admin',
+        email: `${normalizedWalletAddress}@bbsns.internal`,
         wallet_address: normalizedWalletAddress,
         role: 'admin',
         is_human_verified: true,
         national_id_hash: nationalIdHash,
         password_hash: 'ADMIN_WEB3_ONLY',
+        username: normalizedWalletAddress,
         identity_state: 'ACTIVE'
       });
     }
@@ -635,19 +844,93 @@ router.post('/remote/exchange', allowPublic, requireSystemActivated, simpleRateL
     // 4. [MUTATE SECOND] Consume code now that ALL validations passed
     await client.query('UPDATE remote_auth_sessions SET code_consumed = TRUE WHERE id::text = $1', [sessionId]);
 
-    const token = await signZeroTrustToken(user, normalizedWalletAddress);
+    const token = await signZeroTrustToken(user, normalizedWalletAddress, zeroTrustStatus);
 
     // 5. Persist token and COMMIT
     await client.query("UPDATE remote_auth_sessions SET token = $1 WHERE id::text = $2", [token, sessionId]);
     await client.query('COMMIT');
 
-    res.json({ token, user: { id: user.id, walletAddress: normalizedWalletAddress, role: Number(roleData) } });
+    res.json({ 
+      token, 
+      user: { id: user.id, walletAddress: normalizedWalletAddress, role: Number(roleData) },
+      zeroTrustStatus,
+      walletVerificationPending: zeroTrustStatus === 'DEGRADED'
+    });
   } catch (error) {
     if (client) await client.query('ROLLBACK');
     console.error('[REMOTE_EXCHANGE_FATAL]', error);
     res.status(500).json({ error: 'Internal server error' });
   } finally {
     if (client) client.release();
+  }
+});
+
+/**
+ * 🛡️ [SELF-HEALING] POST /auth/remote/refresh-zero-trust
+ * Responsibility: Upgrade a DEGRADED session to VERIFIED if RPC connectivity returns.
+ * Rule: Server is the SOLE authority for upgrades.
+ */
+router.post('/remote/refresh-zero-trust', allowPublic, async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7) : (req.cookies?.token);
+
+    if (!token) return res.status(401).json({ status: 'REAUTH_REQUIRED', error: 'Missing session token' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, getJWTSecret());
+    } catch (err) {
+      return res.status(401).json({ status: 'REAUTH_REQUIRED', error: 'Invalid or expired token' });
+    }
+
+    // 1. Idempotency: If already verified, no need to upgrade
+    if (decoded.zeroTrustStatus === 'VERIFIED') {
+      return res.json({ status: 'VERIFIED', message: 'Session already verified' });
+    }
+
+    const { address, id } = decoded;
+    const normalizedAddress = address.toLowerCase();
+
+    // 2. Definitive On-Chain Verification (Server Authority)
+    try {
+      const config = await ConfigService.getConfig();
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
+
+      const chainData = await executeWithRetry(async () => {
+        const [r, b] = await Promise.all([
+          registry.getUserRole(normalizedAddress), 
+          registry.isBanned(normalizedAddress)
+        ]);
+        return { role: Number(r), banned: !!b };
+      }, 3, "REFRESH_CHAIN_CHECK");
+
+      if (chainData.banned) {
+        return res.status(403).json({ status: 'BANNED', error: 'Account banned' });
+      }
+
+      // 3. Issue Fresh VERIFIED Token
+      const userResult = await pool.query('SELECT id, role, wallet_address FROM users WHERE id = $1', [id]);
+      if (userResult.rows.length === 0) return res.status(404).json({ status: 'REAUTH_REQUIRED', error: 'User not found' });
+
+      const newToken = await signZeroTrustToken(userResult.rows[0], normalizedAddress, 'VERIFIED');
+
+      console.log(`[AUTH_UPGRADE] Session upgraded to VERIFIED for ${normalizedAddress}`);
+      return res.json({ 
+        status: 'VERIFIED', 
+        token: newToken,
+        user: { id, walletAddress: normalizedAddress, role: chainData.role } 
+      });
+
+    } catch (rpcErr) {
+      // 🛡️ Fail-Safe: RPC still down? Stay DEGRADED.
+      console.warn(`[AUTH_REFRESH_RETRY] Blockchain still unreachable for ${normalizedAddress}: ${rpcErr.message}`);
+      return res.json({ status: 'DEGRADED', message: 'Blockchain still unreachable' });
+    }
+  } catch (err) {
+    console.error('[AUTH_REFRESH_FATAL]', err);
+    res.status(500).json({ status: 'ERROR', error: 'Internal server error' });
   }
 });
 

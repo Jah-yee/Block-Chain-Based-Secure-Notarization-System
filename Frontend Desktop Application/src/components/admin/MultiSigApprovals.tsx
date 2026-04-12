@@ -103,10 +103,11 @@ export function MultiSigApprovals() {
 
     // Listen for account changes
     // @ts-ignore
+    // @ts-ignore
     if (window.ethereum) {
       // @ts-ignore
       window.ethereum.on('accountsChanged', (accounts: string[]) => {
-        if (accounts.length > 0) setUserAddress(accounts[0].toLowerCase());
+        if (accounts && accounts.length > 0) setUserAddress(accounts[0].toLowerCase());
         else setUserAddress(null);
       });
     }
@@ -129,7 +130,7 @@ export function MultiSigApprovals() {
       try {
         // @ts-ignore
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        if (accounts.length > 0) setUserAddress(accounts[0].toLowerCase());
+        if (accounts && accounts.length > 0) setUserAddress(accounts[0].toLowerCase());
       } catch (err) {
         console.error("Failed to get accounts", err);
       }
@@ -140,19 +141,23 @@ export function MultiSigApprovals() {
     setLoading(true);
     try {
       const res = await api.getMultiSigTransactions();
-      setTransactions(res.transactions || []);
-      setContractAddress(res.address || "");
-      setThreshold(res.threshold || 2);
-      setTimelockDelay(res.timelockDelay || 0);
+      
+      // 🛡️ [SECURITY] Hardened object and array extraction
+      const txArray = Array.isArray(res?.transactions) ? res.transactions : [];
+      setTransactions(txArray);
+      setContractAddress(res?.address || "");
+      setThreshold(res?.threshold || 2);
+      setTimelockDelay(res?.timelockDelay || 0);
 
       // If dialog is open, update the active tx data
       if (detailsDialog.open && detailsDialog.tx) {
-        const updatedTx = res.transactions.find((t: any) => t.index === detailsDialog.tx.index);
+        const updatedTx = txArray.find((t: any) => t.index === detailsDialog.tx.index);
         if (updatedTx) setDetailsDialog(prev => ({ ...prev, tx: updatedTx }));
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("[MULTISIG_TX_LOAD_FAIL]", err);
       toast.error("Failed to load Multi-Sig transactions");
+      setTransactions([]); // 🛡️ Maintain stable state on failure
     } finally {
       setLoading(false);
     }

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
-const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require('../../middleware/actor');
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require('../middleware/actor');
 const Joi = require('joi');
 
 // router.use(loadActor) deprecated for zero-trust compliance

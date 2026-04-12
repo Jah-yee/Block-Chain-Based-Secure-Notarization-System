@@ -101,7 +101,9 @@ class StartupGuard {
     const ConfigService = require('./config.service');
     
     try {
+      // 🛡️ Resolve Authoritative Configuration (DB or Atomic Seed from AWS)
       const config = await ConfigService.getConfig();
+      
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       const network = await provider.getNetwork();
       const chainId = Number(network.chainId);
@@ -109,12 +111,13 @@ class StartupGuard {
 
       if (chainId !== expectedChainId) {
         console.error(`❌ [GUARD_FATAL] Chain ID Mismatch. Network (RPC): ${chainId}, Application (Expected): ${expectedChainId}`);
-        console.error(`👉 Solution: Correct the CHAIN_ID in .env or point to the correct RPC endpoint.`);
+        console.error(`👉 Solution: Correct the CHAIN_ID in AWS Secrets or point to the correct RPC endpoint.`);
         process.exit(1);
       }
       console.log(`   ✅ Blockchain Context Verified (Chain ID: ${chainId}).`);
     } catch (err) {
-       console.error('❌ [GUARD_FATAL] Failed to verify blockchain context:', err.message);
+       console.error('❌ [GUARD_FATAL] Failed to verify blockchain context: No configuration authority available.');
+       console.error(`👉 Reason: ${err.message}`);
        process.exit(1);
     }
   }

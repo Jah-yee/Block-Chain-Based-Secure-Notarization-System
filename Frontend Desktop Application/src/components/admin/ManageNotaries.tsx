@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, UserCheck, UserX, Eye, CheckCircle } from "lucide-react";
+import { Search, Filter, UserCheck, UserX, Eye, CheckCircle, ShieldAlert, RotateCw } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
@@ -8,6 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
 import api from "../../services/api";
+
+function unwrapResponse(res: any) {
+  if (res?.status === "ok" && Array.isArray(res.data)) {
+    return res.data;
+  }
+  console.error("CONTRACT_VIOLATION:", res);
+  throw new Error("Invalid API contract");
+}
 
 export function ManageNotaries() {
   const [applications, setApplications] = useState<any[]>([]);
@@ -22,18 +30,28 @@ export function ManageNotaries() {
     open: false,
     application: null as any | null,
   });
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // ===============================
   // LOAD DATA
   // ===============================
   const loadApplications = async () => {
     try {
-      const [applicationsData, activeNotaries] = await Promise.all([
+      const [applicationsRes, activeNotariesRes] = await Promise.all([
         api.getNotaryApplications(),
         api.getNotaries()
       ]);
 
-      const merged = [...applicationsData];
+      console.log("RAW APPLICATION RESPONSE:", applicationsRes);
+      
+      const applicationsArray = unwrapResponse(applicationsRes).map((app: any) => ({
+        ...app,
+        id: app.application_id || app.id // Normalize application_id
+      }));
+      
+      const activeNotaries = unwrapResponse(activeNotariesRes);
+
+      const merged = [...applicationsArray];
 
       activeNotaries.forEach((notary: any) => {
         const existing = merged.find(a =>
@@ -51,8 +69,12 @@ export function ManageNotaries() {
       });
 
       setApplications(merged);
+      setSyncError(null);
     } catch (err: any) {
+      console.error("[NOTARIES_LOAD_FAIL]", err);
+      setSyncError("Data sync error — invalid response format");
       toast.error(err.message || "Failed to load applications");
+      setApplications([]); 
     }
   };
 
@@ -61,11 +83,12 @@ export function ManageNotaries() {
   }, []);
 
   // ===============================
-  // FILTER LOGIC (NO PENDING)
+  // FILTER LOGIC
   // ===============================
-  const visibleStatuses = ["pending", "applied", "approved", "rejected", "kyc_verified"];
+  const visibleStatuses = ["pending", "verified", "approved", "rejected", "activated"];
 
-  const filteredApplications = applications.filter((app) => {
+  const filteredApplications = (Array.isArray(applications) ? applications : []).filter((app) => {
+    if (!app) return false;
     const status = (app.status || "").toLowerCase();
 
     if (!visibleStatuses.includes(status)) return false;
@@ -102,7 +125,11 @@ export function ManageNotaries() {
 
       await loadApplications();
     } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+      if (err.message?.includes("ALREADY_PROCESSED") || err.message?.includes("409")) {
+        toast.info("This application has already been processed.");
+      } else {
+        toast.error(err.message || "Operation failed");
+      }
     } finally {
       setConfirmDialog({ open: false, action: "", application: null });
     }
@@ -110,6 +137,16 @@ export function ManageNotaries() {
 
   const openView = (app: any) => {
     setViewDialog({ open: true, application: app });
+  };
+  
+  const handleResend = async (app: any) => {
+    try {
+      await api.resendNotaryActivation(app.application_id || app.id);
+      toast.success("Activation email resent successfully.");
+      await loadApplications();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to resend activation email.");
+    }
   };
 
   // ===============================
@@ -120,14 +157,14 @@ export function ManageNotaries() {
 
     const variants: Record<string, string> = {
       approved: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+      activated: "bg-emerald-600/10 text-emerald-600 border-emerald-600/20",
       rejected: "bg-rose-500/10 text-rose-500 border-rose-500/20",
-      applied: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-      kyc_verified: "bg-purple-500/10 text-purple-500 border-purple-500/20",
+      verified: "bg-purple-500/10 text-purple-500 border-purple-500/20",
       pending: "bg-amber-500/10 text-amber-500 border-amber-500/20",
     };
 
     return (
-      <Badge className={`${variants[status.toLowerCase()] || variants.applied} border`}>
+      <Badge className={`${variants[status.toLowerCase()] || variants.pending} border`}>
         {status}
       </Badge>
     );
@@ -141,6 +178,13 @@ export function ManageNotaries() {
           Review and approve verification requests
         </p>
       </div>
+
+      {syncError && (
+        <div className="mx-6 mt-6 p-4 bg-amber-500/10 border border-amber-500/50 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold">
+          <ShieldAlert size={18} />
+          {syncError}
+        </div>
+      )}
 
       <div className="p-6">
         {/* Filters */}
@@ -162,10 +206,11 @@ export function ManageNotaries() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="applied">Applied</SelectItem>
-              <SelectItem value="kyc_verified">KYC Verified</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="verified">Verified</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
               <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="activated">Activated</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -193,7 +238,7 @@ export function ManageNotaries() {
               ) : (
                 filteredApplications.map((app) => {
                   const status = (app.status || "").toLowerCase();
-                  const canAdminAct = ["applied", "kyc_verified"].includes(status);
+                  const canAdminAct = status === "verified";
 
                   return (
                     <TableRow key={app.id}>
@@ -236,6 +281,18 @@ export function ManageNotaries() {
                                 Reject
                               </Button>
                             </>
+                          )}
+
+                          {status === "approved" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleResend(app)}
+                              className="text-amber-500 hover:bg-amber-500/10"
+                            >
+                              <RotateCw size={14} className="mr-1" />
+                              Resend
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -328,9 +385,9 @@ export function ManageNotaries() {
               <h4 className="text-sm font-medium text-muted-foreground">Status & Verification</h4>
               <div className="flex items-center gap-3">
                 {getStatusBadge(viewDialog.application?.status)}
-                {viewDialog.application?.status?.toLowerCase() === 'kyc_verified' && (
+                {viewDialog.application?.status?.toLowerCase() === 'verified' && (
                   <div className="flex items-center gap-2 text-xs text-emerald-500 font-medium">
-                    <CheckCircle size={14} /> Biometric & ID Match Confirmed
+                    <CheckCircle size={14} /> Identity Integrity Verified by System
                   </div>
                 )}
               </div>

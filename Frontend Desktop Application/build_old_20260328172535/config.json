@@ -1,0 +1,5 @@
+{
+  "API_BASE_URL": "http://13.205.148.98:5000",
+  "RPC_URL": "https://data-seed-prebsc-1-s1.binance.org:8545",
+  "CHAIN_ID": 97
+}

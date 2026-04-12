@@ -182,15 +182,15 @@ router.get('/sync/health', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_L
     try {
         const stats = await pool.query(`
             SELECT 
-                COUNT(*) FILTER (WHERE tx_status = 'processing' AND status_updated_at < NOW() - INTERVAL '15 minutes') as stuck_identity_processing,
-                COUNT(*) FILTER (WHERE role_tx_status = 'processing' AND status_updated_at < NOW() - INTERVAL '15 minutes') as stuck_role_processing,
-                COUNT(*) FILTER (WHERE tx_status = 'permanent_failed') as perm_failed_identity,
-                COUNT(*) FILTER (WHERE role_tx_status = 'permanent_failed') as perm_failed_role,
-                COUNT(*) FILTER (WHERE tx_status = 'failed') as failed_identity,
-                COUNT(*) FILTER (WHERE role_tx_status = 'failed') as failed_role,
+                COUNT(CASE WHEN tx_status = 'processing' AND status_updated_at < NOW() - INTERVAL '15 minutes' THEN 1 END) as stuck_identity_processing,
+                COUNT(CASE WHEN role_tx_status = 'processing' AND status_updated_at < NOW() - INTERVAL '15 minutes' THEN 1 END) as stuck_role_processing,
+                COUNT(CASE WHEN tx_status = 'permanent_failed' THEN 1 END) as perm_failed_identity,
+                COUNT(CASE WHEN role_tx_status = 'permanent_failed' THEN 1 END) as perm_failed_role,
+                COUNT(CASE WHEN tx_status = 'failed' THEN 1 END) as failed_identity,
+                COUNT(CASE WHEN role_tx_status = 'failed' THEN 1 END) as failed_role,
                 AVG(retry_count) as avg_identity_retries,
                 AVG(role_retry_count) as avg_role_retries,
-                EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) FILTER (WHERE tx_status != 'confirmed' OR role_tx_status != 'confirmed') as oldest_pending_task_age
+                COALESCE(MAX(CASE WHEN tx_status != 'confirmed' OR role_tx_status != 'confirmed' THEN EXTRACT(EPOCH FROM (NOW() - created_at)) END), 0) as oldest_pending_task_age
             FROM users
         `);
 

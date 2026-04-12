@@ -78,6 +78,7 @@ const StepCreateAccount = ({
   showConfirmPassword,
   onToggleShowPassword,
   onToggleShowConfirmPassword,
+  errors,
 }: {
   formData: FormDataState
   handleInputChange: (field: keyof FormDataState, value: string) => void
@@ -85,6 +86,7 @@ const StepCreateAccount = ({
   showConfirmPassword: boolean
   onToggleShowPassword: () => void
   onToggleShowConfirmPassword: () => void
+  errors: any
 }) => (
   <div className="grid gap-4">
     <div className="space-y-2">
@@ -94,8 +96,10 @@ const StepCreateAccount = ({
         placeholder="Jane Doe"
         value={formData.fullName}
         onChange={(e) => handleInputChange("fullName", e.target.value)}
+        className={errors.fullName ? "border-red-500/50 ring-red-500/20" : ""}
         required
       />
+      {errors.fullName && <p className="text-[11px] text-red-500 font-medium">Use 2-4 words, letters only (First Middle Last)</p>}
     </div>
 
     <div className="space-y-2">
@@ -106,8 +110,10 @@ const StepCreateAccount = ({
         placeholder="jane@example.com"
         value={formData.email}
         onChange={(e) => handleInputChange("email", e.target.value)}
+        className={errors.email ? "border-red-500/50 ring-red-500/20" : ""}
         required
       />
+      {errors.email && <p className="text-[11px] text-red-500 font-medium">Enter a valid professional email address</p>}
     </div>
 
     <div className="space-y-2">
@@ -118,6 +124,7 @@ const StepCreateAccount = ({
           type={showPassword ? "text" : "password"}
           value={formData.password}
           onChange={(e) => handleInputChange("password", e.target.value)}
+          className={errors.password ? "border-red-500/50 ring-red-500/20" : ""}
           required
         />
         <Button
@@ -131,7 +138,7 @@ const StepCreateAccount = ({
           {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">Minimum 8 characters required</p>
+      <p className="text-xs text-muted-foreground font-medium">Minimum 8 characters required</p>
     </div>
 
     <div className="space-y-2">
@@ -142,6 +149,7 @@ const StepCreateAccount = ({
           type={showConfirmPassword ? "text" : "password"}
           value={formData.confirmPassword}
           onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+          className={errors.confirmPassword ? "border-red-500/50 ring-red-500/20" : ""}
           required
         />
         <Button
@@ -155,7 +163,7 @@ const StepCreateAccount = ({
           {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">Must match your password</p>
+      {errors.confirmPassword && <p className="text-[11px] text-red-500 font-medium">Passwords do not match</p>}
     </div>
   </div>
 )
@@ -166,12 +174,14 @@ const StepNationalId = ({
   handleFileDrop,
   handleFileSelect,
   fileInputRef,
+  errors,
 }: {
   formData: FormDataState
   handleInputChange: (field: keyof FormDataState, value: string | File | null) => void
   handleFileDrop: (e: React.DragEvent<HTMLDivElement>) => void
   handleFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   fileInputRef: React.RefObject<HTMLInputElement>
+  errors: any
 }) => (
   <div className="grid gap-4">
     <div className="space-y-2">
@@ -181,8 +191,10 @@ const StepNationalId = ({
         placeholder="Enter your National ID"
         value={formData.nationalIdText}
         onChange={(e) => handleInputChange("nationalIdText", e.target.value)}
+        className={errors.nationalId ? "border-red-500/50 ring-red-500/20 text-red-500" : ""}
         required
       />
+      {errors.nationalId && <p className="text-[11px] text-red-500 font-medium">Required: 6-20 alphanumeric characters</p>}
     </div>
 
     <div className="space-y-2">
@@ -327,12 +339,22 @@ export function SignUpForm() {
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData)
+        const now = Date.now()
+        
+        // 🛡️ [Hardening] Check for 24h Expiry
+        if (now - (parsed.timestamp || 0) > 24 * 60 * 60 * 1000) {
+          localStorage.removeItem('signupFormData')
+          localStorage.removeItem('signupFormStep')
+          console.log("[GUARD] Registration draft expired.")
+          return
+        }
+
         setFormData(prev => ({
           ...prev,
           fullName: parsed.fullName || "",
           email: parsed.email || "",
-          password: parsed.password || "",
-          confirmPassword: parsed.confirmPassword || "",
+          password: "", // 🛡️ CRITICAL: NEVER RESTORE PASSWORD FROM STORAGE
+          confirmPassword: "",
           nationalIdText: parsed.nationalIdText || "",
           livenessPassed: parsed.livenessPassed || false,
           faceDescriptor: parsed.faceDescriptor || null,
@@ -356,24 +378,56 @@ export function SignUpForm() {
     if (savedStep) {
       setStep(parseInt(savedStep) as Step)
     }
+
+    // 🛡️ [Hardening] Guide if draft is invalid
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        const nameWords = (parsed.fullName || "").trim().split(/\s+/).length;
+        const isDraftValid = /^[A-Za-z]+([ .'-][A-Za-z]+)*$/.test(parsed.fullName || "") && 
+                           nameWords >= 2 && nameWords <= 4 &&
+                           /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(parsed.email || "");
+        
+        if (!isDraftValid && parsed.fullName) {
+          toast({ title: "Draft Found", description: "Some fields in your saved draft need correction for domain validity.", variant: "default" });
+        }
+      } catch (e) {}
+    }
   }, [toast])
 
-  // Save form data to localStorage whenever it changes
-  useEffect(() => {
-    const dataToSave = {
-      fullName: formData.fullName,
-      email: formData.email,
-      password: formData.password,
-      confirmPassword: formData.confirmPassword,
-      nationalIdText: formData.nationalIdText,
-      livenessPassed: formData.livenessPassed,
-      faceDescriptor: formData.faceDescriptor,
-      walletConnected: formData.walletConnected,
-      // Note: File cannot be saved to localStorage
-    }
+  const REGEX = {
+    NAME: /^[A-Za-z]+([ .'-][A-Za-z]+)*$/,
+    EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
+    ALPHA_NUMERIC: /^[A-Za-z0-9]{6,20}$/
+  };
 
-    localStorage.setItem('signupFormData', JSON.stringify(dataToSave))
-    localStorage.setItem('signupFormStep', step.toString())
+  const validationErrors = {
+    fullName: formData.fullName && (!REGEX.NAME.test(formData.fullName) || formData.fullName.trim().split(/\s+/).length > 4 || formData.fullName.trim().split(/\s+/).length < 2),
+    email: formData.email && !REGEX.EMAIL.test(formData.email),
+    password: formData.password && formData.password.length < 8,
+    confirmPassword: formData.confirmPassword && formData.confirmPassword !== formData.password,
+    nationalId: formData.nationalIdText && (!REGEX.ALPHA_NUMERIC.test(formData.nationalIdText) || formData.nationalIdText.length < 6)
+  };
+
+  // 🛡️ [Hardening] Debounced Save (Security: No Passwords)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const dataToSave = {
+        fullName: formData.fullName,
+        email: formData.email,
+        nationalIdText: formData.nationalIdText,
+        livenessPassed: formData.livenessPassed,
+        faceDescriptor: formData.faceDescriptor,
+        walletConnected: formData.walletConnected,
+        timestamp: Date.now()
+        // 🛡️ CRITICAL: PASSWORDS EXCLUDED FROM PERSISTENCE
+      }
+
+      localStorage.setItem('signupFormData', JSON.stringify(dataToSave))
+      localStorage.setItem('signupFormStep', step.toString())
+    }, 500) // 500ms Debounce
+
+    return () => clearTimeout(timer)
   }, [formData, step])
 
 
@@ -488,6 +542,9 @@ export function SignUpForm() {
               variant: "destructive",
             });
             setIsLoading(false);
+            localStorage.removeItem('signupFormData')
+            localStorage.removeItem('signupFormStep')
+            router.push("/documents")
             return;
           }
         }
@@ -562,11 +619,14 @@ export function SignUpForm() {
 
     if (typeof value === 'string') {
       if (field === "fullName") {
-        // Only allow letters and spaces
-        filteredValue = value.replace(/[^a-zA-Z\s]/g, "");
+        // Enforce ^[A-Za-z\s.'-]{2,50}$
+        filteredValue = value.replace(/[^A-Za-z\s.'-]/g, "").slice(0, 50);
       } else if (field === "nationalIdText") {
-        // Only allow alphanumeric
-        filteredValue = value.replace(/[^a-zA-Z0-9]/g, "");
+        // Enforce alphanumeric 6-20
+        filteredValue = value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 20);
+      } else if (field === "email") {
+        // Normalize: lowercase, no spaces
+        filteredValue = value.toLowerCase().replace(/\s/g, "");
       }
     }
 
@@ -578,26 +638,25 @@ export function SignUpForm() {
   const stepValid = useMemo(() => {
     switch (step) {
       case 0: {
+        const nameWords = formData.fullName.trim().split(/\s+/).length;
         return (
-          formData.fullName.trim().length >= 2 &&
-          isValidEmail(formData.email) &&
+          REGEX.NAME.test(formData.fullName) &&
+          nameWords >= 2 && nameWords <= 4 &&
+          REGEX.EMAIL.test(formData.email) &&
           formData.password.length >= 8 &&
           formData.password === formData.confirmPassword
         )
       }
-      case 1: {
-        return !!formData.nationalIdText.trim() && !!formData.nationalIdFile && isAcceptedFile(formData.nationalIdFile)
-      }
-      case 2: {
-        return formData.livenessPassed
-      }
-      case 3: {
+      case 1:
+        return formData.nationalIdText.length >= 6 && REGEX.ALPHA_NUMERIC.test(formData.nationalIdText) && !!formData.nationalIdFile
+      case 2:
+        return formData.livenessPassed && !!formData.faceDescriptor
+      case 3:
         return formData.walletConnected
-      }
       default:
         return false
     }
-  }, [step, formData])
+  }, [step, formData, REGEX])
 
   const showStepError = () => {
     if (step === 0) {
@@ -860,6 +919,7 @@ export function SignUpForm() {
           showConfirmPassword={showConfirmPassword}
           onToggleShowPassword={() => setShowPassword((s) => !s)}
           onToggleShowConfirmPassword={() => setShowConfirmPassword((s) => !s)}
+          errors={validationErrors}
         />
       )}
       {step === 1 && (
@@ -869,6 +929,7 @@ export function SignUpForm() {
           handleFileDrop={handleFileDrop}
           handleFileSelect={handleFileSelect}
           fileInputRef={fileInputRef}
+          errors={validationErrors}
         />
       )}
       {step === 2 && (
@@ -890,7 +951,7 @@ export function SignUpForm() {
       )}
 
       <div className="mt-4 flex items-center justify-between gap-3">
-        <Button type="button" variant="ghost" onClick={handleBack} disabled={step === 0} className="gap-2">
+        <Button type="button" variant="ghost" onClick={handleBack} disabled={step === 0 || isLoading} className="gap-2">
           <ArrowLeft className="h-4 w-4" />
           Back
         </Button>
@@ -899,15 +960,20 @@ export function SignUpForm() {
           <Button
             type="button"
             onClick={handleNext}
-            className="gap-2"
-            disabled={!stepValid}
+            className="gap-2 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+            disabled={!stepValid || isLoading}
           >
             Next
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button type="button" onClick={handleFinalSubmission} className="gap-2" disabled={isLoading}>
-            Create Account
+          <Button 
+            type="button" 
+            onClick={handleFinalSubmission} 
+            className="gap-2 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed" 
+            disabled={!stepValid || isLoading}
+          >
+            {isLoading ? "Creating Account..." : "Finalize Registration"}
             <CheckCircle2 className="h-4 w-4" />
           </Button>
         )}

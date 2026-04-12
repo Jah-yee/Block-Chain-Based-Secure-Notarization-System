@@ -107,7 +107,9 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       toast.info("Browser opened. Please sign the challenge.");
     } catch (err: any) {
       console.error(err);
-      if (err.message.includes("403") || err.message.toLowerCase().includes("not activated")) {
+      if (err.message.includes("403") || err.message.toLowerCase().includes("activation required")) {
+        setError("ACCOUNT_NOT_ACTIVATED");
+      } else if (err.message.toLowerCase().includes("not activated")) {
         setError("SYSTEM_NOT_ACTIVATED");
       } else {
         setError(err.message || "Failed to start secure login.");
@@ -153,13 +155,23 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 mb-6">
                <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
                  <AlertCircle className="h-4 w-4" />
-                 <span>System Activation Required</span>
+                 <span>Protocol Activation Required</span>
                </div>
-               <p className="text-[10px] text-amber-400/80 leading-relaxed">
-                 The BBSNS protocol has not been activated on-chain yet. Please contact your Genesis Admin or use the initialization module to activate the network before trying to log in as a Notary.
+               <p className="text-[10px] text-amber-500/80 leading-relaxed">
+                 The BBSNS protocol has not been activated on-chain yet. Please contact your Genesis Admin to activate the network.
                </p>
-               <Button variant="outline" size="sm" onClick={() => setStep(1)} className="w-full border-amber-500/30 text-amber-500 hover:bg-amber-500/10 text-xs">
-                  Review Credentials
+            </div>
+          ) : error === "ACCOUNT_NOT_ACTIVATED" ? (
+            <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl space-y-3 mb-6">
+               <div className="flex items-center gap-2 text-blue-500 text-sm font-bold">
+                 <AlertCircle className="h-4 w-4" />
+                 <span>Account Activation Required</span>
+               </div>
+               <p className="text-[10px] text-blue-400/80 leading-relaxed">
+                 Your application has been approved, but your account is not yet activated. Please check your email for the activation link to set your secure password.
+               </p>
+               <Button variant="outline" size="sm" onClick={() => setStep(1)} className="w-full border-blue-500/30 text-blue-500 hover:bg-blue-500/10 text-xs">
+                  Back to Login
                </Button>
             </div>
           ) : error && (
