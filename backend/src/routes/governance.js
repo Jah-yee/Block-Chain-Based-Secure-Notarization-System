@@ -5,6 +5,7 @@ const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middle
 const { ethers } = require("ethers");
 const path = require("path");
 const ConfigService = require("../services/config.service");
+const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
 
 // UUID validation helper - prevents Postgres cast errors on invalid session IDs
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,7 +49,7 @@ router.get("/alerts/count", allowPublic, async (req, res) => {
 });
 
 // POST /api/governance/proposals (Admin only)
-router.post("/proposals", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('GOV_PROPOSAL_CREATE'), withMutation(), async (req, res) => {
     const { title, description, type, target_id, target_notaries, expires_in_days } = req.body;
 
     if (!title || !type) {
@@ -71,7 +72,7 @@ router.post("/proposals", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LE
 });
 
 // POST /api/governance/proposals/:id/vote (Admin/Notary depending on type - keeping Admin for now but checking threshold)
-router.post("/proposals/:id/vote", requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('GOV_VOTE_SUBMIT'), withMutation(), async (req, res) => {
     const { decision, signature } = req.body;
     const proposalId = req.params.id;
 
@@ -278,7 +279,7 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES
 });
 
 // POST /api/governance/proposals/:id/submit-on-chain
-router.post("/proposals/:id/submit-on-chain", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
     const proposalId = req.params.id;
     const { signature } = req.body;
 
@@ -334,7 +335,7 @@ router.post("/proposals/:id/submit-on-chain", requirePrivilege({ minRole: ROLES.
 // ================= REMOTE GOVERNANCE VOTING ==================
 
 // POST /api/governance/remote/vote/session - Initialize remote voting session
-router.post('/remote/vote/session', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), withAction('GOV_REMOTE_INIT'), withMutation(), async (req, res) => {
     try {
         const { proposalId, decision } = req.body;
         if (!proposalId || !decision) {
@@ -391,7 +392,7 @@ router.get('/remote/vote/status/:sessionId', allowPublic, async (req, res) => {
 });
 
 // POST /api/governance/remote/vote/authorize - Submit signature for remote vote
-router.post('/remote/vote/authorize', allowPublic, async (req, res) => {
+router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
     try {
         const { sessionId, walletAddress, signature } = req.body;
 

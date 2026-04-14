@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
-const { requirePrivilege, ROLES, RISK_LEVELS } = require('../middleware/actor');
+const UX_CODES = require('../constants/ux-codes');
+const { requirePrivilege, ROLES, RISK_LEVELS, withGuestContext } = require('../middleware/actor');
+const { withDomain, withAction, withMutation } = require('../middleware/policy');
 const { uploadLimiter } = require('../middleware/rate-limit');
 const { requireSystemActivated } = require('../middleware/activation');
 const { documentCreateSchema, documentUpdateSchema } = require('../utils/validation');
@@ -26,16 +28,23 @@ const memoryUpload = multer({
 });
 
 
-// Function to sanitize document response (exclude internal fields)
-function sanitizeDocument(doc) {
-  // DERIVED STATUS LOGIC (Gated Integrity)
-  let derivedStatus = doc.submission_state; // Default to base state (pending, rejected, submitted_to_blockchain)
+function mapToDetailedDoc(doc) {
+  const now = new Date();
+  const createdAt = new Date(doc.created_at);
+  const elapsed_ms = now.getTime() - createdAt.getTime();
 
-  if (doc.chain_confirmed) {
-    derivedStatus = 'approved';
-  } else if (doc.submission_state === 'submitted_to_blockchain') {
-    derivedStatus = 'verifying'; // Show 'verifying' while waiting for on-chain confirmation
+  // Mapping Backend States to Authoritative UX Codes
+  let uxCode = UX_CODES.NOTARY_ASSIGNMENT_PENDING;
+  if (doc.submission_state === 'submitted_to_blockchain') uxCode = UX_CODES.CHAIN_TX_PENDING;
+  if (doc.chain_confirmed) uxCode = UX_CODES.CHAIN_TX_CONFIRMED;
+  if (doc.submission_state === 'rejected') uxCode = UX_CODES.NOTARY_REJECTED;
+
+  // Time-Aware perception shift: If stuck in pending for > 2 mins, flag as delayed
+  if (doc.submission_state === 'pending' && elapsed_ms > 120000) {
+    uxCode = UX_CODES.CHAIN_SYNC_DELAYED;
   }
+
+  const derivedStatus = doc.submission_state;
 
   return {
     id: doc.id,
@@ -43,11 +52,13 @@ function sanitizeDocument(doc) {
     owner_wallet: doc.owner_wallet || null,
     filename: doc.filename,
     file_hash: doc.file_hash,
-    // Dual-Field Support: Use storage_key exclusively (per latest schema)
     storage_key: doc.storage_key || null,
     storage_state: doc.storage_state || 'STORED',
     type: (doc.storage_key || '').split('.').pop() || null,
     status: derivedStatus,
+    state: doc.submission_state, // Raw backend state
+    code: uxCode, // Transformed UX Contract code
+    elapsed_ms, // Time-Aware metric
     submission_state: doc.submission_state,
     assignment_state: doc.assignment_state || 'pending',
     last_assignment_error: doc.last_assignment_error || null,
@@ -76,9 +87,7 @@ function uuidToBytes32(uuid) {
 }
 
 // ─── POST /api/documents/initiate ─────────────────────────────────────────
-// STEP 1: Receive file, hash it, create upload intent, return payment params.
-// Document is NOT created here — only after on-chain burn is verified.
-router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
+router.post('/initiate', withDomain('DOCS'), requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
   try {
     const actor = req.actor;
     if (!actor)    return res.status(401).json({ error: 'Actor header required' });
@@ -175,9 +184,7 @@ router.post('/initiate', requireUnpaused, requireSystemActivated, requirePrivile
 });
 
 // ─── POST /api/documents/confirm ──────────────────────────────────────────
-// STEP 2: User submits txHash after calling NTKR.burnForUpload() in their wallet.
-// Backend performs 8 strict on-chain verification guards, then creates document.
-router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.post('/confirm', withDomain('DOCS'), requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_CONFIRM'), withMutation(), async (req, res) => {
   const { intent_id, tx_hash } = req.body;
   if (!intent_id || !tx_hash) {
     return res.status(400).json({ error: 'intent_id and tx_hash are required' });
@@ -188,6 +195,7 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
 
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const actor = req.actor;
 
     // 🛡️ Guard 1: Lock intent and verify ownership
@@ -347,19 +355,33 @@ router.post('/confirm', requireUnpaused, requireSystemActivated, requirePrivileg
 
 // ─── GET /api/documents/intent/:id ────────────────────────────────────────
 // Frontend polls this while waiting for user to complete their wallet TX.
-router.get('/intent/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_INTENT_READ'), async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, status, file_hash, amount, amount_wei, expires_at, payment_tx_hash, filepath, storage_key
+      `SELECT id, status, file_hash, amount, amount_wei, expires_at, created_at, payment_tx_hash, filepath, storage_key
        FROM upload_intents WHERE id=$1 AND user_id=$2`,
       [req.params.id, req.actor.id]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Intent not found' });
-    const i = r.rows[0];
-    const expired = i.status === 'awaiting_payment' && new Date(i.expires_at) < new Date();
+    const expired = i.status === 'AWAITING_PAYMENT' && new Date(i.expires_at) < new Date();
+    
+    // Time-Aware perception
+    const now = new Date();
+    const createdAt = new Date(i.created_at || now); // fallback
+    const elapsed_ms = now.getTime() - createdAt.getTime();
+
+    // Map intent internal status to UX codes
+    let uxCode = UX_CODES.INTENT_CREATED;
+    if (i.status === 'AWAITING_PAYMENT') uxCode = UX_CODES.INTENT_PAYMENT_PENDING;
+    if (i.status === 'PAYMENT_VERIFIED') uxCode = UX_CODES.INTENT_PAYMENT_VERIFIED;
+    if (i.status === 'DOC_CREATED' || i.status === 'COMPLETED') uxCode = UX_CODES.INTENT_DOC_SYNC_PENDING;
+
     res.json({
       intent_id:       i.id,
-      status:          expired ? 'expired' : i.status,
+      status:          expired ? 'EXPIRED' : i.status,
+      state:           i.status,
+      code:            uxCode,
+      elapsed_ms,
       file_hash:       i.file_hash,
       amount:          i.amount,
       amount_wei:      i.amount_wei,
@@ -372,7 +394,7 @@ router.get('/intent/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LE
 
 const maintenanceService = require('../services/maintenance.service');
 
-router.get('/', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_LIST'), async (req, res) => {
   console.error('[DEBUG_DOCS] Hit GET /documents');
   try {
     if (!req.actor) return res.status(401).json({ error: 'Actor header required' });
@@ -423,7 +445,7 @@ router.get('/', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }
 
 // GET /api/documents/:id/signature-payload
 // Provides the EIP-712 payload for a notary to sign
-router.get('/:id/signature-payload', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), withAction('DOC_SIGNATURE_PAYLOAD'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     const { status } = req.query; // 'approved' or 'rejected'
@@ -524,7 +546,7 @@ router.get('/:id/signature-payload', requirePrivilege({ minRole: ROLES.NOTARY, r
   }
 });
 
-router.get('/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_READ'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     let query;
@@ -577,7 +599,7 @@ router.get('/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LO
 });
 
 // Download Document File
-router.get('/:id/file', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_DOWNLOAD'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     let query;
@@ -649,18 +671,15 @@ router.get('/:id/file', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVE
   }
 });
 
-const { sendApprovalTx } = require('../utils/blockchain');
+// ─── ARBORIZATION: Split Bimodal PATCH into /update and /approve ─────────
 
-// Unified Update Route (Owner metadata OR Notary Action)
-router.patch('/:id', requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
-  // SECURITY: For high-risk notary actions, we must escalate to live-check
-  if (req.body.signature) {
-    const escalation = requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH });
-    return escalation(req, res, async () => {
-      // Recalculate actor if needed or just proceed
-      return handleDocumentPatch(req, res);
-    });
-  }
+// Method A: Metadata Update (OWNER)
+router.patch('/:id/update', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPDATE'), withMutation(), async (req, res) => {
+  return handleDocumentPatch(req, res);
+});
+
+// Method B: Notary Approval (NOTARY)
+router.post('/:id/approve', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('DOC_APPROVE'), withMutation(), async (req, res) => {
   return handleDocumentPatch(req, res);
 });
 
@@ -987,7 +1006,7 @@ router.put('/:id', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.H
   }
 });
 
-router.delete('/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.delete('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_DELETE'), withMutation(), async (req, res) => {
   try {
     const { id } = req.params;
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid document ID format' });

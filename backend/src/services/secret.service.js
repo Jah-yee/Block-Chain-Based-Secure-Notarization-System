@@ -26,6 +26,10 @@ class SecretService {
     
     const isProduction = process.env.NODE_ENV === "production" || process.env.CHAIN_ID === "97";
     
+    console.log(`   - 🛡️ [SECRET_AUDIT] isProduction: ${isProduction}`);
+    console.log(`   - 🛡️ [SECRET_AUDIT] Current NODE_ENV: [${process.env.NODE_ENV}]`);
+    console.log(`   - 🛡️ [SECRET_AUDIT] Current CHAIN_ID: [${process.env.CHAIN_ID}]`);
+
     if (!isProduction) {
       console.log("   - 🛡️ SecretService: Local Node mode detected. Skipping AWS vault fetch.");
       this.isLoaded = true;
@@ -43,6 +47,7 @@ class SecretService {
 
       if (response.SecretString) {
         const secrets = JSON.parse(response.SecretString);
+        console.log(`   - 🛡️ [SECRET_AUDIT] Vault keys received: [${Object.keys(secrets).join(', ')}]`);
         
         // 🛡️ [INJECTION] Overwrite process.env with vaulted secrets
         Object.keys(secrets).forEach(key => {

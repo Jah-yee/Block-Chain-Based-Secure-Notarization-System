@@ -3,6 +3,8 @@
 const pool = require('../db/index');
 const lockService = require('./lock.service');
 const reputationService = require('./reputation.service');
+const { runWithSystemContext } = require('../middleware/actor');
+const WorkerRegistry = require('./worker-registry.service');
 
 /**
  * Maintenance Service (Survival V3 - Hardened Reconciliation)
@@ -65,8 +67,9 @@ class MaintenanceService {
 
             console.log(`[MAINTENANCE] Found ${r.rows.length} orphans. Executing reconciliation pass...`);
 
-            // 🛡️ [INTEGRITY] Establish System Context for mutations
-            await pool.runWithContext({ userId: 0, reason: 'SYSTEM_RECONCILIATION' }, async () => {
+            // 🛡️ [PHASE 6.2] Establish System Audit Context for mutations
+            await runWithSystemContext('RECONCILIATION_WORKER', 'Healing orphaned documents', async () => {
+                WorkerRegistry.heartbeat('reconciliation', 'OK');
                 for (const doc of r.rows) {
                     try {
                         // Update to 'processing' to prevent race conditions during async execution

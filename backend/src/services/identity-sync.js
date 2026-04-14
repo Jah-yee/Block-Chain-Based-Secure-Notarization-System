@@ -11,7 +11,13 @@ async function triggerOnChainRegistration(user) {
   const { provider } = await connectBNB();
   const userId = user.id;
 
-  try {
+  return await pool.runWithContext({
+    userId: 0, 
+    contextType: 'SYSTEM',
+    reason: `IDENTITY_SYNC: Reconciling identity for user ${userId}`,
+    service: 'IDENTITY_SYNC_WORKER'
+  }, async (client) => {
+    try {
     // --- PATH 1: TX_EXISTS (Recovery Mode) ---
     if (user.tx_hash) {
       console.log(`[IDENTITY_SYNC] 🔍 Tracking existing TX: ${user.tx_hash}`);
@@ -20,7 +26,7 @@ async function triggerOnChainRegistration(user) {
       if (receipt) {
         if (receipt.status === 1) {
           console.log(`[IDENTITY_SYNC] ✅ TX confirmed. Settling.`);
-          await pool.query(
+          await client.query(
             "UPDATE users SET tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
             [userId]
           );
@@ -43,7 +49,7 @@ async function triggerOnChainRegistration(user) {
           statusBefore: 'processing', statusAfter: 'processing', txHash: user.tx_hash
         });
         // Release back to queue by resetting tx_status to 'retrying'
-        await pool.query("UPDATE users SET tx_status = 'retrying', status_updated_at = NOW() WHERE id = $1", [userId]);
+        await client.query("UPDATE users SET tx_status = 'retrying', status_updated_at = NOW() WHERE id = $1", [userId]);
       }
       return;
     }
@@ -53,7 +59,7 @@ async function triggerOnChainRegistration(user) {
     const liveRole = await contract.getUserRole(user.wallet_address);
     if (Number(liveRole) > 0) {
       console.log(`[IDENTITY_SYNC] ✅ Self-settling.`);
-      await pool.query(
+      await client.query(
         "UPDATE users SET tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
         [userId]
       );
@@ -69,7 +75,7 @@ async function triggerOnChainRegistration(user) {
     const result = await registerNotaryOnChain(user.wallet_address);
     
     if (result && result.txHash) {
-      await pool.query(
+      await client.query(
         "UPDATE users SET tx_hash = $1, tx_status = 'initiated', updated_at = NOW(), status_updated_at = NOW() WHERE id = $2",
         [result.txHash, userId]
       );
@@ -82,15 +88,18 @@ async function triggerOnChainRegistration(user) {
       throw new Error("On-chain registration failed to return hash");
     }
 
-  } catch (err) {
-    await handleIdentitySyncFailure(user, err.message);
-  }
+    } catch (err) {
+      await handleIdentitySyncFailure(user, err.message, client);
+    }
+  });
 }
 
-async function handleIdentitySyncFailure(user, errorMessage) {
+async function handleIdentitySyncFailure(user, errorMessage, externalClient = null) {
   const nextRetryCount = user.retry_count + 1;
   const isHardFailure = nextRetryCount >= 5;
   const newStatus = isHardFailure ? 'permanent_failed' : 'failed';
+
+  const client = externalClient || pool;
 
   await SyncLogger.logEvent({
     userId: user.id, syncType: 'identity', 
@@ -98,7 +107,7 @@ async function handleIdentitySyncFailure(user, errorMessage) {
     statusBefore: 'processing', statusAfter: newStatus, error: errorMessage, retryCount: nextRetryCount
   });
   
-  await pool.query(
+  await client.query(
     "UPDATE users SET tx_status = $1, last_error = $2, retry_count = $3, updated_at = NOW(), status_updated_at = NOW() WHERE id = $4",
     [newStatus, errorMessage, nextRetryCount, user.id]
   );

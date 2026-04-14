@@ -57,7 +57,27 @@ const uploadLimiter = rateLimit({
   }
 });
 
+/**
+ * 🛡️ AUTH HANDSHAKE LIMITER (Fast Lane)
+ * 100 requests per 5 minutes per IP.
+ * Optimized for the Signature/Nonce/Register chain.
+ */
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIP(req),
+  handler: (req, res) => {
+    res.status(429).json({
+      error: "Authentication frequency limit reached. Please wait 5 minutes.",
+      code: "AUTH_RATE_LIMIT"
+    });
+  }
+});
+
 module.exports = {
   globalLimiter,
-  uploadLimiter
+  uploadLimiter,
+  authLimiter
 };

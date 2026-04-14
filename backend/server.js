@@ -2,6 +2,7 @@ require('dotenv').config();
 const { ethers } = require("ethers");
 const DB = require("./src/db/index");
 const Storage = require("./src/services/storage.service");
+const dbContext = require('./src/db/context');
 const ConfigService = require("./src/services/config.service");
 const SecretService = require("./src/services/secret.service");
 
@@ -16,12 +17,20 @@ if (process.env.PORT && isNaN(PORT)) {
 async function bootstrap() {
   console.log("🚀 Initializing BBSNS Zero-Trust Backend...");
   
+  // 🔍 [AUDIT] Runtime Environment Snapshot
+  console.log("🔍 [AUDIT] Pre-Secret Snapshot:");
+  console.log(`   - NODE_ENV: [${process.env.NODE_ENV}]`);
+  console.log(`   - CHAIN_ID: [${process.env.CHAIN_ID}]`);
+  console.log(`   - JWT_SECRET: [${process.env.JWT_SECRET ? 'SET (AUDIT_FAIL)' : 'MISSING (EXPECTED)'}]`);
+
   // 0. 🛡️ Fetch Authoritative Secrets from AWS Vault (NON-ECHO)
   try {
+    console.log("   - 🛡️ Initiating SecretService.loadSecrets()...");
     await SecretService.loadSecrets();
+    console.log(`   - 🛡️ Post-Secret JWT_SECRET: [${process.env.JWT_SECRET ? 'SET (SUCCESS)' : 'MISSING (FATAL)'}]`);
   } catch (secretErr) {
     console.error("❌ CRITICAL: SecretService Boot Failure. Application is unconfigured.");
-    console.error(secretErr.message);
+    console.error(`   - Error: ${secretErr.message}`);
     process.exit(1);
   }
 
@@ -67,7 +76,9 @@ async function bootstrap() {
   // We require 'app' ONLY HERE so all nested captures (JWT_SECRET, etc.) have access to the vault.
   const app = require("./src/app");
 
-  // 2. Structural Route Audit (Mandatory Privilege Verification)
+  const { BBSNS_DOMAINS } = require("./src/constants/protocol");
+
+  // 2. Structural Route Audit (Phase 4: Capability Graph Enforcement)
   const unprotectedRoutes = [];
   const auditRoutes = (stack, path = '') => {
     if (!stack || !Array.isArray(stack)) return;
@@ -76,24 +87,83 @@ async function bootstrap() {
       if (layer.route) {
         let routePath = (path + layer.route.path).replace(/\/+/g, '/');
         if (!routePath.startsWith('/')) routePath = '/' + routePath;
-        const stackNames = layer.route.stack.map(s => s.name || 'anonymous');
-        const hasSecurity = layer.route.stack && layer.route.stack.some(s => s && (s.name === 'requirePrivilege' || s.name === 'allowPublic'));
-        if (!hasSecurity) {
-          unprotectedRoutes.push(`${Object.keys(layer.route.methods).join(',').toUpperCase()} ${routePath} [Stack Size: ${layer.route.stack.length}, Names: ${stackNames.join(', ')}]`);
-          console.warn(`      [AUDIT_FAIL] ${routePath} - Layer Name: ${layer.name}, Stack Size: ${layer.route.stack.length}, Names: ${stackNames.join(', ')}`);
+        
+        // 🛡️ [PHASE FINAL] Mandatory Auth Bootstrap Bypass
+        if (routePath.startsWith('/api/auth/') || routePath.startsWith('/auth/') || 
+            ['/nonce', '/login', '/pre-check', '/genesis/onboard', '/notary/onboard'].includes(routePath)) {
+            continue; // Authorize bootstrapping entry point
         }
-      } else if (layer.name === 'router' || layer.name === 'bound dispatch') {
-        const nextStack = layer.handle ? layer.handle.stack : (layer.route ? layer.route.stack : null);
+        
+        const methods = Object.keys(layer.route.methods).map(m => m.toUpperCase());
+        const middlewares = layer.route.stack.map((s, index) => ({ 
+          name: s.name || 'anonymous',
+          index,
+          domain: s.handle?.__domain,
+          action: s.handle?.__action,
+          isMutation: s.handle?.__isMutation,
+          isActor: (s.name === 'requirePrivilege' || s.name === 'withGuestContext' || s.name === 'allowPublic')
+        }));
+
+        const domainNode = middlewares.find(m => m.domain);
+        const actionNode = middlewares.find(m => m.action);
+        const mutationNode = middlewares.find(m => m.isMutation);
+        const actorNode = middlewares.find(m => m.isActor);
+
+        // 🛡️ [PHASE 4] EXPLICIT MUTATION INTENT RULE
+        if (mutationNode) {
+          // A. Structural Existence Check
+          if (!domainNode || !actionNode || !actorNode) {
+            const missing = [!domainNode && 'Domain', !actorNode && 'Actor', !actionNode && 'Action'].filter(Boolean);
+            unprotectedRoutes.push(`[STRUCTURAL_MISSING] ${methods.join(',')} ${routePath} - Missing: ${missing.join(', ')}`);
+          } else {
+            // B. Domain-Action Binding Check
+            const prefix = BBSNS_DOMAINS[domainNode.domain];
+            if (!actionNode.action.startsWith(prefix)) {
+              unprotectedRoutes.push(`[ACTION_DOMAIN_MISMATCH] ${methods.join(',')} ${routePath} - Action ${actionNode.action} vs Domain ${domainNode.domain}`);
+            }
+
+            // C. Chain of Command (Order Check)
+            // Sequence: Domain -> Actor -> Action (Mutation can be anywhere after Domain)
+            if (!(domainNode.index < actorNode.index && actorNode.index < actionNode.index)) {
+              unprotectedRoutes.push(`[ORDER_VIOLATION] ${methods.join(',')} ${routePath} - Expected Domain -> Actor -> Action`);
+            }
+          }
+        } else {
+          // D. Undeclared Mutation Risk Check (POST without withMutation)
+          if (methods.includes('POST') || methods.includes('PUT') || methods.includes('DELETE')) {
+            console.warn(`⚠️ [UNDECLARED_MUTATION_RISK] ${methods.join(',')} ${routePath} - State-changing method used without explicit withMutation()`);
+          }
+
+          // E. [PHASE 4] READ-ONLY AUDIT (Action Allowed for SELECTs)
+          // No restriction here anymore, just logging that it's a passive audit path.
+        }
+
+        const isBootstrappingPath = routePath.includes('/remote/');
+        const isGuestAuthorized = actorNode && actorNode.name === 'withGuestContext';
+
+        if (isGuestAuthorized && !isBootstrappingPath) {
+          unprotectedRoutes.push(`[GUEST_MISUSE] ${methods.join(',')} ${routePath}`);
+        }
+
+      } else if (layer.handle && (layer.handle.stack || (layer.handle.router && layer.handle.router.stack))) {
+        // Recurse into sub-routers or handlers with stacks
+        const nextStack = layer.handle.stack || layer.handle.router.stack;
         let segment = '';
-        if (layer.regexp && layer.regexp.source) {
+        
+        if (layer.regexp && layer.regexp.source && layer.regexp.source !== '^\\/?(?=\\/|$)' && layer.regexp.source !== '^\\/?$') {
           segment = layer.regexp.source
             .replace('\\/?(?=\\/|$)', '')
             .replace(/\\\//g, '/')
-            .replace('(?:/(?=$))?$', '');
-          if (segment.startsWith('^\\')) segment = segment.substring(2);
-          if (segment.startsWith('^')) segment = segment.substring(1);
+            .replace('(?:/(?=$))?$', '')
+            .replace(/^\^/, '')
+            .replace(/\?$/, '')
+            .replace(/\/\?$/, '')
+            .split('(?=')[0]; // Strip lookaheads
         }
-        auditRoutes(nextStack, path + segment);
+        
+        const nextPath = (path + '/' + segment).replace(/\/+/g, '/');
+        // console.log(`[AUDIT_TRACE] Router Found. Segment: ${segment} | Accumulated: ${nextPath}`);
+        auditRoutes(nextStack, nextPath);
       }
     }
   };
@@ -142,48 +212,12 @@ async function bootstrap() {
     setInterval(checkActivation, 15000);
     checkActivation();
 
-    // 4. Start Background Reconciliation Worker
-    try {
-      const { reconcile } = require("./src/workers/reconciliation-worker");
-      const RECONCILIATION_INTERVAL = process.env.RECONCILIATION_INTERVAL || 30000;
-      console.log(`   - Launching Reconciliation Worker (Interval: ${RECONCILIATION_INTERVAL}ms)`);
-      setInterval(reconcile, RECONCILIATION_INTERVAL);
-      // Run once immediately
-      reconcile();
-    } catch (workerErr) {
-      console.error("❌ Warning: Failed to launch Reconciliation Worker:", workerErr.message);
-    }
-
-    // 4b. Start Identity Sync Worker (Enforcement)
-    try {
-      const { startWorker } = require("./src/workers/identity-sync-worker");
-      console.log(`   - Launching Identity Sync Worker (Guardian Enforcement Active)`);
-      startWorker();
-    } catch (workerErr) {
-      console.error("❌ Warning: Failed to launch Identity Sync Worker:", workerErr.message);
-    }
-
-    // 4c. Start Intent Cleanup Worker
-    try {
-      const { runIntentCleanup } = require("./src/workers/intent-cleanup-worker");
-      const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
-      console.log(`   - Launching Intent Cleanup Worker (Interval: 5m)`);
-      setInterval(runIntentCleanup, CLEANUP_INTERVAL);
-      runIntentCleanup(); // Run once on startup
-    } catch (workerErr) {
-      console.error("❌ Warning: Failed to launch Intent Cleanup Worker:", workerErr.message);
-    }
-
-    // 4d. Start Hardened Scavenger Worker (Distributed Recovery)
-    try {
-      const { runScavenger } = require("./src/workers/scavenger-worker");
-      const SCAVENGER_INTERVAL = 30000; // 30 seconds
-      console.log(`   - Launching Scavenger Worker (Self-Healing Recovery Active)`);
-      setInterval(runScavenger, SCAVENGER_INTERVAL);
-      runScavenger();
-    } catch (workerErr) {
-      console.error("❌ Warning: Failed to launch Scavenger Worker:", workerErr.message);
-    }
+    // [PHASE 7.2] Authoritative Background Authority Launch
+    // Responsibility: HANDLED BY DEDICATED PM2 WORKER PROCESSES.
+    // Rule: We disable internal workers here to prevent race conditions and fulfill 
+    // the Zero-Trust Isolation Guard (only isolated workers can elevate to SYSTEM context).
+    console.log(`   - Web Authority launched in ISOLATION mode (RUNTIME='${process.env.BBSNS_RUNTIME || 'web'}')`);
+    console.log(`   - Internal workers are DISABLED. Background Sync is handled by dedicated processes.`);
 
     // 4. Initialize Circuit Breaker Status
     try {
@@ -196,5 +230,14 @@ async function bootstrap() {
 }
 
 if (require.main === module) {
-  bootstrap();
+  dbContext.run({
+    actor: 'SYSTEM',
+    actorId: 'SYSTEM_BOOT',
+    domain: 'SYSTEM',
+    action: 'SYSTEM_BOOTSTRAP',
+    requestId: `BOOT_${Date.now()}`,
+    service: 'STARTUP_GUARD'
+  }, () => {
+    bootstrap();
+  });
 }

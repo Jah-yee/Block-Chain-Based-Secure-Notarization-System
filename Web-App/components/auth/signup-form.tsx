@@ -823,7 +823,8 @@ export function SignUpForm() {
 
     setIsLoading(true)
 
-    let signature = ""
+      let signature = ""
+    let receivedNonce = ""
 
     try {
       console.log("[SIGNUP] Initiating signature flow...");
@@ -833,11 +834,12 @@ export function SignUpForm() {
 
       // 1. Get Nonce (Strict Replay Protection)
       console.log("[SIGNUP] Fetching nonce for address:", walletAddress);
-      const { message_template } = await apiClient.post('/auth/nonce', {
+      const { nonce, message_template } = await apiClient.post('/auth/nonce', {
           wallet_address: walletAddress,
           action: 'register'
       });
-      if (!message_template) throw new Error("Invalid server response (missing auth template)");
+      if (!nonce || !message_template) throw new Error("Invalid server response (missing auth template)");
+      receivedNonce = nonce;
 
       // 2. Sign Message
       console.log("[SIGNUP] Prompting for signature in MetaMask...");
@@ -883,6 +885,7 @@ export function SignUpForm() {
       signupForm.append('faceDescriptor', JSON.stringify(formData.faceDescriptor));
       signupForm.append('walletAddress', localStorage.getItem("connectedWallet") || "");
       signupForm.append('signature', signature);
+      signupForm.append('nonce', receivedNonce);
 
       await apiClient.post('/users/register', signupForm);
 

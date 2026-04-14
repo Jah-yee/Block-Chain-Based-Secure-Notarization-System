@@ -17,8 +17,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "./components/ui/button";
 import api from "./services/api";
 import { ethers } from "ethers";
+import JourneyBox from "./components/journey/JourneyBox";
+import JourneyErrorBoundary from "./components/shared/ErrorBoundary";
 
-type AppState = "role-selection" | "admin-login" | "admin-app" | "notary-login" | "notary-app" | "initialize-system";
+type AppState = "role-selection" | "admin-login" | "admin-app" | "notary-login" | "notary-app" | "owner-app" | "initialize-system";
 type AdminScreen = "dashboard" | "manage-notaries" | "governance" | "system-logs" | "multi-sig" | "settings";
 type NotaryScreen = "dashboard" | "pending" | "approved" | "profile" | "request-details" | "governance";
 
@@ -218,6 +220,8 @@ export default function App() {
         setAppState("admin-app");
       } else if (normalizedRole === "notary") {
         setAppState("notary-app");
+      } else if (normalizedRole === "owner") {
+        setAppState("owner-app");
       }
       
       pollAlerts();
@@ -246,7 +250,7 @@ export default function App() {
                 const normalizedRole = ROLE_MAP[userProfile.role] || 'none';
                 
                 const finalState = {
-                    appState: normalizedRole === 'admin' ? 'admin-app' : (normalizedRole === 'notary' ? 'notary-app' : 'role-selection'),
+                    appState: normalizedRole === 'admin' ? 'admin-app' : (normalizedRole === 'notary' ? 'notary-app' : (normalizedRole === 'owner' ? 'owner-app' : 'role-selection')),
                     user: { ...userProfile, role: normalizedRole }
                 };
                 
@@ -519,6 +523,24 @@ export default function App() {
               <DialogFooter><Button onClick={handleLogoutConfirm} className="bg-red-500">Logout</Button></DialogFooter>
             </DialogContent>
           </Dialog>
+        </div>
+      )}
+
+      {appState === "owner-app" && (
+        <div className="flex h-screen bg-[#07090e]">
+           <Sidebar
+            role="owner" user={user} activeScreen="dashboard"
+            onNavigate={() => {}} 
+            onLogout={() => setLogoutDialogOpen(true)}
+            alertCount={0} isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          />
+          <main className="flex-1 overflow-auto bg-[#07090e] p-8 flex items-center justify-center">
+             <JourneyErrorBoundary>
+                <JourneyBox />
+             </JourneyErrorBoundary>
+          </main>
         </div>
       )}
     </div>

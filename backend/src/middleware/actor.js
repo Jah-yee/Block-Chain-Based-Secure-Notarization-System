@@ -1,18 +1,9 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db/index.js');
+const dbContext = require('../db/context');
 const ConfigService = require('../services/config.service');
 
-const ROLES = {
-  NONE: 0,
-  OWNER: 1,
-  NOTARY: 2,
-  ADMIN: 3
-};
-
-const RISK_LEVELS = {
-  LOW: 'RISK_LOW',
-  HIGH: 'RISK_HIGH'
-};
+const { ROLES, RISK_LEVELS, ACTOR_IDS } = require('../constants/protocol');
 
 /**
  * 🛡️ [SECURITY] HIGH RISK ACTIONS
@@ -292,21 +283,105 @@ function requirePrivilege(config) {
     }
 
     // 🛡️ [INTEGRITY] Establish Ironclad Audit Context for the request lifecycle
-    const auditReason = `USER_API_ACTION: ${req.method} ${req.originalUrl}`;
-    return pool.runWithContext({ userId: req.actor.id, reason: auditReason }, () => {
-        return next();
-    });
+    const store = dbContext.getStore();
+
+    // 1. Structural Guard: Ensure we are inside a root database context
+    if (!store) {
+      throw new pool.BBSNSEnforcementError("STRUCTURAL_ERROR: Database context missing");
+    }
+
+    // 2. Identity Guard: Ensure identity was properly derived by the authority layer
+    if (!req.actor || req.actor.role === undefined || req.actor.id === undefined) {
+      throw new pool.BBSNSEnforcementError("AUTH_ERROR: Protected route accessed without valid actor state");
+    }
+
+    // 3. Write-Once Corruption Guard: Prevent cross-request or same-role/different-user collisions
+    if (store.actor && (store.actor !== req.actor.role || store.actorId !== req.actor.id)) {
+      throw new pool.BBSNSEnforcementError(`SECURITY_ERROR: Audit context corruption detected for request ${store.requestId}`);
+    }
+
+    // 4. Authorized Promotion: Finalize identity affinity for the remainder of the trace
+    if (!store.actor) {
+      store.actor = req.actor.role;
+      store.actorId = req.actor.id;
+      store.service = 'USER_API';
+
+      // 5. Audit Pulse
+      console.log(`[CTX_ACTOR_SET] actor=${store.actor} actorId=${store.actorId} requestId=${store.requestId}`);
+    }
+
+    return next();
   };
   Object.defineProperty(middleware, 'name', { value: 'requirePrivilege' });
   return middleware;
 }
 
-// Public route shim for audit compliance
+// Audit compliance shim
 function allowPublic(req, res, next) {
-  // Option: We could wrap allowPublic in a GUEST context if we wanted to audit reads,
-  // but per V4 design, we allow Bootstrap Reads without context.
   next();
 }
 Object.defineProperty(allowPublic, 'name', { value: 'allowPublic' });
 
-module.exports = { loadActor, requireRole, requirePrivilege, allowPublic, ROLES, RISK_LEVELS, rejectTransactionModification, restrictDocumentUpdate };
+/**
+ * 🛡️ [SECURITY] System Context Bridge (INTERNAL ONLY)
+ * Allows background workers (Identity Sync, Reconciliation) to perform legitimate 
+ * mutations while ensuring they remain isolated from the web request lifecycle.
+ */
+function runWithSystemContext(service, reason, fn) {
+    const store = dbContext.getStore();
+    
+    // 🛡️ [ENFORCEMENT] structural Execution Isolation
+    if (process.env.BBSNS_RUNTIME !== 'worker') {
+        console.error(`❌ [ISOLATION_VIOLATION] from ${process.env.BBSNS_RUNTIME || 'WEB_ROUTER'}`);
+        throw new BBSNSEnforcementError('ISOLATION_VIOLATION: System context structural forbidden');
+    }
+
+    if (!store) {
+        throw new BBSNSEnforcementError("STRUCTURAL_ERROR: System context used before root initialization");
+    }
+
+    // Mutate existing store
+    store.userId = ACTOR_IDS.SYSTEM;
+    store.actorId = ACTOR_IDS.SYSTEM;
+    store.reason = `SYSTEM_ACTION: ${reason}`;
+    store.service = service || 'BACKGROUND_WORKER';
+
+    return fn();
+}
+
+/**
+ * 🛡️ [SECURITY] Guest Context Bridge
+ * Allows public mutation routes (Nonces, Remote Sessions) to proceed under a 
+ * "GUEST" audit context. Combined with Sentinel table-restrictions.
+ */
+function withGuestContext(req, res, next) {
+    const store = dbContext.getStore();
+    console.log("CTX INIT CHECK:", !!store);
+
+    if (!store) {
+        throw new BBSNSEnforcementError("STRUCTURAL_ERROR: Guest Context used before root initialization");
+    }
+
+    // Mutate standardized object properties
+    store.actor = 'GUEST';
+    store.actorId = ACTOR_IDS.GUEST;
+    store.userId = ACTOR_IDS.GUEST;
+    store.service = 'GUEST_API';
+
+    return next();
+}
+Object.defineProperty(withGuestContext, 'name', { value: 'withGuestContext' });
+
+module.exports = { 
+  loadActor, 
+  requireRole, 
+  requirePrivilege, 
+  allowPublic, 
+  withGuestContext, 
+  runWithSystemContext,
+  ACTOR_IDS,
+  ROLES, 
+  RISK_LEVELS, 
+  rejectTransactionModification, 
+  restrictDocumentUpdate 
+};

@@ -5,7 +5,7 @@
 const { Pool } = require('pg');
 const http = require('http');
 
-const pool = new Pool({ connectionString: 'postgres://bbsns_user:bbsns_pass@localhost:5433/notarydb' });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgres://bbsns_user:bbsns_pass@localhost:5432/notarydb' });
 const PORT = 5000;
 
 const R = { pass: 0, fail: 0, warn: 0, items: [] };

@@ -46,6 +46,8 @@ const distributedRateLimiter = (limit, windowMs) => {
                 console.warn(`[SECURITY] Distributed Rate limit exceeded | key=${key} | ip=${req.ip} | violations=${violations}`);
                 return res.status(429).json({
                     error: 'Too many requests.',
+                    code: 'RATE_LIMIT_EXCEEDED',
+                    state: 'RATE_LIMITED',
                     retryAfter: Math.ceil((new Date(reset_at) - now) / 1000)
                 });
             }

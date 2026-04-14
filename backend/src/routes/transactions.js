@@ -6,6 +6,8 @@ const Joi = require('joi');
 
 // router.use(loadActor) deprecated for zero-trust compliance
 
+const { withDomain, withAction, withMutation } = require('../middleware/policy');
+
 const transactionApprovalSchema = Joi.object({
     document_id: Joi.number().integer().required(),
     status: Joi.string().valid('approved', 'rejected').required(),
@@ -14,7 +16,7 @@ const transactionApprovalSchema = Joi.object({
 });
 
 // POST /transactions - Create a transaction (Approval/Rejection flow)
-router.post('/', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('TX_APPROVE_VOTE'), withMutation(), async (req, res) => {
     try {
         const actor = req.actor;
         if (!actor) return res.status(401).json({ error: 'Actor header required' });

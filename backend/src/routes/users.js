@@ -14,10 +14,10 @@ const upload = multer({
 
 
 const { userSchema, validateBody } = require("../utils/validation.js");
-const { ethers } = require('ethers');
+const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
 
 // REGISTER User (public)
-router.post("/register", allowPublic, requireSystemActivated, upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
+router.post("/register", withDomain('USERS'), allowPublic, requireSystemActivated, withAction('USERS_REGISTER'), withMutation(), upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
   // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   
@@ -25,41 +25,46 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
   const email = body.email;
   const password = body.password;
   const nationalId = body.nationalId || body.nationalIdText;
-  const signature = body.signature || body.wallet_nonce;
+  const signature = body.signature;
+  const clientNonce = body.nonce; // 🛡️ [Hardening] Use provided nonce for deterministic verification
   
   if (!signature) {
     return res.status(400).json({ status: 'error', error: 'Cryptographic signature is required' });
   }
 
-  // Handle faceDescriptor (may be stringified JSON from FormData)
-  let faceDescriptor = body.faceDescriptor;
-  if (typeof faceDescriptor === 'string') {
-    try { faceDescriptor = JSON.parse(faceDescriptor); } catch (e) { console.error("JSON parse failed for descriptor", e); }
+  if (!clientNonce) {
+    return res.status(400).json({ status: 'error', error: 'Authentication nonce is required for deterministic verification' });
   }
 
-  console.log("[REGISTER_DEBUG] Standardized input received. Initiating Signature Recovery...");
+  console.log("[REGISTER_DEBUG] Standardized input received. Initiating Deterministic Signature Recovery...");
 
   let recoveredWallet;
   try {
-    // 🛡️ [Hardening] Derive wallet address ONLY from signature as per Validation Contract
-    // 1. Fetch valid nonce
+    // 🛡️ [Hardening] 1. Verify specific nonce existence and validity
     const nonceResult = await pool.query(
-      "SELECT nonce FROM wallet_nonces WHERE LOWER(wallet_address) = LOWER($1) AND used_at IS NULL AND expiry > NOW() ORDER BY created_at DESC LIMIT 1",
-      [body.walletAddress] // We use the provided wallet as a HINT to find the nonce, but signature is the AUTHORITY.
+      "SELECT id, nonce FROM wallet_nonces WHERE nonce = $1 AND LOWER(wallet_address) = LOWER($2) AND used_at IS NULL AND expiry > NOW()",
+      [clientNonce, body.walletAddress]
     );
 
     if (nonceResult.rows.length === 0) {
-      return res.status(401).json({ status: 'error', error: 'Authentication challenge expired or not found' });
+      return res.status(401).json({ status: 'error', error: 'Authentication challenge invalid, expired, or already used' });
     }
 
     const nonce = nonceResult.rows[0].nonce;
     const message = `Login request for BBSNS: ${nonce}`;
     recoveredWallet = ethers.verifyMessage(message, signature).toLowerCase();
 
-    // 2. Validate recovered address matches the hint (if provided) or fulfills ERC-20 format
+    // 2. Validate recovered address matches the hint
     if (body.walletAddress && recoveredWallet !== body.walletAddress.toLowerCase()) {
       return res.status(401).json({ status: 'error', error: 'Identity mismatch: Signature does not match public key' });
     }
+
+    // 🛡️ [Hardening] 3. Enforce Single-Use: Mark nonce as used IMMEDIATELY
+    await pool.query(
+      "UPDATE wallet_nonces SET used_at = NOW() WHERE id = $1",
+      [nonceResult.rows[0].id]
+    );
+
   } catch (err) {
     console.error("[REGISTER_DEBUG] Signature verification crashed:", err);
     return res.status(401).json({ status: 'error', error: 'Signature verification failed' });
@@ -85,18 +90,26 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
   console.log("[REGISTER_DEBUG] Data hashed. Inserting into DB...");
 
   try {
-    const user = await UserService.createUser({
-      username: email.toLowerCase().trim(),
-      name,
-      email: email.toLowerCase().trim(),
-      wallet_address: normalizedWalletAddress,
-      password_hash,
-      national_id_hash,
-      face_descriptor: JSON.stringify(faceDescriptor),
-      wallet_nonce: signature,
-      role: 'user',
-      is_human_verified: true,
-      identity_state: 'ACTIVE'
+    const user = await pool.runWithContext({
+      userId: ACTOR_IDS.GUEST,
+      reason: 'USER_SIGNUP',
+      route: req.originalUrl,
+      requestId: req.requestId || 'UNKNOWN',
+      service: 'AUTH_SERVICE'
+    }, async (auditClient) => {
+      return await UserService.createUser({
+        username: email.toLowerCase().trim(),
+        name,
+        email: email.toLowerCase().trim(),
+        wallet_address: normalizedWalletAddress,
+        password_hash,
+        national_id_hash,
+        face_descriptor: JSON.stringify(faceDescriptor),
+        wallet_nonce: signature,
+        role: 'user',
+        is_human_verified: true,
+        identity_state: 'ACTIVE'
+      }, auditClient);
     });
 
     console.log("[REGISTER_DEBUG] Registration successful for:", email);
@@ -115,7 +128,7 @@ router.post("/register", allowPublic, requireSystemActivated, upload.single('nat
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // CREATE User (Admin only)
-router.post("/", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), validateBody(userSchema), async (req, res) => {
+router.post("/", withDomain('USERS'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('USERS_CREATE'), withMutation(), validateBody(userSchema), async (req, res) => {
   const { username, fullName: name, email, password, walletAddress: wallet_address, role } = req.body;
   try {
     const normalizedWalletAddress = wallet_address.toLowerCase();
@@ -161,7 +174,7 @@ router.get("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LO
 });
 
 // UPDATE User
-router.put("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.put("/:id", withDomain('USERS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('USERS_UPDATE'), withMutation(), async (req, res) => {
   const { username, email, password, wallet_address, role, kyc_status, liveness_status, national_id_hash } = req.body;
 
   // Prevent wallet_address update
@@ -240,7 +253,7 @@ router.put("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LO
 });
 
 // SOFT DELETE User (Admin only)
-router.delete("/:id", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.delete("/:id", withDomain('USERS'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('USERS_DEACTIVATE'), withMutation(), async (req, res) => {
   try {
     const result = await pool.query(
       "UPDATE users SET is_deactivated = true, deactivated_at = NOW() WHERE id = $1 RETURNING id, is_deactivated",

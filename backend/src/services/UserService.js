@@ -12,20 +12,36 @@ class UserService {
    * @param {Object} userData - User metadata (email, name, wallet, password_hash, role)
    * @returns {Object} The created user
    */
-  async createUser(userData) {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+  async createUser(userData, externalClient) {
+    // 🛡️ [GUARD_1] Mandatory Audit Context (SENTINEL_2.0_FAIL_CLOSED)
+    if (!externalClient) {
+      throw new Error("Audit violation: UserService.createUser MUST receive an auditClient context.");
+    }
+    const client = externalClient;
 
-      // 🛡️ [CONSTRAINT_HARMONY]
-      // Database requires is_human_verified = true for ACTIVE state
+    try {
+      // 🛡️ [GUARD_2] Protocol Parameter Enforcement
+      if (!userData.role) {
+        throw new Error("Identity violation: role is a mandatory parameter for user creation.");
+      }
+
+      // 🛡️ [INVARIANT_1] Document Owners are ALWAYS ACTIVE (MVP Policy)
+      // This override removes state discretion from route handlers.
+      if (userData.role === 'user') {
+        userData.identity_state = 'ACTIVE';
+      }
+
+      if (!userData.identity_state) {
+        throw new Error("Identity violation: identity_state must be explicitly defined for this role.");
+      }
+
+      // 🛡️ [CONSTRAINT_SYNC] satisfy DB check constraint for ACTIVE states
       if (userData.identity_state === 'ACTIVE') {
         userData.is_human_verified = true;
       }
 
       // 1. Create the user record
       const fields = Object.keys(userData);
-      const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
       const values = Object.values(userData);
 
       const insertQuery = `
@@ -37,23 +53,30 @@ class UserService {
       const res = await client.query(insertQuery, values);
       const user = res.rows[0];
 
-      // 2. Log Initial State Transition (NULL -> ACTIVE)
-      // Every user created is 'ACTIVE' by default in the new MVP model
+      // 2. Log Initial State Transition (NULL -> INITIAL)
       await client.query(
         `INSERT INTO user_state_history (user_id, from_state, to_state, reason, changed_by) 
          VALUES ($1, $2, $3::identity_lifecycle, $4, $5)`,
-        [user.id, null, 'ACTIVE', 'INITIAL_REGISTRATION', 0] // 0 = SYSTEM
+        [user.id, null, user.identity_state, 'INITIAL_PROVISIONING', 0] // 0 = SYSTEM
       );
 
-      await client.query('COMMIT');
-      logger.info('USER_CREATED', { email: user.email, userId: user.id, state: 'ACTIVE' });
+      logger.info('USER_CREATED', { email: user.email, userId: user.id, state: user.identity_state });
       return user;
     } catch (err) {
-      await client.query('ROLLBACK');
+      // 🛡️ [Hardening 4.2] Idempotency Guard: Handle concurrent creation race
+      if (err.code === '23505') {
+        logger.warn('USER_CREATION_CONCURRENCY_SUPPRESSED', { 
+          wallet: userData.wallet_address, 
+          msg: 'User already exists, likely created by concurrent request.' 
+        });
+        return null; // Signals to caller that creation was suppressed
+      }
       logger.error('USER_CREATION_FAILED', { error: err.message }, err);
       throw err;
     } finally {
-      client.release();
+      if (shouldRelease) {
+        client.release();
+      }
     }
   }
 

@@ -44,16 +44,22 @@ const userSchema = Joi.object({
         'string.empty': 'Email is required',
         'string.pattern.base': 'Invalid email format (e.g., user@example.com)'
     }),
-    phone: Joi.string().trim().regex(REGEX.PHONE).required().messages({
+    phone: Joi.string().trim().regex(REGEX.PHONE).optional().messages({
         'string.pattern.base': 'Phone number must be exactly 10 digits'
     }),
-    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required().messages({
+    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'National ID must be 6-20 alphanumeric characters'
     }),
     license: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'License ID must be 6-20 alphanumeric characters'
     }),
-    walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).optional()
+    walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).optional(),
+    nonce: Joi.string().required().messages({
+        'any.required': 'Authentication nonce is required'
+    }),
+    signature: Joi.string().required().messages({
+        'any.required': 'Cryptographic signature is required'
+    })
 }).unknown(true);
 
 // 3. Document Creation Schema

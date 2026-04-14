@@ -8,6 +8,7 @@ const emailService = require("../services/EmailService");
 const crypto = require("crypto");
 const { userSchema, validateBody } = require("../utils/validation.js");
 const { logAction } = require("../utils/logger");
+const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
 
 // Apply actor loading middleware
 // router.use(loadActor) deprecated for zero-trust compliance
@@ -56,7 +57,7 @@ router.get("/applications/status/:id", allowPublic, async (req, res) => {
 });
 
 // PUBLIC: Submit initial notary application
-router.post("/applications/public", allowPublic, validateBody(userSchema), async (req, res) => {
+router.post("/applications/public", withDomain('NOTARY'), allowPublic, validateBody(userSchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
@@ -185,7 +186,7 @@ router.post("/applications/public", allowPublic, validateBody(userSchema), async
 });
 
 // PUBLIC: Finalize application with face descriptor & signature
-router.post("/applications/:id/verify", allowPublic, async (req, res) => {
+router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
   const { id } = req.params;
   const { signature, faceDescriptor, walletAddress } = req.body;
 
@@ -325,7 +326,7 @@ router.get("/applications", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_
 
 
 // POST /api/notaries/applications/:id/approve (Admin only)
-router.post("/applications/:id/approve", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_APP_APPROVE'), withMutation(), async (req, res) => {
   const { id } = req.params;
   
   try {
@@ -397,7 +398,7 @@ router.post("/applications/:id/approve", requirePrivilege({ minRole: ROLES.ADMIN
 });
 
 // 🛡️ [Hardening FIX B] Activation Recovery (Resend Token)
-router.post("/applications/:id/resend-activation", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/applications/:id/resend-activation", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_TOKEN_RESEND'), withMutation(), async (req, res) => {
   const { id } = req.params;
   try {
     const isReference = (id || "").startsWith('BBSNS-REG-');
@@ -431,7 +432,7 @@ router.post("/applications/:id/resend-activation", requirePrivilege({ minRole: R
 });
 
 // POST /api/notaries/applications/:id/reject (Admin only)
-router.post("/applications/:id/reject", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_APP_REJECT'), withMutation(), async (req, res) => {
   const { id } = req.params;
   try {
     const isReference = (id || "").startsWith('BBSNS-REG-');
