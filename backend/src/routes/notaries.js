@@ -6,9 +6,11 @@ const bcrypt = require("bcrypt");
 const { registerNotaryOnChain } = require("../blockchain/notary-registry");
 const emailService = require("../services/EmailService");
 const crypto = require("crypto");
-const { userSchema, validateBody } = require("../utils/validation.js");
+const { notarySchema, validateBody } = require("../utils/validation.js");
 const { logAction } = require("../utils/logger");
 const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
+const { verifyProtocolSignature } = require("../utils/identity-crypto");
+const { ACTOR_IDS } = require('../constants/protocol');
 
 // Apply actor loading middleware
 // router.use(loadActor) deprecated for zero-trust compliance
@@ -57,7 +59,7 @@ router.get("/applications/status/:id", allowPublic, async (req, res) => {
 });
 
 // PUBLIC: Submit initial notary application
-router.post("/applications/public", withDomain('NOTARY'), allowPublic, validateBody(userSchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/applications/public", withDomain('NOTARY'), allowPublic, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
@@ -188,99 +190,99 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, validateB
 // PUBLIC: Finalize application with face descriptor & signature
 router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
   const { id } = req.params;
-  const { signature, faceDescriptor, walletAddress } = req.body;
+  const { signature, faceDescriptor, walletAddress, nonce } = req.body;
 
   try {
-    const { ethers } = require('ethers');
     const normalizedWallet = (walletAddress || "").toLowerCase();
 
-    if (!normalizedWallet || !signature) {
+    if (!normalizedWallet || !signature || !nonce) {
       return res.status(400).json({ 
         status: "error", 
         data: null, 
-        error: "walletAddress and signature are required" 
+        error: "walletAddress, nonce, and signature are required" 
       });
     }
 
-    // 1. Fetch EXCLUSIVE valid nonce for NOTARY_BIND
-    const nonceResult = await pool.query(
-      `SELECT nonce FROM wallet_nonces 
-       WHERE LOWER(wallet_address) = $1 AND purpose = 'NOTARY_BIND' 
-       AND used_at IS NULL AND expiry > NOW() 
-       ORDER BY created_at DESC LIMIT 1`,
-      [normalizedWallet]
-    );
+    // 🛡️ [Hardening] Deterministic Protocol Verification (Atomic Nonce Consumption)
+    // Replaces legacy 'Notary binding request for BBSNS: {nonce}' string.
+    // Uses protocol-standard: BBSNS::NOTARY_BIND::v1::{nonce}::{wallet}
+    await pool.runWithContext({
+      userId: ACTOR_IDS.GUEST,
+      reason: 'NOTARY_APP_VERIFY',
+      route: req.originalUrl,
+      requestId: req.requestId || 'NOTARY_VERIFY',
+      service: 'AUTH_SERVICE'
+    }, async (auditClient) => {
+      try {
+        await verifyProtocolSignature({
+          purpose: 'NOTARY_BIND',
+          nonce,
+          wallet: normalizedWallet,
+          signature,
+          rawPayload: {},
+          version: 'v1',
+          client: auditClient,
+          requestId: req.requestId || 'NOTARY_APP_VERIFY'
+        });
+      } catch (authErr) {
+        const err = new Error(authErr.message || 'Cryptographic verification failed');
+        err.statusCode = 401;
+        throw err;
+      }
 
-    if (nonceResult.rows.length === 0) {
-      return res.status(401).json({ 
-        status: "error", 
-        data: null, 
-        error: "Missing or expired verification session. Please request a new nonce." 
+      // Update Application State
+      // 🛡️ [Hardening] Atomic Transition: pending -> verified
+      const isReference = (id || "").startsWith('BBSNS-REG-');
+      const lookupField = isReference ? "reference_id" : "id";
+      const appCheck = await auditClient.query(`SELECT status FROM notary_applications WHERE ${lookupField} = $1`, [id]);
+      if (appCheck.rows.length === 0) {
+        const err = new Error('Application not found');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const currentStatus = appCheck.rows[0].status;
+      
+      if (['verified', 'approved', 'activated'].includes(currentStatus)) {
+        const err = new Error('ALREADY_PROCESSED: Identity is already verified or active.');
+        err.statusCode = 409;
+        throw err;
+      }
+
+      if (currentStatus !== 'pending') {
+        const err = new Error(`INVALID_TRANSITION: Cannot verify application in '${currentStatus}' state.`);
+        err.statusCode = 409;
+        throw err;
+      }
+
+      const result = await auditClient.query(
+        `UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'verified', updated_at = NOW() WHERE ${lookupField} = $4 RETURNING *`,
+        [JSON.stringify(faceDescriptor), signature, normalizedWallet, id]
+      );
+
+      logAction('NOTARY_STATUS_CHANGE', `System verified identity for app ${id}`, 'system', { id, from: currentStatus, to: 'verified' });
+
+      return result.rows[0];
+    }).then((application) => {
+      res.json({
+        status: "ok",
+        data: {
+          message: "Identity verified successfully. Waiting for administrative approval.",
+          application
+        },
+        error: null
       });
-    }
-
-    // 2. Cryptographic Signature Verification
-    const nonce = nonceResult.rows[0].nonce;
-    const APP_NAME = 'BBSNS';
-    const message = `Notary binding request for ${APP_NAME}: ${nonce}`;
-    const recoveredAddress = ethers.verifyMessage(message, signature);
-
-    if (recoveredAddress.toLowerCase() !== normalizedWallet) {
-      return res.status(401).json({ 
-        status: "error", 
-        data: null, 
-        error: "Signature verification failed: Address mismatch" 
-      });
-    }
-
-    // 3. Mark Nonce Used
-    await pool.query(
-      "UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2",
-      [normalizedWallet, nonce]
-    );
-
-    // 4. Update Application State
-    // 🛡️ [Hardening] Atomic Transition: pending -> verified
-    const isReference = (id || "").startsWith('BBSNS-REG-');
-    const lookupField = isReference ? "reference_id" : "id";
-    const appCheck = await pool.query(`SELECT status FROM notary_applications WHERE ${lookupField} = $1`, [id]);
-    if (appCheck.rows.length === 0) {
-      return res.status(404).json({ status: "error", error: "Application not found" });
-    }
-
-    const currentStatus = appCheck.rows[0].status;
-    
-    // Idempotency: If already verified or beyond, return success/conflict
-    if (['verified', 'approved', 'activated'].includes(currentStatus)) {
-      return res.status(409).json({ 
-        status: "error", 
-        error: "ALREADY_PROCESSED: Identity is already verified or active." 
-      });
-    }
-
-    if (currentStatus !== 'pending') {
-      return res.status(409).json({ 
-        status: "error", 
-        error: `INVALID_TRANSITION: Cannot verify application in '${currentStatus}' state.` 
-      });
-    }
-
-    const result = await pool.query(
-      `UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'verified', updated_at = NOW() WHERE ${lookupField} = $4 RETURNING *`,
-      [JSON.stringify(faceDescriptor), signature, normalizedWallet, id]
-    );
-
-    logAction('NOTARY_STATUS_CHANGE', `System verified identity for app ${id}`, 'system', { id, from: currentStatus, to: 'verified' });
-
-    res.json({
-      status: "ok",
-      data: {
-        message: "Identity verified successfully. Waiting for administrative approval.",
-        application: result.rows[0]
-      },
-      error: null
     });
   } catch (err) {
+    if (err.statusCode === 401) {
+      return res.status(401).json({ status: "error", data: null, error: err.message });
+    }
+    if (err.statusCode === 404) {
+      return res.status(404).json({ status: "error", error: err.message });
+    }
+    if (err.statusCode === 409) {
+      return res.status(409).json({ status: "error", error: err.message });
+    }
     console.error("Notary Verification Error:", err);
     res.status(500).json({ 
       status: "error", 

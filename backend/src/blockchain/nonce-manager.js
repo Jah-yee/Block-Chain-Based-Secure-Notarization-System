@@ -5,7 +5,7 @@ const pool = require("../db/index");
  * 
  * Ensures that the Relayer always uses the correct sequential nonce,
  * even with simultaneous requests or server restarts.
- * Uses the 'wallet_nonces' table for persistence.
+ * Uses the 'relayer_nonces' table for persistence.
  */
 class NonceManager {
     constructor(signer) {

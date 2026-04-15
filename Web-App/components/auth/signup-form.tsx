@@ -322,7 +322,21 @@ export function SignUpForm() {
     livenessPassed: false,
     faceDescriptor: null,
     walletConnected: false,
+    hasSigned: false // 🛡️ [SENTINEL_3.1]
   })
+
+  const [signature, setSignature] = useState("")
+  const [nonce, setNonce] = useState("")
+
+  // 🛡️ [SENTINEL_3.1] Mutation Locking Effect
+  // Automatically invalidates signature if ANY linked identity field changes.
+  useEffect(() => {
+    if (signature) {
+      console.log("[SENTINEL] Identity field mutation detected. Invalidating signature to maintain cryptographic intent.");
+      setSignature("");
+      setNonce("");
+    }
+  }, [formData.fullName, formData.email, formData.nationalIdText]);
 
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -823,7 +837,11 @@ export function SignUpForm() {
 
     setIsLoading(true)
 
-      let signature = ""
+    // 🛡️ [Hardening] Backend Authority ensures frontend is a dumb signer.
+    // Replaced legacy payload normalization, canonicalization, and hashing with message_template.
+
+    // 🛡️ [SENTINEL_3.1] Use local states instead of shadowing
+    let finalSignature = ""
     let receivedNonce = ""
 
     try {
@@ -832,16 +850,26 @@ export function SignUpForm() {
       const walletAddress = localStorage.getItem("connectedWallet");
       if (!walletAddress) throw new Error("Wallet not connected. Please go back and connect your wallet.");
 
-      // 1. Get Nonce (Strict Replay Protection)
+      // 1. Get Nonce & Canonical Challenge Template
       console.log("[SIGNUP] Fetching nonce for address:", walletAddress);
+      
+      const payloadObj = {
+        fullName: formData.fullName,
+        email: formData.email,
+        nationalIdText: formData.nationalIdText
+      };
+      
       const { nonce, message_template } = await apiClient.post('/auth/nonce', {
           wallet_address: walletAddress,
-          action: 'register'
+          purpose: 'REGISTER',
+          payload: payloadObj,
+          version: 'v1'
       });
       if (!nonce || !message_template) throw new Error("Invalid server response (missing auth template)");
       receivedNonce = nonce;
-
-      // 2. Sign Message
+      
+      console.log("[SIGNUP] Received authoritative challenge template from backend:", message_template);
+      
       console.log("[SIGNUP] Prompting for signature in MetaMask...");
       const { ethers } = await import("ethers")
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -852,13 +880,16 @@ export function SignUpForm() {
       const currentSignerAddress = await signer.getAddress();
       if (currentSignerAddress.toLowerCase() !== walletAddress.toLowerCase()) {
         console.warn("[SIGNUP] Signer mismatch!", { current: currentSignerAddress, expected: walletAddress });
-        // Update local storage and stop to allow user to re-submit with correct address if needed
         localStorage.setItem("connectedWallet", currentSignerAddress);
         throw new Error(`Wallet address changed in MetaMask to ${currentSignerAddress}. Please check your selection and try again.`);
       }
 
-      signature = await signer.signMessage(message_template)
+      finalSignature = await signer.signMessage(message_template);
       console.log("[SIGNUP] Signature acquired successfully.");
+      
+      // 🛡️ [SENTINEL_3.1] Persist to component state for submission
+      setSignature(finalSignature);
+      setNonce(receivedNonce);
 
     } catch (sigErr: any) {
       console.error("[SIGNUP] Signature/Nonce failed:", sigErr)
@@ -874,9 +905,10 @@ export function SignUpForm() {
     }
 
     try {
+      // 4. Submit Normalized Payload
       const signupForm = new FormData();
       signupForm.append('fullName', formData.fullName);
-      signupForm.append('email', formData.email.toLowerCase().trim());
+      signupForm.append('email', formData.email);
       signupForm.append('password', formData.password);
       signupForm.append('nationalIdText', formData.nationalIdText);
       if (formData.nationalIdFile) {
@@ -884,8 +916,11 @@ export function SignUpForm() {
       }
       signupForm.append('faceDescriptor', JSON.stringify(formData.faceDescriptor));
       signupForm.append('walletAddress', localStorage.getItem("connectedWallet") || "");
-      signupForm.append('signature', signature);
+      signupForm.append('signature', finalSignature);
       signupForm.append('nonce', receivedNonce);
+      signupForm.append('version', 'v1');
+      // 🛡️ [Hardening] Assert backward compatibility branch on the backend
+      signupForm.append('backendChallenge', 'true');
 
       await apiClient.post('/users/register', signupForm);
 

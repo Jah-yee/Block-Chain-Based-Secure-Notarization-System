@@ -50,6 +50,7 @@ const userSchema = Joi.object({
     nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'National ID must be 6-20 alphanumeric characters'
     }),
+    nationalIdText: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional(),
     license: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'License ID must be 6-20 alphanumeric characters'
     }),
@@ -59,8 +60,41 @@ const userSchema = Joi.object({
     }),
     signature: Joi.string().required().messages({
         'any.required': 'Cryptographic signature is required'
-    })
-}).unknown(true);
+    }),
+    password: Joi.string().min(6).required(),
+    faceDescriptor: Joi.string().optional(),
+    nationalIdFile: Joi.any().optional(),
+    version: Joi.string().valid('v1').optional(),
+    backendChallenge: Joi.boolean().optional()
+});
+
+const loginSchema = Joi.object({
+    email: Joi.string().trim().lowercase().regex(REGEX.EMAIL).required(),
+    password: Joi.string().required(),
+    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required().messages({
+        'any.required': 'National ID is required for secure login',
+        'string.pattern.base': 'National ID must be 6-20 alphanumeric characters'
+    }),
+    walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).required(),
+    nonce: Joi.string().required(),
+    signature: Joi.string().required(),
+    signature_nonce: Joi.string().optional(), // Fallback for existing frontend
+    version: Joi.string().valid('v1').optional(),
+    backendChallenge: Joi.boolean().optional()
+});
+
+const notarySchema = Joi.object({
+    fullName: Joi.string().trim().regex(REGEX.NAME).required(),
+    email: Joi.string().trim().lowercase().regex(REGEX.EMAIL).required(),
+    walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).optional(),
+    phone: Joi.string().trim().regex(REGEX.PHONE).required(),
+    license: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required(),
+    experience: Joi.number().integer().min(0).max(100).optional(),
+    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required(),
+    nationality: Joi.string().optional(),
+    version: Joi.string().valid('v1').optional(),
+    backendChallenge: Joi.boolean().optional()
+});
 
 // 3. Document Creation Schema
 const documentCreateSchema = Joi.object({
@@ -89,8 +123,10 @@ const validateBody = (schema) => {
 };
 
 module.exports = {
+    REGEX,
     userSchema,
+    loginSchema,
+    notarySchema,
     documentCreateSchema,
-    validateBody,
-    REGEX
+    validateBody
 };

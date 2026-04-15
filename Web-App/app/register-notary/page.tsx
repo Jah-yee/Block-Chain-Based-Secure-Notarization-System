@@ -239,10 +239,15 @@ export default function RegisterNotaryPage() {
             if (!wallet) throw new Error("No wallet selected");
             localStorage.setItem("connectedWallet", wallet);
 
-            const { message_template } = await apiClient.post("/api/auth/nonce", {
+            const nonceResponse = await apiClient.post("/api/auth/nonce", {
                 wallet_address: wallet,
                 purpose: 'NOTARY_BIND'
             });
+            const { message_template, nonce: receivedNonce } = nonceResponse;
+            if (!message_template || !receivedNonce) throw new Error("Invalid server response: missing auth template or nonce");
+
+            // Store nonce for submission
+            localStorage.setItem("notary_bind_nonce", receivedNonce);
 
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
@@ -268,15 +273,24 @@ export default function RegisterNotaryPage() {
 
         setIsLoading(true);
         try {
+            const storedNonce = localStorage.getItem("notary_bind_nonce");
+            if (!storedNonce) {
+                toast({ title: "Session Expired", description: "Please sign your wallet again to refresh the session.", variant: "destructive" });
+                setIsWalletSigned(false);
+                setSignature(null);
+                return;
+            }
             await apiClient.post(`/api/notaries/applications/${applicationId}/verify`, { 
                 signature, 
                 faceDescriptor,
-                walletAddress: wallet 
+                walletAddress: wallet,
+                nonce: storedNonce
             });
 
             toast({ title: "KYC Verified & Locked", description: "Identity locked for review." });
             localStorage.removeItem("bbsns_resuming_id");
             localStorage.removeItem(DRAFT_KEY);
+            localStorage.removeItem("notary_bind_nonce");
             setStep(4);
         } catch (err: any) {
             toast({ title: "Verification Error", description: err.message, variant: "destructive" });

@@ -3,8 +3,9 @@ const router = express.Router();
 const pool = require("../db/index.js");
 const { hashPassword } = require("../utils/password.js");
 const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middleware/actor.js");
-const { requireSystemActivated } = require("../middleware/activation.js");
+// activation.js defunct
 const UserService = require("../services/UserService");
+const { ACTOR_IDS } = require('../constants/protocol'); // 🛡️ [Fix] Canonical source
 
 const multer = require("multer");
 const upload = multer({ 
@@ -15,18 +16,23 @@ const upload = multer({
 
 const { userSchema, validateBody } = require("../utils/validation.js");
 const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
+const { 
+    verifyProtocolSignature 
+} = require("../utils/identity-crypto");
 
 // REGISTER User (public)
-router.post("/register", withDomain('USERS'), allowPublic, requireSystemActivated, withAction('USERS_REGISTER'), withMutation(), upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
+router.post("/register", withDomain('USERS'), allowPublic, withAction('USERS_REGISTER'), withMutation(), upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
   // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   
-  const name = body.fullName; // userSchema ensures this exists and matches regex
+  const name = body.fullName;
   const email = body.email;
   const password = body.password;
   const nationalId = body.nationalId || body.nationalIdText;
+  const faceDescriptor = body.faceDescriptor; // 🛡️ [Fix] Extract from req.body (not undefined var)
   const signature = body.signature;
-  const clientNonce = body.nonce; // 🛡️ [Hardening] Use provided nonce for deterministic verification
+  const clientNonce = body.nonce;
+  const clientVersion = body.version || 'v1'; // 🛡️ [SENTINEL_3.1] Explicit protocol routing
   
   if (!signature) {
     return res.status(400).json({ status: 'error', error: 'Cryptographic signature is required' });
@@ -38,47 +44,10 @@ router.post("/register", withDomain('USERS'), allowPublic, requireSystemActivate
 
   console.log("[REGISTER_DEBUG] Standardized input received. Initiating Deterministic Signature Recovery...");
 
-  let recoveredWallet;
-  try {
-    // 🛡️ [Hardening] 1. Verify specific nonce existence and validity
-    const nonceResult = await pool.query(
-      "SELECT id, nonce FROM wallet_nonces WHERE nonce = $1 AND LOWER(wallet_address) = LOWER($2) AND used_at IS NULL AND expiry > NOW()",
-      [clientNonce, body.walletAddress]
-    );
+  const normalizedWalletAddress = (body.walletAddress || '').toLowerCase();
 
-    if (nonceResult.rows.length === 0) {
-      return res.status(401).json({ status: 'error', error: 'Authentication challenge invalid, expired, or already used' });
-    }
-
-    const nonce = nonceResult.rows[0].nonce;
-    const message = `Login request for BBSNS: ${nonce}`;
-    recoveredWallet = ethers.verifyMessage(message, signature).toLowerCase();
-
-    // 2. Validate recovered address matches the hint
-    if (body.walletAddress && recoveredWallet !== body.walletAddress.toLowerCase()) {
-      return res.status(401).json({ status: 'error', error: 'Identity mismatch: Signature does not match public key' });
-    }
-
-    // 🛡️ [Hardening] 3. Enforce Single-Use: Mark nonce as used IMMEDIATELY
-    await pool.query(
-      "UPDATE wallet_nonces SET used_at = NOW() WHERE id = $1",
-      [nonceResult.rows[0].id]
-    );
-
-  } catch (err) {
-    console.error("[REGISTER_DEBUG] Signature verification crashed:", err);
-    return res.status(401).json({ status: 'error', error: 'Signature verification failed' });
-  }
-
-  const normalizedWalletAddress = recoveredWallet;
-
-  // Check if email or wallet exists
-  const existing = await pool.query(
-    'SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(wallet_address) = $2',
-    [email, normalizedWalletAddress]
-  );
-  if (existing.rows.length > 0) {
-    return res.status(409).json({ error: 'Email or wallet address already registered' });
+  if (!normalizedWalletAddress || !/^0x[a-fA-F0-9]{40}$/.test(normalizedWalletAddress)) {
+    return res.status(400).json({ status: 'error', error: 'A valid Ethereum wallet address is required for registration.' });
   }
 
   console.log("[REGISTER_DEBUG] Inputs validated. Hashing sensitive data...");
@@ -87,17 +56,61 @@ router.post("/register", withDomain('USERS'), allowPublic, requireSystemActivate
   const crypto = require('crypto');
   const national_id_hash = nationalId ? crypto.createHash('sha256').update(nationalId).digest('hex') : null;
 
-  console.log("[REGISTER_DEBUG] Data hashed. Inserting into DB...");
+  console.log("[REGISTER_DEBUG] Data hashed. Starting unified registration transaction...");
 
+  // 🛡️ [SENTINEL_3.1] Unified Transaction: Signature Verification + User Creation
+  // Both AUTH_NONCES UPDATE and USERS INSERT run in one audit context with USERS_REGISTER action.
+  // This resolves SYSTEM_BOOTSTRAP action inheritance by correctly using the middleware-set action.
   try {
     const user = await pool.runWithContext({
       userId: ACTOR_IDS.GUEST,
-      reason: 'USER_SIGNUP',
+      reason: 'USER_SIGNUP_WITH_SIG_VERIFY',
       route: req.originalUrl,
       requestId: req.requestId || 'UNKNOWN',
       service: 'AUTH_SERVICE'
     }, async (auditClient) => {
-      return await UserService.createUser({
+
+      // 🛡️ [Hardening] Dual-Path Branching for Backend Challenge Parity
+      // If backendChallenge is NOT present (legacy frontend), we must ensure 
+      // the payload shape exactly matches the backend schema expectations since fieldMap is dead.
+      const isBackendChallenge = body.backendChallenge === true;
+      let verificationPayload = body;
+      
+      if (!isBackendChallenge) {
+         // Legacy map: Map 'nationalIdText' back to 'nationalId' strictly for hashing
+         verificationPayload = {
+            ...body,
+            nationalId: body.nationalIdText || body.nationalId
+         };
+      }
+
+      // Step 1: Verify signature & atomically consume nonce (AUTH_NONCES UPDATE)
+      await verifyProtocolSignature({
+        purpose: 'REGISTER',
+        nonce: clientNonce,
+        wallet: body.walletAddress,
+        signature,
+        rawPayload: verificationPayload,
+        version: clientVersion,
+        client: auditClient,  // ✅ Same auditClient = sentinel sees USERS_REGISTER action
+        requestId: req.requestId || 'USER_REGISTRATION'
+      });
+
+      console.log("[REGISTER_DEBUG] Signature verified. Creating user record...");
+
+      // Step 2: Check duplicates
+      const existing = await auditClient.query(
+        'SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(wallet_address) = $2',
+        [email, normalizedWalletAddress]
+      );
+      if (existing.rows.length > 0) {
+        const err = new Error('Email or wallet address already registered');
+        err.statusCode = 409;
+        throw err;
+      }
+
+      // Step 3: Create user (USERS INSERT)
+      const newUser = await UserService.createUser({
         username: email.toLowerCase().trim(),
         name,
         email: email.toLowerCase().trim(),
@@ -110,14 +123,22 @@ router.post("/register", withDomain('USERS'), allowPublic, requireSystemActivate
         is_human_verified: true,
         identity_state: 'ACTIVE'
       }, auditClient);
+
+      return newUser;
     });
 
     console.log("[REGISTER_DEBUG] Registration successful for:", email);
     res.status(201).json(user);
   } catch (err) {
+    if (err.statusCode === 409) {
+      return res.status(409).json({ error: err.message });
+    }
+    if (err.message && (err.message.includes('Authentication failed') || err.message.includes('Cryptographic'))) {
+      return res.status(401).json({ status: 'error', error: err.message });
+    }
     console.error("[REGISTER_DEBUG] FATAL REGISTRATION ERROR:", err);
     if (err.code === '23505') {
-      const field = err.detail.includes('email') ? 'Email' : err.detail.includes('wallet') ? 'Wallet' : 'User';
+      const field = err.detail?.includes('email') ? 'Email' : err.detail?.includes('wallet') ? 'Wallet' : 'User';
       return res.status(409).json({ error: `${field} already registered` });
     }
     res.status(500).json({ error: err.message });

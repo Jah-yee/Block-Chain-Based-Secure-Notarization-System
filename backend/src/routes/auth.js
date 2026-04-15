@@ -8,6 +8,14 @@ const { ACTOR_IDS } = require('../constants/protocol');
 const { generateNonce } = require('../utils/nonce');
 const { ethers } = require('ethers');
 const ConfigService = require('../services/config.service');
+const { 
+    IDENTITY_PROTOCOL, 
+    buildSigningMessage 
+} = require('../constants/identity');
+const { 
+    verifyProtocolSignature 
+} = require('../utils/identity-crypto');
+const { loginSchema, validateBody } = require('../utils/validation');
 
 const APP_NAME = 'BBSNS';
 const getJWTSecret = () => {
@@ -36,7 +44,6 @@ const COOKIE_OPTIONS = {
 
 const { requirePrivilege, allowPublic, withGuestContext, ROLES, RISK_LEVELS } = require('../middleware/actor');
 const { withDomain, withAction, withMutation } = require('../middleware/policy');
-const { requireSystemActivated } = require('../middleware/activation');
 const UserService = require('../services/UserService');
 
 // Hardened Rate Limiter: IP + Wallet + Endpoint binding with cooldown escalation
@@ -149,13 +156,14 @@ router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH
 // POST /auth/nonce - Hardened blind-trust eliminator
 router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NONCE'), withMutation(), async (req, res) => {
   try {
-    const { wallet_address, purpose } = req.body;
+    const { wallet_address, purpose, payload } = req.body;
     if (!wallet_address) {
       return res.status(400).json({ error: 'wallet_address is required' });
     }
 
     const normalizedWalletAddress = wallet_address.toLowerCase();
-    const noncePurpose = purpose || 'LOGIN';
+    const noncePurpose = (purpose || 'LOGIN').toUpperCase();
+    const protocolVersion = req.body.version || IDENTITY_PROTOCOL.DEFAULT_VERSION;
 
     const result = await pool.runWithContext({
         userId: ACTOR_IDS.GUEST,
@@ -164,34 +172,31 @@ router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NON
         requestId: (dbContext.getStore() || {}).requestId || 'UNKNOWN',
         service: 'GUEST_API'
     }, async (client) => {
-        // 🛡️ [SECURITY] Semantic Cooldown Enforcement
+        // 🛡️ [SECURITY] Semantic Cooldown Enforcement (Action-Scoped)
         const recentNonce = await client.query(
-            `SELECT created_at FROM wallet_nonces 
-             WHERE LOWER(wallet_address) = $1 AND purpose = $2 
-             AND created_at > NOW() - INTERVAL '30 seconds'
-             ORDER BY created_at DESC LIMIT 1`,
+            `SELECT issued_at FROM auth_nonces 
+             WHERE LOWER(wallet_address) = $1 AND action = $2 
+             AND issued_at > NOW() - INTERVAL '30 seconds'
+             ORDER BY issued_at DESC LIMIT 1`,
             [normalizedWalletAddress, noncePurpose]
         );
 
         if (recentNonce.rows.length > 0) {
-            const elapsed = Date.now() - new Date(recentNonce.rows[0].created_at).getTime();
+            const elapsed = Date.now() - new Date(recentNonce.rows[0].issued_at).getTime();
             const retry_after = Math.ceil((30000 - elapsed) / 1000);
             return { throttled: true, retry_after };
         }
 
-        // 1. Invalidate ALL previous unused nonces for this wallet + purpose
-        await client.query(
-          'UPDATE wallet_nonces SET used_at = NOW() WHERE LOWER(wallet_address) = $1 AND purpose = $2 AND used_at IS NULL',
-          [normalizedWalletAddress, noncePurpose]
-        );
-
-        // 2. Generate and store new nonce
+        // 1. Generate and store new nonce (Upsert pattern for Action-Scoping)
         const nonce = generateNonce();
         const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
         await client.query(
-          'INSERT INTO wallet_nonces (wallet_address, nonce, expiry, purpose) VALUES ($1, $2, $3, $4)',
-          [normalizedWalletAddress, nonce, expiry, noncePurpose]
+          `INSERT INTO auth_nonces (wallet_address, nonce, action, expires_at) 
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (wallet_address, action) 
+           DO UPDATE SET nonce = EXCLUDED.nonce, expires_at = EXCLUDED.expires_at, issued_at = NOW(), used = false`,
+          [normalizedWalletAddress, nonce, noncePurpose, expiry]
         );
 
         return { nonce, expiry };
@@ -208,13 +213,20 @@ router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NON
 
     const { nonce, expiry } = result;
 
-    // 3. Define message template based on purpose
-    let message_template;
-    if (noncePurpose === 'NOTARY_BIND' || noncePurpose === 'NOTARY_ONBOARD') {
-      message_template = `Notary binding request for ${APP_NAME}: ${nonce}`;
-    } else {
-      message_template = `Login request for ${APP_NAME}: ${nonce}`;
+    // 3. Reconstruct canonical challenge template (Versioned & Hash Scoped)
+    let generatedPayloadHash = null;
+    const { SCHEMA_CONFIG } = require('../constants/identity');
+    const { calculatePayloadHash } = require('../utils/identity-crypto');
+    
+    if (payload && SCHEMA_CONFIG[protocolVersion] && SCHEMA_CONFIG[protocolVersion].requiresPayloadHash[noncePurpose]) {
+        try {
+            generatedPayloadHash = calculatePayloadHash(protocolVersion, noncePurpose, payload);
+        } catch (normErr) {
+            console.error('[NONCE_HASH_FAIL]', normErr);
+        }
     }
+    
+    const message_template = buildSigningMessage(noncePurpose, nonce, normalizedWalletAddress, generatedPayloadHash, protocolVersion);
 
     res.json({
       nonce,
@@ -288,32 +300,23 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
 
-    // 1. Fetch Nonce with strict validation
-    const nonceResult = await pool.query(
-      `SELECT nonce FROM wallet_nonces 
-       WHERE LOWER(wallet_address) = $1 AND purpose = 'GENESIS_ONBOARD' 
-       AND used_at IS NULL AND expiry > NOW() 
-       FOR UPDATE`, 
-      [normalizedWalletAddress]
-    );
-
-    if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== nonce) {
-      return res.status(401).json({ 
-        error: 'Invalid or expired onboarding session',
-        code: 'NONCE_INVALID_OR_EXPIRED',
-        state: 'AUTH_FAILED'
+    // 1. Deterministic Protocol Verification (Atomic Consumption)
+    // Genesis onboarding uses NO payload hash as it's a seed action.
+    try {
+      await verifyProtocolSignature({
+        purpose: 'GENESIS_ONBOARD',
+        nonce,
+        wallet: normalizedWalletAddress,
+        signature,
+        rawPayload: {},
+        requestId: (dbContext.getStore() || {}).requestId || 'GENESIS_ONBOARD'
       });
-    }
-
-    // 2. Guard: No Profile
-    const checkUser = await pool.query('SELECT id FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
-    if (checkUser.rows.length > 0) return res.status(400).json({ error: 'Profile already exists' });
-
-    // 3. Sig Verification
-    const message = `Login request for ${APP_NAME}: ${nonce}`;
-    const recoveredAddress = ethers.verifyMessage(message, signature);
-    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
-      return res.status(401).json({ error: 'Cryptographic signature verification failed' });
+    } catch (authErr) {
+      return res.status(401).json({ 
+        error: authErr.message,
+        code: 'AUTH_FAILED',
+        state: 'REJECTED'
+      });
     }
 
     // 4. On-Chain Check
@@ -341,7 +344,6 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
     if (Number(userRole) !== 3) return res.status(403).json({ error: 'Unauthorized role' });
 
     // 5. Create Profile using UserService for atomic audit entry
-    await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
     const nationalIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
     
     await pool.runWithContext({
@@ -382,27 +384,18 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
 
-    // 1. Verify Nonce with strict validation
-    const nonceResult = await pool.query(
-      `SELECT nonce FROM wallet_nonces 
-       WHERE LOWER(wallet_address) = $1 AND purpose = 'NOTARY_ONBOARD' 
-       AND used_at IS NULL AND expiry > NOW() 
-       FOR UPDATE`,
-      [normalizedWalletAddress]
-    );
-
-    if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== nonce) {
-      return res.status(401).json({ 
-        error: 'Invalid or expired session',
-        code: 'NONCE_INVALID_OR_EXPIRED',
-        state: 'AUTH_FAILED'
+    // 1. Deterministic Protocol Verification
+    try {
+      await verifyProtocolSignature({
+        purpose: 'NOTARY_ONBOARD',
+        nonce,
+        wallet: normalizedWalletAddress,
+        signature,
+        rawPayload: {}, // Initial onboard usually seed profile
+        requestId: (dbContext.getStore() || {}).requestId || 'NOTARY_ONBOARD'
       });
-    }
-
-    // 2. Sig Verification
-    const message = `Login request for ${APP_NAME}: ${nonce}`;
-    if (ethers.verifyMessage(message, signature).toLowerCase() !== normalizedWalletAddress) {
-      return res.status(401).json({ error: 'Signature verification failed' });
+    } catch (authErr) {
+      return res.status(401).json({ error: authErr.message });
     }
 
     // 3. On-Chain Check
@@ -414,7 +407,6 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
     if (Number(liveRole) !== 2) return res.status(403).json({ error: 'Not authorized role' });
 
     // 4. Create Profile via UserService
-    await pool.query('UPDATE wallet_nonces SET used_at = NOW() WHERE wallet_address = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
     await pool.runWithContext({
       userId: ACTOR_IDS.GUEST,
       reason: 'NOTARY_ONBOARDING_SYNC',
@@ -440,14 +432,14 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
 });
 
 // POST /auth/login - The primary authority bridge
-router.post('/login', withDomain('AUTH'), withGuestContext, withAction('AUTH_LOGIN'), withMutation(), async (req, res) => {
+router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestContext, withAction('AUTH_LOGIN'), withMutation(), async (req, res) => {
   try {
-    const { email, password, walletAddress, signature, nationalId, signature_nonce } = req.body;
+    const { email, password, walletAddress, signature, nationalId, signature_nonce, nonce } = req.body;
     const normalizedWalletAddress = (walletAddress || "").trim().toLowerCase();
 
     console.log(`[LOGIN_DEBUG] Attempting login for wallet: "${normalizedWalletAddress}"`);
 
-    if (!walletAddress || !signature || !signature_nonce) {
+    if (!walletAddress || !signature || (!signature_nonce && !nonce)) {
       return res.status(400).json({ error: 'Wallet address, signature, and nonce are required' });
     }
 
@@ -482,44 +474,38 @@ router.post('/login', withDomain('AUTH'), withGuestContext, withAction('AUTH_LOG
         requestId: (dbContext.getStore() || {}).requestId || 'UNKNOWN',
         service: 'AUTH_SERVICE'
     }, async (auditClient) => {
-        await auditClient.query('BEGIN');
         try {
-            // 1. Wallet Signature Verification with strict validation
-            const nonceResult = await auditClient.query(
-              `SELECT nonce FROM wallet_nonces 
-               WHERE LOWER(wallet_address) = $1 AND purpose = 'LOGIN' AND used_at IS NULL AND expiry > NOW() 
-               FOR UPDATE`,
-              [normalizedWalletAddress]
-            );
-
-            if (nonceResult.rows.length === 0 || nonceResult.rows[0].nonce !== signature_nonce) {
-              await auditClient.query('ROLLBACK');
-              return { 
-                error: 'Session expired. Please request a new nonce.',
-                code: 'NONCE_INVALID_OR_EXPIRED',
-                status: 400
-              };
-            }
-
-            const nonce = nonceResult.rows[0].nonce;
-            const message = `Login request for ${APP_NAME}: ${nonce}`;
-            if (ethers.verifyMessage(message, signature).toLowerCase() !== normalizedWalletAddress) {
-              await auditClient.query('ROLLBACK');
-              return { error: 'Wallet signature verification failed', status: 401 };
-            }
-
-            // Atomic Consumption
-            await auditClient.query('UPDATE wallet_nonces SET used_at = NOW() WHERE LOWER(wallet_address) = $1 AND nonce = $2', [normalizedWalletAddress, nonce]);
-
-            // 2. Fetch/Provision User
-            const userResult = await auditClient.query('SELECT * FROM users WHERE LOWER(wallet_address) = $1', [normalizedWalletAddress]);
+            // 1. Fetch/Provision User by Email
+            const normalizedEmail = (email || '').trim().toLowerCase();
+            let userResult = await auditClient.query('SELECT * FROM users WHERE LOWER(email) = $1', [normalizedEmail]);
             let user = userResult.rows.length > 0 ? userResult.rows[0] : null;
 
+            // Auto-Sync Admin via UserService (Uses pre-fetched liveRoleValue)
+            if (!user && Number(liveRoleValue) === 3) {
+              const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
+              user = await UserService.createUser({
+                name: 'Genesis Admin',
+                email: normalizedEmail || 'genesis@bbsns.admin',
+                wallet_address: normalizedWalletAddress,
+                role: 'admin',
+                is_human_verified: true,
+                national_id_hash: nationalIdHash,
+                password_hash: 'ADMIN_WEB3_ONLY',
+                username: normalizedWalletAddress,
+                identity_state: 'ACTIVE'
+              }, auditClient);
+            }
+
+            if (!user) {
+              await auditClient.query('ROLLBACK');
+              return { error: 'User profile not found. Please register first.', status: 404 };
+            }
+
             // 🛡️ [Hardening 2.9C-A] Activation Guard for Notaries (Uses pre-fetched liveRoleValue)
-            if (Number(liveRoleValue) === 2) {
+            if (Number(liveRoleValue) === 2 || user.role === 'notary') {
               const appCheck = await auditClient.query(
                 "SELECT status, is_activated FROM notary_applications WHERE LOWER(wallet_address) = $1",
-                [normalizedWalletAddress]
+                [user.wallet_address]
               );
               if (appCheck.rows.length === 0 || appCheck.rows[0].status !== 'activated' || !appCheck.rows[0].is_activated) {
                 await auditClient.query('ROLLBACK');
@@ -531,24 +517,44 @@ router.post('/login', withDomain('AUTH'), withGuestContext, withAction('AUTH_LOG
               }
             }
 
-            // 3. Auto-Sync Admin via UserService (Uses pre-fetched liveRoleValue)
-            if (!user && Number(liveRoleValue) === 3) {
-              const nationalIdHash = crypto.createHash('sha256').update("GENESIS_ID_PLACEHOLDER").digest('hex');
-              user = await UserService.createUser({
-                name: 'Genesis Admin',
-                wallet_address: normalizedWalletAddress,
-                role: 'admin',
-                is_human_verified: true,
-                national_id_hash: nationalIdHash,
-                password_hash: 'ADMIN_WEB3_ONLY',
-                username: normalizedWalletAddress,
-                identity_state: 'ACTIVE'
-              }, auditClient); // <--- CONNECTION AFFINITY
+            // 2. Password Check (Non-Admin)
+            // 3. National ID Match
+            if (Number(liveRoleValue) !== 3) {
+              const { comparePassword } = require('../utils/password');
+              if (!(await comparePassword(password, user.password_hash))) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'Invalid credentials', status: 401 };
+              }
+              const inputIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
+              if (user.national_id_hash && user.national_id_hash !== inputIdHash) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'National ID mismatch', status: 401 };
+              }
             }
 
-            if (!user) {
-              await auditClient.query('ROLLBACK');
-              return { error: 'User profile not found. Please register first.', status: 404 };
+            // 4. Deterministic Protocol Verification (Atomic Consumption)
+            try {
+                await verifyProtocolSignature({
+                    purpose: 'LOGIN',
+                    nonce: signature_nonce || nonce,
+                    wallet: normalizedWalletAddress,
+                    signature,
+                    rawPayload: {}, // Login uses nonce-only challenge
+                    client: auditClient,
+                    requestId: (dbContext.getStore() || {}).requestId || 'LOGIN_HANDSHAKE'
+                });
+            } catch (authErr) {
+                await auditClient.query('ROLLBACK');
+                return { 
+                    error: authErr.message,
+                    status: 401
+                };
+            }
+
+            // 5. Wallet Match Guarantee
+            if (user.wallet_address.toLowerCase() !== normalizedWalletAddress) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'Wallet access mismatch: Signature does not bind to requested identity.', status: 403 };
             }
 
             await auditClient.query('COMMIT');
@@ -580,22 +586,7 @@ router.post('/login', withDomain('AUTH'), withGuestContext, withAction('AUTH_LOG
       });
     }
 
-    // 4. Identity Checks (Non-Admin)
-    const isAdmin = Number(liveRoleValue) === 3;
-    if (!isAdmin) {
-      if (!email || !password || !nationalId) {
-        return res.status(400).json({ error: 'Email, Password, and National ID are required' });
-      }
-      const { comparePassword } = require('../utils/password');
-      if (!(await comparePassword(password, user.password_hash))) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-      const inputIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
-      if (user.national_id_hash && user.national_id_hash !== inputIdHash) {
-        return res.status(401).json({ error: 'National ID mismatch' });
-      }
-    }
-
+    // MFA assertions are now resolved transactionally inside the cascade context
     // 5. Success
     const token = await signZeroTrustToken(user, normalizedWalletAddress);
     
@@ -794,7 +785,7 @@ router.get('/me', allowPublic, async (req, res) => {
 
 const { requireUnpaused } = require('../middleware/circuit-breaker');
 
-router.post('/remote/session', withGuestContext, requireSystemActivated, async (req, res) => {
+router.post('/remote/session', withGuestContext, async (req, res) => {
   try {
     const { device_id } = req.body;
     if (!device_id) return res.status(400).json({ error: 'device_id is required' });
@@ -835,7 +826,7 @@ router.get('/remote/status/:sessionId', allowPublic, async (req, res) => {
   }
 });
 
-router.post('/remote/authorize', withGuestContext, requireSystemActivated, simpleRateLimiter(5, 60000), async (req, res) => {
+router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), async (req, res) => {
   try {
     const { sessionId, signature, walletAddress } = req.body;
     if (!sessionId || !walletAddress || !signature) return res.status(400).json({ error: 'Missing data' });
@@ -880,7 +871,7 @@ router.post('/remote/authorize', withGuestContext, requireSystemActivated, simpl
 });
 
 // 🛡️ [SECURITY] Hardened Atomic Token Exchange (Transactional with Row Lock)
-router.post('/remote/exchange', withGuestContext, requireSystemActivated, simpleRateLimiter(5, 60000), async (req, res) => {
+router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), async (req, res) => {
   try {
     const result = await pool.runWithContext({
       userId: ACTOR_IDS.SYSTEM,

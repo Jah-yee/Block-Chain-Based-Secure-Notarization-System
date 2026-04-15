@@ -242,8 +242,9 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
         password: formData.password,
         walletAddress: walletAddress,
         signature: signature,
-        signature_nonce: nonce,
+        nonce: nonce,
         nationalId: formData.nationalId,
+        backendChallenge: true,
       })
 
       toast({ title: "Secure Login Successful", description: `Welcome back!` })

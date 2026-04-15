@@ -5,7 +5,7 @@ const UX_CODES = require('../constants/ux-codes');
 const { requirePrivilege, ROLES, RISK_LEVELS, withGuestContext } = require('../middleware/actor');
 const { withDomain, withAction, withMutation } = require('../middleware/policy');
 const { uploadLimiter } = require('../middleware/rate-limit');
-const { requireSystemActivated } = require('../middleware/activation');
+// requireSystemActivated purged
 const { documentCreateSchema, documentUpdateSchema } = require('../utils/validation');
 const multer = require('multer');
 const crypto = require('crypto');
@@ -87,7 +87,7 @@ function uuidToBytes32(uuid) {
 }
 
 // ─── POST /api/documents/initiate ─────────────────────────────────────────
-router.post('/initiate', withDomain('DOCS'), requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
+router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
   try {
     const actor = req.actor;
     if (!actor)    return res.status(401).json({ error: 'Actor header required' });
@@ -184,7 +184,7 @@ router.post('/initiate', withDomain('DOCS'), requireUnpaused, requireSystemActiv
 });
 
 // ─── POST /api/documents/confirm ──────────────────────────────────────────
-router.post('/confirm', withDomain('DOCS'), requireUnpaused, requireSystemActivated, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_CONFIRM'), withMutation(), async (req, res) => {
+router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_CONFIRM'), withMutation(), async (req, res) => {
   const { intent_id, tx_hash } = req.body;
   if (!intent_id || !tx_hash) {
     return res.status(400).json({ error: 'intent_id and tx_hash are required' });

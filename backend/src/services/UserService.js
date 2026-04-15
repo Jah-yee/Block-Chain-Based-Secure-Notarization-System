@@ -69,14 +69,10 @@ class UserService {
           wallet: userData.wallet_address, 
           msg: 'User already exists, likely created by concurrent request.' 
         });
-        return null; // Signals to caller that creation was suppressed
+        return null;
       }
       logger.error('USER_CREATION_FAILED', { error: err.message }, err);
       throw err;
-    } finally {
-      if (shouldRelease) {
-        client.release();
-      }
     }
   }
 
