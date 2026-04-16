@@ -31,7 +31,7 @@ const getBucket = () => {
     return _bucketName;
 };
 
-const MAX_FILE_SIZE = () => parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024;
+const MAX_FILE_SIZE = () => parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024; // 10MB Standard
 const ALLOWED_MIME_TYPES = () => (process.env.ALLOWED_MIME_TYPES || 'application/pdf,image/jpeg,image/png').split(',');
 const ALLOWED_EXTENSIONS = () => (process.env.ALLOWED_EXTENSIONS || '.pdf,.jpg,.jpeg,.png').split(',');
 
@@ -49,7 +49,7 @@ class StorageService {
      */
     validateFile(size, mimeType, filename) {
         if (size > MAX_FILE_SIZE()) {
-            console.warn(`[STORAGE_VALIDATION] File too large: ${size} bytes`);
+            console.warn(`[STORAGE_VALIDATION] File too large: ${size} bytes (Limit: ${MAX_FILE_SIZE()})`);
             return false;
         }
         if (!ALLOWED_MIME_TYPES().includes(mimeType)) {
@@ -84,11 +84,11 @@ class StorageService {
         });
 
         try {
-            await s3Client.send(command);
-            console.log(`[S3_UPLOAD] Success: ${key}`);
+            await client.send(command);
+            console.log(`[S3_UPLOAD] S3 UPLOAD SUCCESS: ${key}`);
             return key;
         } catch (err) {
-            console.error(`[S3_UPLOAD] Failed: ${key} | Error: ${err.message}`);
+            console.error(`[S3_UPLOAD] S3 UPLOAD FAILED: ${key} | Error: ${err.message}`);
             throw err;
         }
     }
@@ -104,7 +104,7 @@ class StorageService {
             Key: key
         });
         try {
-            await s3Client.send(command);
+            await getClient().send(command);
             console.log(`[S3_DELETE] Success: ${key}`);
         } catch (err) {
             console.error(`[S3_DELETE] Failed: ${key} | Error: ${err.message}`);
@@ -115,14 +115,27 @@ class StorageService {
     /**
      * Generates a signed URL for reading a private S3 object
      * @param {string} key 
-     * @param {number} expiresIn - Seconds
+     * @param {object} options - { expiresIn, disposition, filename, contentType }
      * @returns {Promise<string>}
      */
-    async getSignedDownloadUrl(key, expiresIn = 3600) {
-        const command = new GetObjectCommand({
+    async getSignedDownloadUrl(key, options = {}) {
+        const { 
+            expiresIn = 120, // 120s Production Hardened Default
+            disposition = 'attachment',
+            filename,
+            contentType
+        } = options;
+
+        const params = {
             Bucket: getBucket(),
-            Key: key
-        });
+            Key: key,
+            ResponseContentDisposition: filename 
+                ? `${disposition}; filename="${filename.replace(/"/g, '')}"`
+                : disposition,
+            ResponseContentType: contentType || 'application/octet-stream'
+        };
+
+        const command = new GetObjectCommand(params);
         return await getSignedUrl(getClient(), command, { expiresIn });
     }
 

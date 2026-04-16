@@ -13,8 +13,8 @@ const REGEX = {
     EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
     // Enforces: Exactly 10 digits
     PHONE: /^[0-9]{10}$/,
-    // Enforces: 6-20 alphanumeric characters
-    ALPHA_NUMERIC: /^[A-Za-z0-9]{6,20}$/,
+    // Enforces: 6-30 alphanumeric characters and spaces
+    ALPHA_NUMERIC: /^[A-Za-z0-9 ]{6,30}$/,
     // Enforces: Ethereum format
     WALLET: /^0x[a-fA-F0-9]{40}$/
 };
@@ -103,7 +103,12 @@ const documentCreateSchema = Joi.object({
     owner: Joi.number().integer().positive().optional()
 });
 
-// 4. Middleware Helper
+// 4. Document Update Schema (Metadata Only)
+const documentUpdateSchema = Joi.object({
+    name: Joi.string().trim().max(100).optional()
+});
+
+// 5. Middleware Helper
 /**
  * validateBody: Higher-order middleware for Joi validation
  */
@@ -128,5 +133,6 @@ module.exports = {
     loginSchema,
     notarySchema,
     documentCreateSchema,
+    documentUpdateSchema,
     validateBody
 };

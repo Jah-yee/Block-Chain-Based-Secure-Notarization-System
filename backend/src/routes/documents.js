@@ -8,6 +8,9 @@ const { uploadLimiter } = require('../middleware/rate-limit');
 // requireSystemActivated purged
 const { documentCreateSchema, documentUpdateSchema } = require('../utils/validation');
 const multer = require('multer');
+const dbContext = require('../db/context');
+const { withRestoredContext } = require('../middleware/context-rebinder');
+
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -23,10 +26,19 @@ const ConfigService = require('../services/config.service');
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 25 * 1024 * 1024 // 25MB Limit (BBSNS Production Hardening)
+    fileSize: 10 * 1024 * 1024 // 10MB Standard (Phase 1 Hardening)
   }
 });
 
+
+function sanitizeDocument(doc) {
+  if (!doc) return null;
+  const sanitized = { ...doc };
+  delete sanitized.encrypted_key;
+  delete sanitized.user_id;
+  delete sanitized.notary_id;
+  return sanitized;
+}
 
 function mapToDetailedDoc(doc) {
   const now = new Date();
@@ -87,8 +99,9 @@ function uuidToBytes32(uuid) {
 }
 
 // ─── POST /api/documents/initiate ─────────────────────────────────────────
-router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, memoryUpload.single('file'), async (req, res) => {
+router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, withRestoredContext(memoryUpload.single('file')), async (req, res) => {
   try {
+
     const actor = req.actor;
     if (!actor)    return res.status(401).json({ error: 'Actor header required' });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -104,7 +117,16 @@ router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({
     const costWei  = (BigInt(cost) * 1000000000000000000n).toString();
 
     const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
-    const filename = req.body.filename || req.file.originalname;
+    
+    // [Architectural Separation]
+    // title = logical label (user-meaning)
+    // filename = technical key (must preserve extension)
+    const title = req.body.filename || req.file.originalname;
+    
+    // Hardened Phase 1: Sanitization with Extension Preservation
+    const originalExt = path.extname(req.file.originalname);
+    const baseName = path.basename(req.file.originalname, originalExt).replace(/[^a-zA-Z0-9-_]/g, '');
+    const safeFilename = `${baseName || 'file-' + Date.now()}${originalExt}`;
 
     let storage_key = null;
     let filepath = null;
@@ -125,44 +147,55 @@ router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({
     }
 
     const intentId = crypto.randomUUID();
-    // 5. STORAGE DECISION: S3 vs Local (Zero-Downtime Migration Support)
-    const isS3Configured = !!process.env.AWS_S3_BUCKET;
+    const fileId = crypto.randomUUID(); // Hardened Phase 0: Physical File Identifier
 
-    if (isS3Configured) {
-      storage_key = `intents/${actor.id}/${intentId}/${filename}`;
-      await storageService.uploadFile(req.file.buffer, storage_key, req.file.mimetype);
-      console.log(`[STORAGE] Uploaded to S3: ${storage_key} | intentId=${intentId}`);
-    } else {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const diskFilename = `file-${uniqueSuffix}${path.extname(filename)}`;
-      filepath = path.join('uploads', diskFilename);
-      const fullPath = path.join(__dirname, '../../', filepath);
-      const uploadDir = path.join(__dirname, '../../uploads');
-      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-      fs.writeFileSync(fullPath, req.file.buffer);
-      console.log(`[STORAGE] Saved locally: ${filepath} | intentId=${intentId}`);
+    // 5. STORAGE DECISION: Enforce S3 explicitly
+    const isS3Configured = !!process.env.AWS_S3_BUCKET;
+    if (!isS3Configured) {
+      throw new Error("S3 infrastructure is missing. Silent local fallback is disabled by enforcement constraints.");
     }
+
+    // Format: intents/{userId}/{intentId}/{fileId}
+    storage_key = `intents/${actor.id}/${intentId}/${fileId}`;
+    
+    await storageService.uploadFile(req.file.buffer, storage_key, req.file.mimetype);
+    console.log(`[STORAGE] Uploaded to S3: ${storage_key} | intentId=${intentId} | display=${safeFilename}`);
 
     // 6. DB TRANSACTION (Atomic Intent Creation)
     let intent;
     try {
       const intentRes = await pool.query(
         `INSERT INTO upload_intents
-           (id, user_id, wallet_address, file_hash, filename, storage_key, category, amount, amount_wei, storage_state, status, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'AWAITING_PAYMENT', NOW() + INTERVAL '30 minutes')
-         RETURNING id, expires_at`,
-        [intentId, actor.id, walletAddress.toLowerCase(), fileHash, filename, storage_key || filepath, category, cost, costWei, storage_key ? 'UPLOADED' : 'STORED']
+           (id, user_id, wallet_address, file_hash, filename, title, mimetype, storage_key, category, amount, amount_wei, storage_state, status, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [
+          intentId,
+          actor.id,
+          actor.address || actor.walletAddress || actor.address, // Guard for possible naming diff
+          fileHash,
+          safeFilename,
+          title,
+          req.file.mimetype,
+          storage_key,
+          category,
+          cost,
+          costWei,
+          'UPLOADED',
+          'AWAITING_PAYMENT',
+          new Date(Date.now() + 30 * 60 * 1000)
+        ]
       );
       intent = intentRes.rows[0];
     } catch (dbErr) {
       // 7. COMPENSATING CLEANUP (Transaction Safety)
       console.error(`[STORAGE_CRITICAL] DB insert failed. Cleaning up storage for intent ${intentId}.`);
       if (storage_key) await storageService.deleteFile(storage_key).catch(() => {});
-      else if (filepath) try { fs.unlinkSync(path.join(__dirname, '../../', filepath)); } catch(e) {}
       throw dbErr;
     }
 
-    console.log(`[INITIATE] intent=${intent.id} user=${actor.id} hash=${fileHash} mode=${storage_key ? 'S3' : 'LOCAL'}`);
+    const storage_mode = 'S3';
+    console.log(`[INITIATE] intent=${intent.id} user=${actor.id} hash=${fileHash} mode=${storage_mode}`);
 
     // AUTHORITATIVE CONFIG RESOLUTION
     const config = await ConfigService.getConfig();
@@ -175,7 +208,7 @@ router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({
       amount_wei:        costWei,
       ntkr_contract:     config.contracts.ntkr,
       expires_at:        intent.expires_at,
-      storage_mode:      storage_key ? 'S3' : 'LOCAL'
+      storage_mode:      storage_mode
     });
   } catch (err) {
     console.error('[INITIATE] Error:', err);
@@ -598,76 +631,74 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, 
   }
 });
 
+// ─── GET /api/documents/:id/preview ───────────────────────────────────────
+// NEW: Cloud-First Preview Endpoint (Phase 2)
+router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_READ'), async (req, res) => {
+  try {
+    const { id: paramId } = req.params;
+    const docQuery = await pool.query('SELECT * FROM documents WHERE id=$1 AND is_deleted=false', [paramId]);
+    
+    if (docQuery.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const doc = docQuery.rows[0];
+
+    // Authorization (Same logic as /file)
+    const role = Number(req.actor.role);
+    const userId = Number(req.actor.id);
+    if (role !== ROLES.ADMIN && Number(doc.user_id) !== userId && Number(doc.notary_id) !== userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (!doc.storage_key) return res.status(404).json({ error: 'Cloud source not found' });
+
+    // Hardened Phase 2: Sign with Correct Content-Type for rendering
+    const previewUrl = await storageService.getSignedDownloadUrl(doc.storage_key, {
+      expiresIn: 120,
+      disposition: 'inline',
+      contentType: doc.mimetype || 'application/pdf' // Use DB stored type
+    });
+
+    console.log(`[DOC_PREVIEW] user=${userId} doc=${req.params.id}`);
+    res.json({ preview_url: previewUrl });
+  } catch (err) {
+    console.error('[PREVIEW] Error:', err);
+    res.status(500).json({ error: 'Failed to generate preview' });
+  }
+});
+
 // Download Document File
 router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_DOWNLOAD'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
-    let query;
-    let queryParams;
-
-    // Detect if the parameter is a 64-character hex hash (SHA-256)
-    const isHash = /^[a-fA-F0-9]{64}$/.test(paramId);
-
-    if (isHash) {
-      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.wallet_address as owner_wallet 
-               FROM documents d 
-               LEFT JOIN users u ON d.notary_id = u.id 
-               LEFT JOIN users u2 ON d.user_id = u2.id
-               WHERE d.file_hash=$1 AND d.is_deleted=false`;
-      queryParams = [paramId];
-    } else {
-      if (isNaN(paramId)) return res.status(400).json({ error: 'Invalid document ID or Hash format' });
-      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.wallet_address as owner_wallet 
-               FROM documents d 
-               LEFT JOIN users u ON d.notary_id = u.id 
-               LEFT JOIN users u2 ON d.user_id = u2.id
-               WHERE d.id=$1 AND d.is_deleted=false`;
-      queryParams = [parseInt(paramId)];
-    }
-
-    const r = await pool.query(query, queryParams);
+    const r = await pool.query('SELECT * FROM documents WHERE id=$1 AND is_deleted=false', [paramId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
     const doc = r.rows[0];
 
     const role = Number(req.actor.role);
     const userId = Number(req.actor.id);
-    const docUserId = Number(doc.user_id);
-    const docNotaryId = doc.notary_id ? Number(doc.notary_id) : null;
-
-    const isOwner = userId === docUserId;
-    const isAssignedNotary = docNotaryId !== null && userId === docNotaryId;
-
-    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary) {
+    if (role !== ROLES.ADMIN && Number(doc.user_id) !== userId && Number(doc.notary_id) !== userId) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    // ── AUTH-FIRST SIGNED URL BOUNDARY ──
-    if (doc.storage_key) {
-      try {
-        const signedUrl = await storageService.getSignedDownloadUrl(doc.storage_key, 300); // 5 minutes
-        console.log(`[STORAGE] Generated signed URL for doc ${doc.id}`);
-        return res.json({ download_url: signedUrl, filename: doc.filename });
-      } catch (s3Err) {
-        console.error(`[STORAGE] S3 signed URL failed for doc ${doc.id}: ${s3Err.message}`);
-        return res.status(502).json({ error: 'Failed to retrieve cloud file.' });
-      }
+    if (!doc.storage_key) return res.status(404).json({ error: 'Cloud storage missing' });
+
+    // Hardened Phase 2: Secure Redirect Boundary
+    const signedUrl = await storageService.getSignedDownloadUrl(doc.storage_key, {
+      expiresIn: 120,
+      disposition: 'attachment',
+      filename: doc.filename, // Technical immutable name (extension preserved)
+      contentType: doc.mimetype // Precise MIME identification
+    });
+
+    // Final Safety Guard
+    if (!signedUrl.startsWith('https://')) {
+      throw new Error('INVALID_SIGNED_URL: Unsecured or malformed redirect intercepted.');
     }
 
-    // Fallback: Local Filesystem (Zero-Downtime Migration Support)
-    let filePath = doc.filepath;
-    if (filePath) {
-      if (!path.isAbsolute(filePath)) {
-        filePath = path.join(__dirname, '../../', filePath);
-      }
-      if (fs.existsSync(filePath)) {
-        return res.download(filePath, doc.filename);
-      }
-    }
-
-    return res.status(404).json({ error: 'Document file not found on any storage layer.' });
+    console.log(`[DOC_DOWNLOAD] user=${userId} doc=${req.params.id}`);
+    return res.redirect(signedUrl);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to download file' });
+    console.error('[DOWNLOAD] Error:', err);
+    res.status(500).json({ error: 'Download failed' });
   }
 });
 
@@ -956,7 +987,7 @@ async function handleDocumentPatch(req, res) {
     const { name, type } = value;
     const r = await client.query(
       `UPDATE documents SET
-        filename=COALESCE($1, filename),
+        title=COALESCE($1, title),
         updated_at=NOW()
        WHERE id=$2 RETURNING *`,
       [name, id]

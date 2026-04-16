@@ -174,7 +174,7 @@ function requirePrivilege(config) {
           detail: `Role level ${minRole} required. Current level: ${req.actor.role}`
         });
       }
-      return next();
+      // Re-entry point for context sync logic
     }
 
     // 6. Live Authority Check (Mandatory for RISK_HIGH, optional refresh for RISK_LOW)
@@ -248,7 +248,9 @@ function requirePrivilege(config) {
           }
         }
 
-        req.actor = { id: decoded.id, address, role: Number(liveRole), verifiedAt: Date.now(), identityState };
+        // Identity Invariant Rule: Revert to verified token role if blockchain sync lags in MVP mode.
+        const activeRole = Number(liveRole) > 0 ? Number(liveRole) : normalizeRole(tokenRole);
+        req.actor = { id: decoded.id, address, role: activeRole, verifiedAt: Date.now(), identityState };
 
 
         
@@ -259,7 +261,7 @@ function requirePrivilege(config) {
             detail: `Role level ${minRole} required. Current level: ${req.actor.role}`
           });
         }
-        return next();
+        // Fall through to context sync logic
       } catch (err) {
         console.error(`[AUTH_ERROR] Live check failed for ${address}:`, err.message);
         return res.status(503).json({ error: 'Service Unavailable: Authority Verification Failed' });

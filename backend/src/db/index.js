@@ -236,11 +236,13 @@ async function executeAuditedQuery(target, originalMethod, ...args) {
         if (isStrict && ENFORCEMENT_MODE === 'hard') throw new BBSNSEnforcementError(reason, logContext);
     }
 
-    // TRANSIT CHANNEL (Context required for mutations)
-    if (isMutation && !store.auditClient) {
-        const reason = 'SENTINEL_BLOCK_NO_CONTEXT: Mutation attempted without active audit client.';
-        writeEnforcementLog('BLOCKED', reason);
-        throw new BBSNSEnforcementError(reason, logContext);
+    // TRANSIT CHANNEL (Identity Required for Mutations)
+    if (isMutation) {
+        if (!store || (!store.actorId && !store.userId)) {
+            const reason = 'SENTINEL_BLOCK_MISSING_ACTOR_CONTEXT: Mutation requires authenticated actor context.';
+            writeEnforcementLog('BLOCKED', reason);
+            throw new BBSNSEnforcementError(reason, logContext);
+        }
     }
 
     return originalMethod.apply(target, args);

@@ -344,7 +344,9 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
     if (Number(userRole) !== 3) return res.status(403).json({ error: 'Unauthorized role' });
 
     // 5. Create Profile using UserService for atomic audit entry
-    const nationalIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
+    // 🛡️ [SIGNUP_CONTRACT] National ID Normalization: TRIM -> REMOVE ALL SPACES -> UPPERCASE
+    const normalizedNationalId = (nationalId || "").toString().replace(/\s+/g, '').toUpperCase();
+    const nationalIdHash = crypto.createHash('sha256').update(normalizedNationalId).digest('hex');
     
     await pool.runWithContext({
       userId: ACTOR_IDS.GUEST,
@@ -525,7 +527,9 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
                 await auditClient.query('ROLLBACK');
                 return { error: 'Invalid credentials', status: 401 };
               }
-              const inputIdHash = crypto.createHash('sha256').update(nationalId).digest('hex');
+              // 🛡️ [SIGNUP_CONTRACT] National ID Normalization: TRIM -> REMOVE ALL SPACES -> UPPERCASE
+              const normalizedNationalId = (nationalId || "").toString().replace(/\s+/g, '').toUpperCase();
+              const inputIdHash = crypto.createHash('sha256').update(normalizedNationalId).digest('hex');
               if (user.national_id_hash && user.national_id_hash !== inputIdHash) {
                 await auditClient.query('ROLLBACK');
                 return { error: 'National ID mismatch', status: 401 };

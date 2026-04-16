@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 interface Document {
   id: string
   filename: string
+  title?: string
   status: "verified" | "pending" | "rejected" | "approved"
   created_at: string
   ntkr_sent: number
@@ -90,7 +91,7 @@ export function DocumentsTable() {
               <TableCell className="font-medium">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  <span>{doc.filename}</span>
+                  <span>{doc.title || doc.filename}</span>
                 </div>
               </TableCell>
               <TableCell>
@@ -163,8 +164,8 @@ export function DocumentsTable() {
                     className="h-8 w-8"
                     title="Download File"
                     onClick={async () => {
-                      const url = await apiClient.getUrl(`/api/documents/${doc.id}/file`);
-                      window.open(url, '_blank');
+                      // Hardened Phase 3: Direct Navigation Redirect
+                      window.location.href = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/documents/${doc.id}/file`;
                     }}
                   >
                     <Download className="h-4 w-4" />

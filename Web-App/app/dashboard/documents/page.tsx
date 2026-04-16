@@ -9,6 +9,7 @@ import { generateCertificatePDF } from "@/lib/pdf-utils";
 interface Document {
     id: number;
     filename: string;
+    title: string;
     file_hash: string;
     status: string;
     created_at: string;
@@ -25,6 +26,8 @@ export default function DocumentsPage() {
     const [documents, setDocuments] = useState<Document[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
     useEffect(() => {
         loadDocuments();
@@ -103,7 +106,7 @@ export default function DocumentsPage() {
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-3">
                                             <FileText className="text-blue-400" size={20} />
-                                            <h3 className="text-lg font-semibold text-gray-100">{doc.filename}</h3>
+                                            <h3 className="text-lg font-semibold text-gray-100">{doc.title || doc.filename}</h3>
                                             {getStatusBadge(doc.status)}
                                         </div>
 
@@ -196,7 +199,10 @@ export default function DocumentsPage() {
             {selectedDocument && (
                 <div
                     className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-                    onClick={() => setSelectedDocument(null)}
+                    onClick={() => {
+                      setSelectedDocument(null);
+                      setPreviewUrl(null);
+                    }}
                 >
                     <div
                         className="bg-[#0A2540] border border-gray-800 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6"
@@ -204,8 +210,13 @@ export default function DocumentsPage() {
                     >
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-semibold text-gray-100">Document Details</h2>
+                            {/* A11y Fix: Screen reader title */}
+                            <span className="sr-only">Document Preview and Metadata</span>
                             <button
-                                onClick={() => setSelectedDocument(null)}
+                                onClick={() => {
+                                  setSelectedDocument(null);
+                                  setPreviewUrl(null);
+                                }}
                                 className="text-gray-400 hover:text-gray-200"
                             >
                                 ✕
@@ -214,8 +225,13 @@ export default function DocumentsPage() {
 
                         <div className="space-y-4">
                             <div className="bg-gray-900/50 rounded-lg p-4">
-                                <p className="text-sm text-gray-400 mb-1">Filename</p>
-                                <p className="text-gray-200">{selectedDocument.filename}</p>
+                                <p className="text-sm text-gray-400 mb-1">Title</p>
+                                <p className="text-gray-200">{selectedDocument.title || selectedDocument.filename}</p>
+                            </div>
+
+                            <div className="bg-gray-900/50 rounded-lg p-4">
+                                <p className="text-sm text-gray-500 mb-1">Technical Filename</p>
+                                <p className="text-sm text-gray-400 font-mono">{selectedDocument.filename}</p>
                             </div>
 
                             <div className="bg-gray-900/50 rounded-lg p-4">
@@ -301,28 +317,44 @@ export default function DocumentsPage() {
                                     </p>
                                 </div>
                             )}
-
-                            {/* Preview Button */}
-                            <div className="flex justify-center pt-2">
+                            {/* Hardened Phase 3: Iframe Preview Integration */}
+                            {previewUrl ? (
+                              <div className="mt-4 border border-gray-700 rounded-lg overflow-hidden bg-white/5 h-[400px]">
+                                <iframe 
+                                  src={previewUrl} 
+                                  className="w-full h-full border-none" 
+                                  title="Document Preview"
+                                  onError={() => toast.error("Browser blocked preview or insecure content.")}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex justify-center pt-2">
                                 <button
                                     onClick={async () => {
+                                        setIsPreviewLoading(true);
                                         try {
-                                            const data = await apiClient.get(`/api/documents/${selectedDocument.id}/preview`, { responseType: 'blob' });
-                                            const url = window.URL.createObjectURL(data);
-                                            window.open(url, '_blank');
-
-                                            // Clean up URL object after a delay to allow browser to load it
-                                            setTimeout(() => window.URL.revokeObjectURL(url), 10000);
+                                            const response = await apiClient.get<{ preview_url: string }>(`/api/documents/${selectedDocument.id}/preview`);
+                                            setPreviewUrl(response.preview_url);
+                                            toast.success("Preview loaded");
                                         } catch (e) {
-                                            toast.error("Failed to open preview. File might be deleted.");
+                                            toast.error("Failed to fetch preview link.");
+                                        } finally {
+                                            setIsPreviewLoading(false);
                                         }
                                     }}
-                                    className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center justify-center gap-2 transition-colors font-medium"
+                                    disabled={isPreviewLoading}
+                                    className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl flex items-center justify-center gap-2 transition-colors font-medium disabled:opacity-50"
                                 >
-                                    <Eye size={18} />
-                                    Preview Document Content
+                                    {isPreviewLoading ? (
+                                      <span className="animate-spin text-xl">◌</span>
+                                    ) : (
+                                      <Eye size={18} />
+                                    )}
+                                    {isPreviewLoading ? "Generating..." : "Preview Document Content"}
                                 </button>
-                            </div>
+                              </div>
+                            )}
+
 
                             {selectedDocument.rejection_reason && (
                                 <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">

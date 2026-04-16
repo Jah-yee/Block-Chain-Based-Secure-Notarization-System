@@ -111,11 +111,11 @@ async function attemptDocCreation(client, intent) {
 
   const docRes = await client.query(
     `INSERT INTO documents
-       (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
-     VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,NOW(),NOW(),false) 
+       (user_id, filename, title, mimetype, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,NOW(),NOW(),false) 
      ON CONFLICT (payment_tx_hash) DO NOTHING
      RETURNING id`,
-    [i.user_id, i.filename, i.storage_key, i.file_hash, i.amount, i.payment_tx_hash, 'STORED']
+    [i.user_id, i.filename, i.title, i.mimetype, i.storage_key, i.file_hash, i.amount, i.payment_tx_hash, 'STORED']
   );
   
   const docId = docRes.rows[0]?.id;

@@ -54,7 +54,9 @@ router.post("/register", withDomain('USERS'), allowPublic, withAction('USERS_REG
   const password_hash = await hashPassword(password);
 
   const crypto = require('crypto');
-  const national_id_hash = nationalId ? crypto.createHash('sha256').update(nationalId).digest('hex') : null;
+  // 🛡️ [SIGNUP_CONTRACT] National ID Normalization: TRIM -> REMOVE ALL SPACES -> UPPERCASE
+  const normalizedNationalId = (nationalId || "").toString().replace(/\s+/g, '').toUpperCase();
+  const national_id_hash = normalizedNationalId ? crypto.createHash('sha256').update(normalizedNationalId).digest('hex') : null;
 
   console.log("[REGISTER_DEBUG] Data hashed. Starting unified registration transaction...");
 
