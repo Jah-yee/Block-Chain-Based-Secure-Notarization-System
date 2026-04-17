@@ -3,8 +3,6 @@ import { ethers } from "ethers";
 import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint } from "lucide-react";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
-const GENESIS_ACTIVATION_ADDRESS = import.meta.env.VITE_GENESIS_ACTIVATION_ADDRESS;
-const GENESIS_NFT_ADDRESS = import.meta.env.VITE_GENESIS_NFT_ADDRESS;
 
 type AppStatus = "loading" | "ready" | "signing" | "authorized" | "expired" | "error" | "genesis-check" | "genesis-activate" | "onboarding";
 
@@ -56,41 +54,71 @@ function App() {
     const mode = params.get("mode");
     const sid = params.get("sessionId");
 
+    const allowedModes = ["login", "genesis"];
+
     const init = async () => {
+      // 1. HARD INPUT VALIDATION
+      if (!mode) {
+        setError("Missing protocol mode parameter (mode).");
+        setStatus("error");
+        return;
+      }
+
+      if (!sid) {
+        setError("Missing session identifier (sessionId).");
+        setStatus("error");
+        return;
+      }
+
+      if (!allowedModes.includes(mode)) {
+        setError(`Invalid protocol mode: ${mode}`);
+        setStatus("error");
+        return;
+      }
+
+      // 2. FRESH AUTHORITY SYNC (Fresh from backend)
       const [statusData, sysConfig] = await Promise.all([
         checkSystemStatus(),
         fetchConfig()
       ]);
 
-      if (sysConfig) {
-        setConfig(sysConfig);
-      } else {
-        setError("Failed to load protocol configuration from backend.");
+      if (!sysConfig) {
+        setError("Failed to load protocol configuration from backend authority.");
         setStatus("error");
         return;
       }
+      setConfig(sysConfig);
 
-      const activated = statusData?.activated;
-      const dbUserCount = statusData?.dbUserCount;
-      
-      if (mode === "genesis") {
-        if (activated === true && dbUserCount > 0) {
-          setError("System is already fully initialized and has registered administrators.");
+      const systemInitialized = statusData?.activated === true && (statusData?.dbUserCount || 0) > 0;
+
+      // 3. DETERMINISTIC STATE MACHINE
+      console.log(`[PROTOCOL] Mode: ${mode} | Initialized: ${systemInitialized} | Session: ${sid}`);
+
+      switch (mode) {
+        case "login":
+          if (!systemInitialized) {
+            setError("Protocol violation: Login requested, but system is not yet initialized. Use Genesis first.");
+            setStatus("error");
+          } else {
+            setSessionId(sid);
+            fetchSession(sid);
+          }
+          break;
+
+        case "genesis":
+          if (systemInitialized) {
+            setError("Protocol violation: Genesis requested, but system is already fully initialized.");
+            setStatus("error");
+          } else {
+            setStatus("genesis-check");
+          }
+          break;
+
+        default:
+          setError("Unrecognized protocol state.");
           setStatus("error");
-        } else {
-          setStatus("genesis-check");
-        }
-        return;
+          break;
       }
-
-      if (!sid) {
-        setError("Session ID missing. Please restart login from the desktop app.");
-        setStatus("error");
-        return;
-      }
-
-      setSessionId(sid);
-      fetchSession(sid);
     };
 
     init();
@@ -193,8 +221,8 @@ function App() {
       // 1. Fetch Real Server Nonce
       const nonce = await fetchNonce(address, "GENESIS_ONBOARD");
 
-      // 2. Sign strict message
-      const message = `Login request for BBSNS: ${nonce}`;
+      // 2. Sign strict message (Canonical Protocol Format)
+      const message = `BBSNS::GENESIS_ONBOARD::v1::${nonce}::${address.toLowerCase()}`;
       const signature = await signer.signMessage(message);
 
       // 3. Submit Onboarding
@@ -298,25 +326,59 @@ function App() {
           throw new Error(data.error || "Authorization failed on server");
         }
       } else {
-        // STANDARD LOGIN
-        console.log(`[AUTH] Attempting Standard Authorize for sessionId: ${sessionId}`);
+        // 🛡️ [Hardening 10.3] Standard Identity Binding Flow
+        // We perform a full protocol login to get a valid JWT, then bind it to the SessionId.
+        console.log(`[AUTH] Initiating Secure Identity Binding for sessionId: ${sessionId}`);
+        
         const provider = new ethers.BrowserProvider((window as any).ethereum);
         const signer = await provider.getSigner();
         const address = await signer.getAddress();
-        const signature = await signer.signMessage(challenge);
 
-        // 🛡️ Always use absolute URL for remote auth (Bypass potential path misinterpretation)
+        // 1. Fetch a fresh protocol nonce for LOGIN
+        const nonce = await fetchNonce(address, "LOGIN");
+
+        // 2. Sign the standard protocol message (Canonical Protocol Format)
+        const message = `BBSNS::LOGIN::v1::${nonce}::${address.toLowerCase()}`;
+        const signature = await signer.signMessage(message);
+
         const API_BASE = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
-        const res = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
+
+        // 3. Perform Full Protocol Login to get Identity JWT
+        const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, walletAddress: address, signature })
+          body: JSON.stringify({
+            walletAddress: address,
+            signature,
+            nonce,
+            email: "remote_user@bbsns.online" // Provisioning fallback for remote flows
+          })
         });
 
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || "Login authorization failed on server");
+        if (!loginRes.ok) {
+          const data = await loginRes.json().catch(() => ({}));
+          throw new Error(data.error || "Portal Identity Verification Failed");
         }
+
+        const { token } = await loginRes.json();
+
+        // 4. Bind the Identity Token to the Remote Session
+        const bindRes = await fetch(`${API_BASE}/api/auth/remote/complete`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ sessionId })
+        });
+
+        if (!bindRes.ok) {
+          const data = await bindRes.json().catch(() => ({}));
+          throw new Error(data.error || "Identity Binding Failed");
+        }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 3000);
       }
 
       setStatus("authorized");

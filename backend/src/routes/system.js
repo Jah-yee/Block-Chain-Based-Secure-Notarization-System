@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const dbContext = require('../db/context');
 const ConfigService = require('../services/config.service');
 
 const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../middleware/actor.js');
@@ -132,6 +133,9 @@ router.get('/sync/events', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_L
 
 // GET /api/system/logs - Fetch REAL system logs (Admin only)
 router.get('/logs', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+    console.log("REQ HEADERS", req.headers);
+    const store = dbContext.getStore();
+    console.log("CTX TRACE", store);
     try {
         const result = await pool.query(`
             SELECT id, level, message, source, metadata, created_at as timestamp 

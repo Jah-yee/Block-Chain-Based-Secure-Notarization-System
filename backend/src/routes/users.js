@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/index.js");
 const { hashPassword } = require("../utils/password.js");
-const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middleware/actor.js");
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic, withGuestContext } = require("../middleware/actor.js");
 // activation.js defunct
 const UserService = require("../services/UserService");
 const { ACTOR_IDS } = require('../constants/protocol'); // 🛡️ [Fix] Canonical source
@@ -16,12 +16,14 @@ const upload = multer({
 
 const { userSchema, validateBody } = require("../utils/validation.js");
 const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
+const { withRestoredContext } = require('../middleware/context-rebinder');
+const dbContext = require('../db/context');
 const { 
     verifyProtocolSignature 
 } = require("../utils/identity-crypto");
 
 // REGISTER User (public)
-router.post("/register", withDomain('USERS'), allowPublic, withAction('USERS_REGISTER'), withMutation(), upload.single('nationalIdFile'), validateBody(userSchema), async (req, res) => {
+router.post("/register", withDomain('USERS'), allowPublic, withGuestContext, withRestoredContext(upload.single('nationalIdFile')), validateBody(userSchema), withAction('USERS_REGISTER'), withMutation(), async (req, res) => {
   // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   
@@ -73,9 +75,8 @@ router.post("/register", withDomain('USERS'), allowPublic, withAction('USERS_REG
     }, async (auditClient) => {
 
       // 🛡️ [Hardening] Dual-Path Branching for Backend Challenge Parity
-      // If backendChallenge is NOT present (legacy frontend), we must ensure 
-      // the payload shape exactly matches the backend schema expectations since fieldMap is dead.
-      const isBackendChallenge = body.backendChallenge === true;
+      // Multi-type check: Multer (FormData) sends strings, JSON sends booleans.
+      const isBackendChallenge = body.backendChallenge === true || body.backendChallenge === 'true';
       let verificationPayload = body;
       
       if (!isBackendChallenge) {
@@ -87,18 +88,24 @@ router.post("/register", withDomain('USERS'), allowPublic, withAction('USERS_REG
       }
 
       // Step 1: Verify signature & atomically consume nonce (AUTH_NONCES UPDATE)
-      await verifyProtocolSignature({
-        purpose: 'REGISTER',
-        nonce: clientNonce,
-        wallet: body.walletAddress,
-        signature,
-        rawPayload: verificationPayload,
-        version: clientVersion,
-        client: auditClient,  // ✅ Same auditClient = sentinel sees USERS_REGISTER action
-        requestId: req.requestId || 'USER_REGISTRATION'
-      });
-
-      console.log("[REGISTER_DEBUG] Signature verified. Creating user record...");
+      console.log(`[REGISTER_DEBUG] Attempting signature verification for wallet: ${body.walletAddress} with nonce: ${clientNonce}`);
+      
+      try {
+        await verifyProtocolSignature({
+          purpose: 'REGISTER',
+          nonce: clientNonce,
+          wallet: body.walletAddress,
+          signature,
+          rawPayload: verificationPayload,
+          version: clientVersion,
+          client: auditClient,  // ✅ Same auditClient = sentinel sees USERS_REGISTER action
+          requestId: req.requestId || 'USER_REGISTRATION'
+        });
+        console.log("[REGISTER_DEBUG] Signature VALID. Proceeding to duplication check...");
+      } catch (sigErr) {
+        console.error("[REGISTER_DEBUG] Signature INVALID:", sigErr.message);
+        throw sigErr;
+      }
 
       // Step 2: Check duplicates
       const existing = await auditClient.query(

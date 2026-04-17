@@ -70,9 +70,8 @@ const userSchema = Joi.object({
 
 const loginSchema = Joi.object({
     email: Joi.string().trim().lowercase().regex(REGEX.EMAIL).required(),
-    password: Joi.string().required(),
-    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required().messages({
-        'any.required': 'National ID is required for secure login',
+    password: Joi.string().optional(),
+    nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'National ID must be 6-20 alphanumeric characters'
     }),
     walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).required(),
@@ -89,7 +88,7 @@ const notarySchema = Joi.object({
     walletAddress: Joi.string().trim().lowercase().regex(REGEX.WALLET).optional(),
     phone: Joi.string().trim().regex(REGEX.PHONE).required(),
     license: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required(),
-    experience: Joi.number().integer().min(0).max(100).optional(),
+    experience: Joi.number().integer().min(0).max(100).allow('', null).optional(),
     nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).required(),
     nationality: Joi.string().optional(),
     version: Joi.string().valid('v1').optional(),
@@ -127,6 +126,15 @@ const validateBody = (schema) => {
     };
 };
 
+/**
+ * normalizeNationalId: Authoritative scrubber for professional identifiers.
+ * Enforces: trim() -> remove-spaces -> toUpperCase()
+ */
+const normalizeNationalId = (id) => {
+    if (!id) return null;
+    return id.trim().replace(/\s+/g, '').toUpperCase();
+};
+
 module.exports = {
     REGEX,
     userSchema,
@@ -134,5 +142,6 @@ module.exports = {
     notarySchema,
     documentCreateSchema,
     documentUpdateSchema,
-    validateBody
+    validateBody,
+    normalizeNationalId
 };

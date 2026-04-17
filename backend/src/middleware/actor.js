@@ -202,10 +202,11 @@ function requirePrivilege(config) {
         }
 
         // Enforcement Rule 8: A user is ACTIVE ONLY IF identity_state == ACTIVE AND blockchain role > 0
-        const userRes = await pool.query("SELECT id, identity_state, is_deactivated FROM users WHERE wallet_address = $1", [address]);
+        const userRes = await pool.query("SELECT id, identity_state, is_deactivated, tx_status FROM users WHERE wallet_address = $1", [address]);
         const userInternal = userRes.rows[0];
         const identityState = userInternal?.identity_state;
         const isDeactivated = userInternal?.is_deactivated;
+        const txStatus = userInternal?.tx_status;
 
         // 🛡️ CRITICAL GUARD: Explicitly Block REJECTED Identities
         // This must run BEFORE the MVP toggle to ensure suspicious accounts are fail-closed.
@@ -250,7 +251,7 @@ function requirePrivilege(config) {
 
         // Identity Invariant Rule: Revert to verified token role if blockchain sync lags in MVP mode.
         const activeRole = Number(liveRole) > 0 ? Number(liveRole) : normalizeRole(tokenRole);
-        req.actor = { id: decoded.id, address, role: activeRole, verifiedAt: Date.now(), identityState };
+        req.actor = { id: decoded.id, address, role: activeRole, verifiedAt: Date.now(), identityState, txStatus };
 
 
         

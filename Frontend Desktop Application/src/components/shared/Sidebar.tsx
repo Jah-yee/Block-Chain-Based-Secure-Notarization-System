@@ -2,7 +2,7 @@ import { Home, Users, FileText, CheckSquare, Settings, LogOut, User, Gavel, Chev
 import { Button } from "../ui/button";
 
 interface SidebarProps {
-  role: "admin" | "notary";
+  role: "admin" | "notary" | "owner";
   user: { name: string; email: string; wallet_address: string } | null;
   activeScreen: string;
   onNavigate: (screen: string) => void;
@@ -32,7 +32,12 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
     { id: "profile", label: "Profile", icon: User },
   ];
 
-  const menuItems = role === "admin" ? adminMenuItems : notaryMenuItems;
+  const ownerMenuItems = [
+    { id: "dashboard", label: "Dashboard", icon: Home },
+    { id: "profile", label: "Profile", icon: User },
+  ];
+
+  const menuItems = role === "admin" ? adminMenuItems : (role === "notary" ? notaryMenuItems : ownerMenuItems);
 
   return (
     <div className={`${isCollapsed ? "w-20" : "w-64"} bg-card border-r border-border flex flex-col h-screen transition-all duration-300 relative`}>
@@ -52,7 +57,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
           <div>
             <h2 className="text-primary leading-none">BBSNS</h2>
             <p className="text-[10px] text-muted-foreground mt-1 uppercase font-black tracking-tighter">
-              {role === "admin" ? "Admin" : "Notary"}
+              {role === "admin" ? "Admin" : (role === "notary" ? "Notary" : "Document Owner")}
             </p>
           </div>
         )}

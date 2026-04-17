@@ -187,17 +187,32 @@ export default function RegisterNotaryPage() {
                 email: formData.email,
                 phone: formData.phone,
                 license: formData.license,
-                experience: formData.experience,
+                experience: formData.experience ? parseInt(formData.experience) : null,
                 nationalId: formData.nationalId,
                 nationality: selectedNationality.name
             });
             
-            const application = envelope.data; // apiClient returns the JSON body directly
+            const application = envelope.data;
 
-            if (application && (application.status === 'submitted' || application.status === 'verified' || application.status === 'APPLIED')) {
+            // CASE 1: Resume an existing session (Draft Restore)
+            if (application && application.resumed) {
+                setApplicationId(application.id);
+                setReferenceId(application.reference_id);
+                localStorage.setItem("bbsns_resuming_id", application.id.toString());
                 toast({ 
-                    title: "Application Already Pending", 
-                    description: "Our system has identified an existing application for this identity. Please wait for administrative review. Returning to Home...",
+                    title: "Draft Restored", 
+                    description: "We found your existing application. Resuming from where you left off.",
+                    variant: "default" 
+                });
+                setStep(2);
+                return;
+            }
+
+            // CASE 2: Identity already fully registered or in advanced review
+            if (application && (application.status === 'verified' || application.status === 'approved' || application.status === 'activated')) {
+                toast({ 
+                    title: "Registration In Progress", 
+                    description: "This identity is already being processed or is active in our system. Redirecting to home...",
                     variant: "destructive",
                     duration: 6000
                 });
@@ -205,25 +220,30 @@ export default function RegisterNotaryPage() {
                 return;
             }
 
-            if (!application || !application.id) throw new Error("Server returned invalid application state.");
+            if (!application || !application.id) throw new Error("Our system failed to initialize your registration profile.");
 
             setApplicationId(application.id);
             setReferenceId(application.reference_id);
             localStorage.setItem("bbsns_resuming_id", application.id.toString());
-            toast({ title: "Profile Secured", description: "Phase 1 complete. Proceeding to Biometric Verification." });
+            toast({ title: "Profile Recorded", description: "Phase 1 complete. Let's proceed to biometric verification." });
             setStep(2);
         } catch (e: any) {
-            const errorMsg = e.response?.data?.error || e.message || "Submission Failed";
+            const errorMsg = e.response?.data?.error || e.message || "Connection Interrupted";
+            
             if (errorMsg.toLowerCase().includes("already registered") || errorMsg.toLowerCase().includes("exists")) {
                 toast({ 
-                    title: "Registration Blocked", 
-                    description: "This identity is already active or pending in the system. Redirecting in 6 seconds...", 
+                    title: "Application Pending", 
+                    description: "An application for this identity is already in our queue. Please wait for the official review. Redirecting...", 
                     variant: "destructive",
                     duration: 6000
                 });
                 setTimeout(() => router.push("/"), 6000);
             } else {
-                toast({ title: "Submission Failed", description: errorMsg, variant: "destructive" });
+                toast({ 
+                    title: "Submission Issue", 
+                    description: errorMsg.includes("403") ? "Your session security policy needs re-validation. Please refresh." : errorMsg, 
+                    variant: "destructive" 
+                });
             }
         } finally {
             setIsLoading(false);
@@ -379,6 +399,21 @@ export default function RegisterNotaryPage() {
                                         <div className="space-y-2">
                                             <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">License Number</Label>
                                             <Input placeholder="Official License" className={cn("bg-slate-950/50 border-white/5 h-12 text-white", validationErrors.license && "border-red-500/50")} value={formData.license} onChange={(e) => handleInputChange("license", e.target.value)} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid md:grid-cols-1 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 ml-1">Professional Experience (Years)</Label>
+                                            <Input 
+                                                type="number" 
+                                                placeholder="Number of years practice" 
+                                                className="bg-slate-950/50 border-white/5 h-12 text-white" 
+                                                value={formData.experience} 
+                                                onChange={(e) => handleInputChange("experience", e.target.value)} 
+                                                min="0"
+                                                max="60"
+                                            />
                                         </div>
                                     </div>
 

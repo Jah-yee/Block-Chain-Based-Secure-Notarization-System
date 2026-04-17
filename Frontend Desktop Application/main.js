@@ -345,86 +345,87 @@ async function startAuthFlow() {
 
         const AUTH_BASE = "https://auth.bbsns.online";
         const AUTH_ROUTE = "/";
-        const authUrl = `${AUTH_BASE}${AUTH_ROUTE}?sessionId=${sessionId}`;
+        const authUrl = `${AUTH_BASE}${AUTH_ROUTE}?mode=login&sessionId=${sessionId}`;
 
         log("INFO", "AUTH_HANDSHAKE", "Handshake active. URL: " + authUrl);
         shell.openExternal(authUrl);
+         if (pollingInterval) clearInterval(pollingInterval);
         
-        if (pollingInterval) clearInterval(pollingInterval);
+        const startTime = Date.now();
+        const MAX_POLL_TIME = 180000; // 3 Minute Hard Timeout
+        
         pollingInterval = setInterval(async () => {
             try {
+                // 1. Check client-side timeout
+                if (Date.now() - startTime > MAX_POLL_TIME) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    log("WARN", "AUTH_TRACE", "[TIMEOUT] Client-side remote auth timeout exceeded.");
+                    if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status: 'expired', error: 'Handshake Timed Out' });
+                    return;
+                }
+
                 const url = `${API_BASE_URL}/api/auth/remote/status/${sessionId}`;
                 const pollRes = await axios.get(url);
                 
                 // [TRACE 1] Polling Response
-                log("INFO", "AUTH_TRACE", `[STEP 1] POLL_RESPONSE: ${JSON.stringify(pollRes.data)}`);
+                const { status, token, user } = pollRes.data;
+                log("INFO", "AUTH_TRACE", `[STEP 1] POLL_STATUS: ${status} (sid=${sessionId.substring(0,8)})`);
                 
-                const { status, one_time_code } = pollRes.data;
-                
-                if (status === 'authorized') {
-                    // [TRACE 2] Authorization Detected
-                    log("INFO", "AUTH_TRACE", `[STEP 2] AUTH_DETECTED: session=${sessionId}`);
-                }
+                // 2. [SUCCESS] Session Completed & Identity Bound
+                if (status === 'completed') {
+                    if (!token) {
+                        log("ERROR", "AUTH_TRACE", "[FAULT] completed state but missing token");
+                        return;
+                    }
 
-                if (status === 'authorized' && !one_time_code) {
-                    log("ERROR", "AUTH_TRACE", `[FAULT] authorized state but missing one_time_code`);
-                }
-
-                if (status === 'authorized' && one_time_code) {
-                    log("INFO", "AUTH_TRACE", `[STEP 3A] CALLING_EXCHANGE: code=${one_time_code.substring(0,8)}...`);
+                    log("INFO", "AUTH_TRACE", `[STEP 2] IDENTITY_RECEIVED: user_id=${user?.id}`);
                     clearInterval(pollingInterval);
                     pollingInterval = null;
 
-                    try {
-                        const exchangeRes = await axios.post(`${API_BASE_URL}/api/auth/remote/exchange`, {
-                            sessionId, code: one_time_code, device_id: getPersistentDeviceId()
-                        });
-                        
-                        // [TRACE 3B] Exchange Success
-                        log("INFO", "AUTH_TRACE", `[STEP 3B] EXCHANGE_SUCCESS: user_id=${exchangeRes.data.user?.id}`);
-                        
-                        saveSecureToken(exchangeRes.data.token);
-                        const ipcPayload = { 
-                            status: 'authorized', 
-                            user: exchangeRes.data.user, 
-                            zeroTrustStatus: exchangeRes.data.zeroTrustStatus,
-                            walletVerificationPending: exchangeRes.data.walletVerificationPending,
-                            traceId: currentTraceId 
-                        };
-                        
-                        // [SELF-HEALING] Start recovery worker if session is degraded
-                        if (exchangeRes.data.zeroTrustStatus === 'DEGRADED') {
-                            startAuthRecoveryWorker();
-                        }
-                        
-                        // [TRACE 4] IPC Send
-                        log("INFO", "AUTH_TRACE", `[STEP 4] IPC_SENDING: ${JSON.stringify(ipcPayload)}`);
-                        if (mainWindow) mainWindow.webContents.send('auth:status-changed', ipcPayload);
+                    // A. Persist Token
+                    saveSecureToken(token);
 
-                    } catch (exErr) {
-                        const errDetail = exErr.response ? `HTTP_${exErr.response.status}_${JSON.stringify(exErr.response.data)}` : exErr.message;
-                        log("ERROR", "AUTH_TRACE", `[STEP 3C] EXCHANGE_FAILURE: ${errDetail}`);
-                        
-                        // Report failure back to UI
-                        if (mainWindow) mainWindow.webContents.send('auth:status-changed', { 
-                            status: 'failed', 
-                            error: `Exchange Failed: ${errDetail}`,
-                            traceId: currentTraceId 
-                        });
-                    }
+                    // B. Notify UI
+                    const ipcPayload = { 
+                        status: 'authorized', 
+                        user: user, 
+                        zeroTrustStatus: pollRes.data.zeroTrustStatus || 'TRUSTED',
+                        traceId: currentTraceId 
+                    };
+                    
+                    log("INFO", "AUTH_TRACE", `[STEP 3] IPC_AUTHORIZED_SEND`);
+                    if (mainWindow) mainWindow.webContents.send('auth:status-changed', ipcPayload);
+                    return;
+                }
 
-                } else if (status === 'expired') {
+                // 3. [FAILURE] Session Expired or Explicitly Failed
+                if (status === 'expired' || status === 'failed') {
                     clearInterval(pollingInterval);
-                    log("WARN", "AUTH_TRACE", "Remote Handshake Expired.");
-                    if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status: 'expired' });
+                    pollingInterval = null;
+                    log("WARN", "AUTH_TRACE", `[TERMINAL] Session ${status}`);
+                    if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status, traceId: currentTraceId });
                 }
+
             } catch (pollErr) { 
-                if (pollErr.response && pollErr.response.status === 429) {
-                    log("ERROR", "API_THROTTLE", "Rate limited on /auth/status");
+                const statusCode = pollErr.response?.status;
+                if (statusCode === 404) {
+                    // Session consumed or missing
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    log("WARN", "AUTH_TRACE", "[CONSUMED] Session no longer available.");
+                    return;
                 }
+                
+                if (statusCode === 429) {
+                    log("ERROR", "API_THROTTLE", "Rate limited on /auth/status");
+                    return;
+                }
+                
                 log("ERROR", "AUTH", `Polling link degraded: ${pollErr.message}`); 
             }
-        }, 2000);
+        }, 3000); // Poll every 3 seconds
+        
         return { sessionId: "[HIDDEN]" };
     } catch (err) {
         let reason = err.message;
@@ -524,95 +525,76 @@ app.whenReady().then(() => {
   ipcMain.handle('api:call', async (event, endpoint, method = 'GET', data = null) => {
     const cleanMethod = (method || 'GET').toUpperCase();
 
-    // 🛡️ [SECURITY] Hardened Path Enforcement (Phase 1.1)
+    // 🛡️ [SECURITY] Hardened Path Enforcement
     if (!validateRequest(endpoint, cleanMethod)) {
         const parsed = new URL(endpoint, "http://localhost");
         const tokenExists = !!(await getSecureToken());
-        
-        // 🚀 [BYPASS] Allow critical bridge-path for public heartbeat/nonce/handshake without tokens
-        const PUBLIC_ROUTES = [
-            '/api/auth/system-status', 
-            '/api/auth/nonce',
-            '/api/auth/remote/session',
-            '/api/auth/remote/exchange',
-            '/api/auth/remote/authorize',
-            '/api/auth/remote/status',
-            '/api/auth/remote/verify',
-            '/api/auth/remote/callback'
-        ];
-        const isPublicRequest = PUBLIC_ROUTES.includes(parsed.pathname);
+        const isPublicRequest = [
+            '/api/auth/system-status', '/api/auth/nonce', '/api/auth/remote/session', 
+            '/api/auth/remote/exchange', '/api/auth/remote/authorize', 
+            '/api/auth/remote/status', '/api/auth/remote/verify', '/api/auth/remote/callback'
+        ].includes(parsed.pathname);
 
         if (!isPublicRequest) {
-            const logData = {
-                request: { raw: endpoint, clean: parsed.pathname, method: cleanMethod },
-                session: { authenticated: tokenExists },
-                severity: "HIGH"
-            };
-            log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access Attempt: ${JSON.stringify(logData)}`);
-            
-            throw { 
-                code: "ACCESS_DENIED", 
-                message: "Unauthorized API access attempt" 
+            log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access: ${cleanMethod} ${endpoint}`);
+            return {
+                success: false,
+                error: { code: "ACCESS_DENIED", message: "Unauthorized API access attempt" }
             };
         }
     }
 
-    log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint}`);
-    
     try {
         const token = await getSecureToken();
-        const parsed = new URL(endpoint, "http://localhost");
-        const PUBLIC_ROUTES = [
-            '/api/auth/system-status', 
-            '/api/auth/nonce',
-            '/api/auth/remote/session',
-            '/api/auth/remote/exchange',
-            '/api/auth/remote/authorize',
-            '/api/auth/remote/status',
-            '/api/auth/remote/verify',
-            '/api/auth/remote/callback'
-        ];
-        const isPublicRequest = PUBLIC_ROUTES.includes(parsed.pathname);
-
-        if (!token && !isPublicRequest) {
-            log("WARN", "API_BRIDGE", `NO_TOKEN for protected path: ${endpoint}`);
-            const error = new Error('UNAUTHORIZED');
-            error.response = { status: 401 };
-            throw error;
-        }
+        console.log("TOKEN TRACE:", token ? `PRESENT (${token.length} chars)` : "NULL");
 
         const headers = { 
             'Content-Type': 'application/json'
         };
-
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
+
+        console.log("FINAL HEADERS:", headers);
+        console.log("REQUEST CONFIG:", { url: endpoint, headers });
 
         const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
         const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const fullUrl = `${cleanBase}${cleanEndpoint}`;
 
         const axiosConfig = { method: cleanMethod, url: fullUrl, headers, timeout: 5000 };
-
         if (cleanMethod !== 'GET' && data) {
             axiosConfig.data = data;
         }
 
+        log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint}`);
         const response = await axios(axiosConfig);
         log("INFO", "API_BRIDGE", `← ${response.status} ${endpoint}`);
-        return response.data;
+
+        return {
+            success: true,
+            data: response.data
+        };
+
     } catch (error) {
         const status = error.response ? error.response.status : 'NETWORK_ERROR';
         let detail = error.message;
         
-        // 🧪 [FORENSIC] Log response body for deep analysis of backend failures (500/503)
         if (error.response && error.response.data) {
             detail += ` | Body: ${JSON.stringify(error.response.data).slice(0, 300)}`;
         }
         
         log("ERROR", "API_BRIDGE", `← ${status} ${endpoint} | Error: ${detail}`);
-        throw error;
+
+        return {
+            success: false,
+            error: {
+                message: error.message,
+                status: status,
+                data: error.response ? error.response.data : null,
+                endpoint
+            }
+        };
     }
   });
 });

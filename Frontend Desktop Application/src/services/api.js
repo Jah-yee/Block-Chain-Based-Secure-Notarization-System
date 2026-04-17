@@ -63,7 +63,17 @@ const api = {
 
         // 🛡️ [SECURITY] Hardened Path: Bridge is now the ONLY authority.
         // No fallback to fetch() to ensure zero-trust logic remains consistent.
-        return await window.electronAPI.api.call(endpoint, method, data);
+        const response = await window.electronAPI.api.call(endpoint, method, data);
+        
+        if (response.success) {
+            return response.data;
+        } else {
+            console.error(`[API_BRIDGE_ERROR] ${endpoint}:`, response.error);
+            const error = new Error(response.error?.message || "Bridge Communication Fault");
+            error.status = response.error?.status || 500;
+            error.data = response.error?.data;
+            throw error;
+        }
     }
 
     // 🛡️ [LEGACY] Fallback Path (localStorage)

@@ -73,6 +73,19 @@ app.get("/health", allowPublic, async (req, res) => {
     });
 });
 
+/**
+ * 🛡️ [WHITELISTED DISCOVERY] Core System Configuration
+ * Priority: ensures the frontend can always find the RPC and Contract authority.
+ */
+app.get(['/api/system/config', '/system/config'], allowPublic, async (req, res) => {
+    try {
+        const config = await ConfigService.getConfig();
+        res.json(config);
+    } catch (err) {
+        res.status(500).json({ error: 'System configuration unavailable' });
+    }
+});
+
 // --- PHASE 7: OBSERVABILITY (CORRELATION & HEALTH) ---
 
 /**

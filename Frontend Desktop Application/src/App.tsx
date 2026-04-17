@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Shield, Loader2, AlertCircle, Sun, Moon, CheckCircle2, ShieldAlert, RefreshCw } from "lucide-react";
 import { RoleSelection } from "./components/RoleSelection";
 import { AdminLogin } from "./components/admin/AdminLogin";
@@ -149,6 +149,7 @@ export default function App() {
   const [alertCount, setAlertCount] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const hasInitiatedRecovery = useRef(false);
   
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem("bbsns_dark_mode");
@@ -172,25 +173,61 @@ export default function App() {
       window.history.replaceState(null, "", "/");
     }
 
-    if (config) {
+    if (config && !hasInitiatedRecovery.current) {
       console.log("[CONFIG] Applying dynamic authority:", config.apiBaseUrl);
       api.setBaseUrl(config.apiBaseUrl);
+      hasInitiatedRecovery.current = true;
       recoverSession();
     }
   }, [config]);
 
-  const recoverSession = async () => {
-    console.log("[SESSION] Initializing hardened recovery flow (getSession)...");
-    try {
-      // 1. Check System Activation Status (Public API)
-      const systemStatus = await api.request("/api/auth/system-status");
-      const { activated } = systemStatus;
-      setIsSystemActivated(activated);
 
-      if (!activated) {
-        setAppState("initialize-system");
-        setIsRecovering(false);
-        return;
+
+  const recoverSession = async () => {
+    console.log("[SESSION] Initializing resilient recovery flow (getSession)...");
+    let resolved = false;
+
+    try {
+      // 🛡️ [RESILIENCE] Decouple UI from Slow Handshake
+      // Race the API call against a 4s hard timeout to prevent UI deadlock
+      const timeout = new Promise(resolve => 
+        setTimeout(() => {
+          if (!resolved) {
+            console.warn("[SESSION] Handshake timeout (4s). Using fail-safe fallback.");
+            resolve(null);
+          }
+        }, 4000)
+      );
+
+      const apiCall = api.request("/api/auth/system-status").then(res => {
+        resolved = true;
+        return res;
+      });
+
+      const systemStatus = await Promise.race([apiCall, timeout]);
+
+      if (systemStatus) {
+        const { activated, hasUsers, isChainUp } = systemStatus;
+        setIsSystemActivated(activated);
+        
+        // ⚖️ [DECISION] Decoupled Logic:
+        // Use facts (hasUsers) to allow entry even if blockchain is unreachable
+        const canProceed = activated === true || hasUsers === true;
+
+        if (!canProceed) {
+          console.log("[SESSION] System not activated and has no users. Redirecting to Genesis.");
+          setAppState("initialize-system");
+          setIsRecovering(false);
+          return;
+        }
+
+        if (!isChainUp) {
+          console.warn("[SESSION] System reachable but blockchain authority is unreachable (DEGRADED).");
+        }
+      } else {
+        // [TIMEOUT CASE] - Assume activated to avoid blocking Admin/Notary entry
+        // If they don't have a session, they'll reach RoleSelection.
+        console.warn("[SESSION] Proceeding in degraded mode after status timeout.");
       }
 
       // 2. Fetch session from main process bridge (Secondary Authority)
@@ -198,6 +235,7 @@ export default function App() {
       
       if (!session || !session.authenticated) {
         console.log("[SESSION] No authenticated session found in OS vault.");
+        setAppState("role-selection");
         setIsRecovering(false);
         return;
       }
@@ -228,9 +266,11 @@ export default function App() {
     } catch (err: any) {
       console.error("[SESSION] Recovery Error:", err.message);
       setRecoveryError(err.message);
+      setAppState("role-selection"); // Fallback to allow re-login attempt
     }
     setIsRecovering(false);
   };
+
 
   useEffect(() => {
     // 🛡️ [SECURITY] Listen for OS-level auth status changes (Success, Expiry, Force Logout)

@@ -63,85 +63,92 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
     const MS_IN_DAY = 24 * 60 * 60 * 1000;
     let resolvedConfig = null;
 
-    try {
-      // 🟢 TIER 1: Authoritative Sync (3 Retries)
-      for (let i = 0; i < 3; i++) {
-        try {
-          const response = await axios.get(`${DEFAULT_API_URL}/api/system/config`, { timeout: 5000 });
-          const payload = response.data;
-          
-          if (payload && payload.apiBaseUrl) {
-            // 🛡️ INTEGRITY: Verify Schema & Checksum
-            const isValid = await ConfigValidator.validate(payload);
-            const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
-
-            if (isValid && isIntact) {
-              setMode('LIVE');
-              resolvedConfig = payload;
-              break;
-            } else if (isValid && !isIntact) {
-              console.warn(`[CONFIG] Authority integrity violation: CHECKSUM_MISMATCH. Entering RESILIENCE mode.`);
-              setMode('EMERGENCY');
-              resolvedConfig = payload;
-              break;
-            } else {
-              const reason = !isValid ? "SCHEMA_INVALID" : "UNIDENTIFIED_FAULT";
-              console.error(`[CONFIG] Authority integrity violation: ${reason}`);
-              throw new Error(`CRITICAL: Configuration ${reason}. System cannot trust authority.`);
-            }
-          }
-        } catch (e) {
-          if (i < 2) {
-            const delay = i === 0 ? 2000 : 5000;
-            await new Promise(r => setTimeout(r, delay));
-          }
-        }
-      }
-
-      // 🟠 TIER 2: OS-Level Cache Fallback
-      if (!resolvedConfig && electronAPI?.config?.load) {
-        try {
-          const cached = await electronAPI.config.load();
-          if (cached && cached.data) {
-            const { data, timestamp } = cached;
+      let modeAssignment = 'LIVE';
+      
+      try {
+        // 🟢 TIER 1: Authoritative Sync (3 Retries)
+        for (let i = 0; i < 3; i++) {
+          try {
+            const response = await axios.get(`${DEFAULT_API_URL}/api/system/config`, { timeout: 5000 });
+            const payload = response.data;
             
-            // 🛡️ INTEGRITY: Verify Cached Schema
-            if (await ConfigValidator.validate(data)) {
-                const age = Date.now() - timestamp;
-                resolvedConfig = data;
-                
-                if (age > MS_IN_DAY) {
-                    console.warn('[CONFIG] OS cache is older than 24h. READ-ONLY mode active.');
-                    setMode('STALE');
-                } else {
-                    console.log('[CONFIG] Using valid local OS cache (DEGRADED).');
-                    setMode('DEGRADED');
-                }
-            } else {
-                console.warn('[CONFIG] OS level cache is corrupted. Clearing.');
-                // Note: We don't have a clearCache IPC yet, but we can just ignore it
+            if (payload && payload.apiBaseUrl) {
+              // 🛡️ INTEGRITY: Verify Schema & Checksum
+              const isValid = await ConfigValidator.validate(payload);
+              const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
+
+              if (isValid && isIntact) {
+                setMode('LIVE');
+                modeAssignment = 'LIVE';
+                resolvedConfig = payload;
+                break;
+              } else if (isValid && !isIntact) {
+                console.warn(`[CONFIG] Authority integrity violation: CHECKSUM_MISMATCH. Entering RESILIENCE mode.`);
+                setMode('EMERGENCY');
+                modeAssignment = 'EMERGENCY';
+                resolvedConfig = payload;
+                break;
+              } else {
+                const reason = !isValid ? "SCHEMA_INVALID" : "UNIDENTIFIED_FAULT";
+                console.error(`[CONFIG] Authority integrity violation: ${reason}`);
+                throw new Error(`CRITICAL: Configuration ${reason}. System cannot trust authority.`);
+              }
+            }
+          } catch (e) {
+            if (i < 2) {
+              const delay = i === 0 ? 2000 : 5000;
+              await new Promise(r => setTimeout(r, delay));
             }
           }
-        } catch (cacheErr) {
-          console.error('[CONFIG] Failed to load OS cache:', cacheErr);
         }
-      }
 
-      // 🔴 TIER 3: Emergency Fallback (Bootstrap Only)
-      if (!resolvedConfig) {
-        console.error('[CONFIG] Critical connection failure. Entering EMERGENCY mode.');
-        setMode('EMERGENCY');
-        resolvedConfig = {
-          apiBaseUrl: DEFAULT_API_URL,
-          webAppUrl: DEFAULT_WEB_URL,
-          remoteAuthUrl: DEFAULT_AUTH_URL,
-          rpcUrl: '',
-          chainId: 0,
-          contracts: {}
-        } as Config;
-      }
+        // 🟠 TIER 2: OS-Level Cache Fallback
+        if (!resolvedConfig && electronAPI?.config?.load) {
+          try {
+            const cached = await electronAPI.config.load();
+            if (cached && cached.data) {
+              const { data, timestamp } = cached;
+              
+              // 🛡️ INTEGRITY: Verify Cached Schema
+              if (await ConfigValidator.validate(data)) {
+                  const age = Date.now() - timestamp;
+                  resolvedConfig = data;
+                  
+                  if (age > MS_IN_DAY) {
+                      console.warn('[CONFIG] OS cache is older than 24h. READ-ONLY mode active.');
+                      setMode('STALE');
+                      modeAssignment = 'STALE';
+                  } else {
+                      console.log('[CONFIG] Using valid local OS cache (DEGRADED).');
+                      setMode('DEGRADED');
+                      modeAssignment = 'DEGRADED';
+                  }
+              } else {
+                  console.warn('[CONFIG] OS level cache is corrupted. Clearing.');
+              }
+            }
+          } catch (cacheErr) {
+            console.error('[CONFIG] Failed to load OS cache:', cacheErr);
+          }
+        }
 
-      if (mode !== 'EMERGENCY' && resolvedConfig.rpcUrl && !resolvedConfig.chainId) {
+        // 🔴 TIER 3: Emergency Fallback (Bootstrap Only)
+        if (!resolvedConfig) {
+          console.error('[CONFIG] Critical connection failure. Entering EMERGENCY mode.');
+          setMode('EMERGENCY');
+          modeAssignment = 'EMERGENCY';
+          resolvedConfig = {
+            apiBaseUrl: DEFAULT_API_URL,
+            webAppUrl: DEFAULT_WEB_URL,
+            remoteAuthUrl: DEFAULT_AUTH_URL,
+            rpcUrl: '',
+            chainId: 0,
+            contracts: {}
+          } as Config;
+        }
+
+        if (modeAssignment !== 'EMERGENCY' && resolvedConfig.rpcUrl && !resolvedConfig.chainId) {
+
         throw { code: 'INVALID_CHAIN_ID', message: `Mismatched network authority. Chain ID is missing.` };
       }
 
@@ -162,7 +169,8 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
       });
       setStatus('error');
     }
-  }, [mode]);
+  }, []);
+
 
   useEffect(() => {
     fetchConfig();

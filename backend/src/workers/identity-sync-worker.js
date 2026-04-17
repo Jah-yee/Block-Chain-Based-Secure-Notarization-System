@@ -1,23 +1,14 @@
 'use strict';
 
 const pool = require('../db/index');
-const { ethers } = require('ethers');
 const SyncLogger = require('../services/SyncLogger');
 const { runWithSystemContext } = require('../middleware/actor');
 const WorkerRegistry = require('../services/worker-registry.service');
+const { triggerOnChainRegistration } = require('../services/identity-sync');
 
 const SYNC_INTERVAL_MS = process.env.IDENTITY_SYNC_INTERVAL_MS || 60000;
 
-/**
- * Trigger On-Chain Registration
- * This is a placeholder for the actual blockchain interaction logic.
- * In a real scenario, this would call a contract method.
- */
-async function triggerOnChainRegistration(user) {
-    // Placeholder implementation
-    console.log(`[IDENTITY_WORKER] Triggering on-chain registration for ${user.wallet_address}...`);
-    // This would typically involve sending a transaction and updating the DB with the hash.
-}
+// Authoritative service imported above
 
 async function startWorker() {
   console.log("[IDENTITY_WORKER] Started. Authoritative Logging & Traceability active.");
@@ -36,8 +27,8 @@ async function startWorker() {
             WHERE id = (
                 SELECT id FROM users 
                 WHERE identity_state = 'ACTIVE'
-                  AND tx_status IN ('initiated', 'failed', 'retrying')
-                  AND (tx_status IS NULL OR tx_status != 'confirmed')
+                  AND tx_status IN ('pending', 'initiated', 'failed', 'retrying')
+                  AND (tx_status IS NOT NULL AND tx_status != 'confirmed')
                   AND retry_count < 5
                   AND (status_updated_at IS NULL OR NOW() > status_updated_at + (power(2, retry_count) * interval '1 minute'))
                 ORDER BY status_updated_at ASC NULLS FIRST

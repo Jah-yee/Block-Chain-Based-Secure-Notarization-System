@@ -1,12 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/index.js");
-const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middleware/actor.js");
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic, withGuestContext } = require("../middleware/actor.js");
 const bcrypt = require("bcrypt");
 const { registerNotaryOnChain } = require("../blockchain/notary-registry");
 const emailService = require("../services/EmailService");
 const crypto = require("crypto");
-const { notarySchema, validateBody } = require("../utils/validation.js");
+const { notarySchema, validateBody, normalizeNationalId } = require("../utils/validation.js");
 const { logAction } = require("../utils/logger");
 const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
 const { verifyProtocolSignature } = require("../utils/identity-crypto");
@@ -59,125 +59,126 @@ router.get("/applications/status/:id", allowPublic, async (req, res) => {
 });
 
 // PUBLIC: Submit initial notary application
-router.post("/applications/public", withDomain('NOTARY'), allowPublic, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/applications/public", withDomain('NOTARY'), allowPublic, withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
+    await pool.runWithContext({
+      userId: ACTOR_IDS.GUEST,
+      reason: 'NOTARY_APP_SUBMIT',
+      route: req.originalUrl,
+      requestId: req.requestId || 'UNKNOWN',
+      service: 'NOTARY_SERVICE'
+    }, async (auditClient) => {
+      // 🛡️ [Hardening] 1. Check if wallet already registered as a document owner (separate accounts required)
+      if (walletAddress) {
+        const walletInUse = await auditClient.query(
+          "SELECT id, role FROM users WHERE wallet_address = $1",
+          [walletAddress.toLowerCase()]
+        );
+        if (walletInUse.rows.length > 0) {
+          const err = new Error("This wallet is already registered as a document owner. Notaries must use a separate wallet address.");
+          err.statusCode = 409;
+          throw err;
+        }
+      }
 
-    // GUARD: Reject if wallet already registered as a document owner (separate accounts required)
-    if (walletAddress) {
-      const walletInUse = await pool.query(
-        "SELECT id, role FROM users WHERE wallet_address = $1",
-        [walletAddress.toLowerCase()]
+      const normalizedId = normalizeNationalId(nationalId);
+
+      // 🛡️ [Hardening] 2. Check if wallet, email, or national ID already has a pending/approved application
+      const queryParts = ["email = $1"];
+      const queryParams = [email.toLowerCase()];
+
+      if (walletAddress) {
+        queryParts.push("wallet_address = $" + (queryParams.length + 1));
+        queryParams.push(walletAddress.toLowerCase());
+      }
+
+      if (normalizedId) {
+        queryParts.push("national_id_number = $" + (queryParams.length + 1));
+        queryParams.push(normalizedId);
+      }
+
+      const existing = await auditClient.query(
+        `SELECT * FROM notary_applications WHERE ${queryParts.join(" OR ")}`,
+        queryParams
       );
-      if (walletInUse.rows.length > 0) {
-        return res.status(409).json({
-          status: "error",
-          data: null,
-          error: "This wallet is already registered as a document owner. Notaries must use a separate wallet address."
-        });
-      }
-    }
 
-    // Check if wallet, email, or national ID already has a pending/approved application
-    const queryParts = ["email = $1"];
-    const queryParams = [email.toLowerCase()];
-
-    if (walletAddress) {
-      queryParts.push("wallet_address = $" + (queryParams.length + 1));
-      queryParams.push(walletAddress.toLowerCase());
-    }
-
-    if (nationalId) {
-      queryParts.push("national_id_number = $" + (queryParams.length + 1));
-      queryParams.push(nationalId);
-    }
-
-    const existing = await pool.query(
-      `SELECT * FROM notary_applications WHERE ${queryParts.join(" OR ")}`,
-      queryParams
-    );
-
-    if (existing.rows.length > 0) {
-      const app = existing.rows[0];
-      if (app.status === 'approved' || app.status === 'activated') {
-        return res.status(400).json({ 
-          status: "error", 
-          data: null, 
-          error: "Professional already registered." 
-        });
-      }
-
-      // If pending, allow updating the non-identity fields
-      const RESUMABLE_STATES = ['pending'];
-      if (RESUMABLE_STATES.includes(app.status)) {
-        // Ensure reference_id exists for legacy applications
-        let referenceId = app.reference_id;
-        if (!referenceId) {
-          const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
-          referenceId = `BBSNS-REG-${suffix}`;
-          await pool.query("UPDATE notary_applications SET reference_id = $1 WHERE id = $2", [referenceId, app.id]);
+      if (existing.rows.length > 0) {
+        const app = existing.rows[0];
+        if (app.status === 'approved' || app.status === 'activated') {
+          const err = new Error("Professional already registered.");
+          err.statusCode = 400;
+          throw err;
         }
 
-        await pool.query(`
-          UPDATE notary_applications 
-          SET phone = $1, experience = $2, nationality = $3, national_id_number = $4, updated_at = NOW()
-          WHERE id = $5
-        `, [phone, experience, nationality, nationalId, app.id]);
+        const RESUMABLE_STATES = ['pending'];
+        if (RESUMABLE_STATES.includes(app.status)) {
+          let referenceId = app.reference_id;
+          if (!referenceId) {
+            const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+            referenceId = `BBSNS-REG-${suffix}`;
+            await auditClient.query("UPDATE notary_applications SET reference_id = $1 WHERE id = $2", [referenceId, app.id]);
+          }
 
-        return res.status(200).json({
-          status: "ok",
-          data: {
-            message: "Application session synchronized. Resuming verification.",
-            id: app.id,
-            reference_id: referenceId,
-            status: app.status,
-            resumed: true
-          },
-          error: null
-        });
+          await auditClient.query(`
+            UPDATE notary_applications 
+            SET phone = $1, experience = $2, nationality = $3, national_id_number = $4, updated_at = NOW()
+            WHERE id = $5
+          `, [phone, experience, nationality, nationalId, app.id]);
+
+          res.status(200).json({
+            status: "ok",
+            data: {
+              message: "Application session synchronized. Resuming verification.",
+              id: app.id,
+              reference_id: referenceId,
+              status: app.status,
+              resumed: true
+            },
+            error: null
+          });
+          return;
+        }
+
+        const err = new Error("Application already exists.");
+        err.statusCode = 400;
+        err.data = { id: app.id, status: app.status };
+        throw err;
       }
 
-      // If in professional advanced state, reject duplicate
-      if (['verified', 'approved', 'activated'].includes(app.status)) {
-        return res.status(409).json({
-          status: "error",
-          data: { id: app.id, status: app.status },
-          error: "Professional identity already verified or active."
-        });
-      }
+      const nationalIdHash = normalizedId ? crypto.createHash('sha256').update(normalizedId).digest('hex') : null;
+      
+      // Generate BBSNS-REG-XXXX reference
+      const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+      const referenceId = `BBSNS-REG-${suffix}`;
 
-      return res.status(400).json({
-        status: "error",
-        data: { id: app.id, status: app.status },
-        error: "Application already exists."
+      // 🛡️ [Hardening] 3. Record application
+      const result = await auditClient.query(`
+        INSERT INTO notary_applications 
+        (full_name, email, wallet_address, phone, license_number, experience, national_id_number, national_id_hash, nationality, status, reference_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
+        RETURNING id, reference_id
+      `, [fullName, email.toLowerCase(), walletAddress ? walletAddress.toLowerCase() : null, phone, license, experience, normalizedId, nationalIdHash, nationality, referenceId]);
+
+      res.status(201).json({
+        status: "ok",
+        data: {
+          message: "Application recorded. Proceed to biometric verification.",
+          id: result.rows[0].id,
+          reference_id: result.rows[0].reference_id
+        },
+        error: null
       });
-    }
-
-    const nationalIdHash = nationalId ? crypto.createHash('sha256').update(String(nationalId)).digest('hex') : null;
-    
-    // Generate BBSNS-REG-XXXX reference
-    const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const referenceId = `BBSNS-REG-${suffix}`;
-
-    // 🛡️ [Hardening 2.9C-A] password_hash removed from application state table
-    const result = await pool.query(`
-      INSERT INTO notary_applications 
-      (full_name, email, wallet_address, phone, license_number, experience, national_id_number, national_id_hash, nationality, status, reference_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
-      RETURNING id, reference_id
-    `, [fullName, email.toLowerCase(), walletAddress ? walletAddress.toLowerCase() : null, phone, license, experience, nationalId, nationalIdHash, nationality, referenceId]);
-
-    res.status(201).json({
-      status: "ok",
-      data: {
-        message: "Application recorded. Proceed to biometric verification.",
-        id: result.rows[0].id,
-        reference_id: result.rows[0].reference_id
-      },
-      error: null
     });
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ 
+        status: "error", 
+        data: err.data || null, 
+        error: err.message 
+      });
+    }
     console.error("Public App Error:", err);
     res.status(500).json({ 
       status: "error", 
@@ -231,7 +232,7 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withA
       }
 
       // Update Application State
-      // 🛡️ [Hardening] Atomic Transition: pending -> verified
+      // 🛡️ [Hardening] Atomic Transition: pending -> KYC_VERIFIED
       const isReference = (id || "").startsWith('BBSNS-REG-');
       const lookupField = isReference ? "reference_id" : "id";
       const appCheck = await auditClient.query(`SELECT status FROM notary_applications WHERE ${lookupField} = $1`, [id]);
@@ -243,7 +244,7 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withA
 
       const currentStatus = appCheck.rows[0].status;
       
-      if (['verified', 'approved', 'activated'].includes(currentStatus)) {
+      if (['KYC_VERIFIED', 'approved', 'activated'].includes(currentStatus)) {
         const err = new Error('ALREADY_PROCESSED: Identity is already verified or active.');
         err.statusCode = 409;
         throw err;
@@ -256,11 +257,11 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withA
       }
 
       const result = await auditClient.query(
-        `UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'verified', updated_at = NOW() WHERE ${lookupField} = $4 RETURNING *`,
+        `UPDATE notary_applications SET face_descriptor = $1, wallet_nonce = $2, wallet_address = $3, status = 'KYC_VERIFIED', updated_at = NOW() WHERE ${lookupField} = $4 RETURNING *`,
         [JSON.stringify(faceDescriptor), signature, normalizedWallet, id]
       );
 
-      logAction('NOTARY_STATUS_CHANGE', `System verified identity for app ${id}`, 'system', { id, from: currentStatus, to: 'verified' });
+      logAction('NOTARY_STATUS_CHANGE', `System verified identity for app ${id}`, 'system', { id, from: currentStatus, to: 'KYC_VERIFIED' });
 
       return result.rows[0];
     }).then((application) => {
@@ -309,7 +310,7 @@ router.get("/applications", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_
         na.status,
         na.created_at as application_date
       FROM notary_applications na
-      WHERE na.status IN ('pending', 'verified', 'approved', 'activated', 'rejected')
+      WHERE na.status IN ('KYC_VERIFIED', 'approved', 'activated', 'rejected')
       ORDER BY na.created_at DESC
     `);
     res.json({
@@ -344,7 +345,7 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
     if (app.status === 'approved' || app.status === 'activated') {
       return res.status(409).json({ status: "error", error: "ALREADY_PROCESSED: Application already approved or active" });
     }
-    if (app.status !== 'verified') {
+    if (app.status !== 'KYC_VERIFIED') {
       return res.status(403).json({ status: "error", error: `FORBIDDEN: Application in '${app.status}' state. Identity verification required.` });
     }
 
@@ -449,7 +450,7 @@ router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({
       return res.status(409).json({ status: "error", error: "ALREADY_PROCESSED: Application already rejected" });
     }
 
-    if (!['pending', 'verified'].includes(currentStatus)) {
+    if (!['pending', 'KYC_VERIFIED'].includes(currentStatus)) {
       return res.status(403).json({ 
         status: "error", 
         error: `FORBIDDEN: Cannot reject application in '${currentStatus}' state.` 

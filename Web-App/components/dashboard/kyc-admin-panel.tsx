@@ -28,6 +28,7 @@ interface NotaryApplication {
     email: string
     wallet_address: string
     license_number: string
+    experience: number
     status: 'pending' | 'verified' | 'approved' | 'activated' | 'rejected'
     application_date: string
 }
@@ -277,6 +278,7 @@ export function KYCAdminPanel() {
                                         <TableRow>
                                             <TableHead>Candidate</TableHead>
                                             <TableHead>Wallet</TableHead>
+                                            <TableHead>Experience</TableHead>
                                             <TableHead>License</TableHead>
                                             <TableHead>Status</TableHead>
                                             <TableHead className="text-right">Governance</TableHead>
@@ -307,6 +309,11 @@ export function KYCAdminPanel() {
                                                     </TableCell>
                                                     <TableCell>
                                                         <code className="text-xs bg-muted px-1 rounded">{app.wallet_address?.substring(0, 10)}...</code>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline" className="text-[10px] font-mono">
+                                                            {app.experience || 0} Years
+                                                        </Badge>
                                                     </TableCell>
                                                     <TableCell>
                                                         <span className="text-xs font-mono">{app.license_number}</span>

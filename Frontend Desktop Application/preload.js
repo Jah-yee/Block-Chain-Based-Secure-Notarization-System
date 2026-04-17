@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     api: {
         call: (endpoint, method, data) => ipcRenderer.invoke('api:call', endpoint, method, data)
     },
+    openExternal: (url) => ipcRenderer.send('open-external', url), // [ROOT] Backward Compatibility
     system: {
-        openExternal: (url) => ipcRenderer.send('open-external', url)
+        openExternal: (url) => ipcRenderer.send('open-external', url) // [NESTED] New Standard
     }
 });

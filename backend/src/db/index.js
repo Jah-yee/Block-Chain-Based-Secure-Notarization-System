@@ -118,7 +118,7 @@ function detectMutation(preparedSql) {
 function detectPrimaryOp(preparedSql) {
     const DML_KEYWORDS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'ALTER', 'DROP', 'CREATE'];
     const matches = [];
-    
+
     for (const kw of DML_KEYWORDS) {
         const regex = new RegExp(`\\b${kw}\\b`, 'gi');
         let match;
@@ -147,7 +147,7 @@ function classifyQuery(preparedSql, tables) {
  */
 async function executeAuditedQuery(target, originalMethod, ...args) {
     const store = dbContext.getStore();
-    
+
     // 🛡️ [FAIL_CLOSED] Mandatory Context Guard with Deep Forensics
     if (!store) {
         const errStack = new Error().stack;
@@ -168,7 +168,7 @@ async function executeAuditedQuery(target, originalMethod, ...args) {
     const isMutation = detectMutation(preparedSql);
     const op = detectPrimaryOp(preparedSql);
     const classification = classifyQuery(preparedSql, mutationTables);
-    
+
     const domain = store.domain || 'UNCATEGORIZED';
     const action = store.action;
     const actorId = store.userId;
@@ -281,7 +281,7 @@ async function runWithContext({ userId, reason, route, requestId, service, conte
 
         store.auditClient = wrapClientWithSentinel(client);
         store.userId = userId;
-        store.contextType = contextType; 
+        store.contextType = contextType;
         store.reason = reason;
         store.route = route || (contextType === 'SYSTEM' ? 'INTERNAL_SERVICE' : 'WEB_ROUTE');
         store.requestId = requestId;
@@ -301,7 +301,7 @@ const dbProxy = new Proxy({}, {
         if (prop === 'getPool') return () => pool;
         if (prop === 'runWithContext') return runWithContext;
         if (prop === 'end') return () => pool ? pool.end() : Promise.resolve();
-        
+
         // 1. Connection Acquisition Methods
         if (typeof prop === 'string' && ['connect', 'getClient'].includes(prop)) {
             return async (...args) => {
