@@ -3,6 +3,7 @@ const router = express.Router();
 const { ethers } = require("ethers");
 const { requirePrivilege, ROLES, RISK_LEVELS } = require("../middleware/actor");
 const ConfigService = require("../services/config.service");
+const ProviderService = require("../blockchain/provider-service");
 
 // Middleware to ensure user is loaded
 // router.use(loadActor) deprecated for zero-trust compliance
@@ -11,7 +12,7 @@ const ConfigService = require("../services/config.service");
  * GET /api/tokens/balance
  * Returns both NTK and NTKR balances for the authenticated user's wallet.
  */
-router.get("/balance", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/balance", requirePrivilege({ capability: 'TOKEN_READ' }), async (req, res) => {
     const user = req.actor;
     // req.actor.id and req.actor.address are now guaranteed by middleware
     const walletAddress = user.address;
@@ -80,12 +81,12 @@ router.get("/balance", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVEL
 });
 
 // GET /api/tokens/onchain/:type/:address
-router.get("/onchain/:type/:address", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/onchain/:type/:address", requirePrivilege({ capability: 'TOKEN_READ' }), async (req, res) => {
     const { type, address } = req.params;
 
     try {
         const config = await ConfigService.getConfig();
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const provider = await ProviderService.getProvider();
         let contractAddress;
 
         if (type === 'ntk') {
@@ -124,7 +125,7 @@ router.get("/onchain/:type/:address", requirePrivilege({ minRole: ROLES.OWNER, r
  * 
  * NOTE: DB balance is "prepaid credit", NOT a mirror of on-chain balance.
  */
-router.post("/deposit", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/deposit", requirePrivilege({ capability: 'TOKEN_MINT' }), async (req, res) => {
     const user = req.actor;
     // requirePrivilege handles authorization and wallet extraction
 
@@ -157,7 +158,7 @@ router.post("/deposit", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVE
     let receipt;
     let currentBlock;
     try {
-        provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        provider = await ProviderService.getProvider();
         receipt = await provider.getTransactionReceipt(txHash);
     } catch (rpcErr) {
         console.error("[DEPOSIT] RPC error fetching receipt:", rpcErr.message);
@@ -298,13 +299,13 @@ router.post("/deposit", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVE
  * POST /api/tokens/ntk/mint
  * Allows a NOTARY to mint their daily 100 NTK fuel tokens.
  */
-router.post("/ntk/mint", requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/ntk/mint", requirePrivilege({ capability: 'TOKEN_MINT' }), async (req, res) => {
     const user = req.actor; // Guaranteed by middleware
     const walletAddress = user.address;
 
     try {
         const config = await ConfigService.getConfig();
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const provider = await ProviderService.getProvider();
         const privateKey = process.env.BNB_SYSTEM_PRIVATE_KEY;
         const ntkAddress = config.contracts.ntk;
 

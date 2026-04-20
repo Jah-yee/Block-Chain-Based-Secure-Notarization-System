@@ -16,7 +16,7 @@ const { ACTOR_IDS } = require('../constants/protocol');
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // PUBLIC: Check application status
-router.get("/applications/status/:id", allowPublic, async (req, res) => {
+router.get("/applications/status/:id", allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY' }), async (req, res) => {
   const { id } = req.params;
   
   // 🛡️ [Hardening] Prevent 500 on 'undefined' or non-numeric IDs unless they match reference_id format
@@ -59,7 +59,7 @@ router.get("/applications/status/:id", allowPublic, async (req, res) => {
 });
 
 // PUBLIC: Submit initial notary application
-router.post("/applications/public", withDomain('NOTARY'), allowPublic, withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_SUBMIT' }), withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
@@ -189,7 +189,7 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, withGuest
 });
 
 // PUBLIC: Finalize application with face descriptor & signature
-router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
+router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY' }), withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
   const { id } = req.params;
   const { signature, faceDescriptor, walletAddress, nonce } = req.body;
 
@@ -294,7 +294,7 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, withA
 });
 
 // GET /api/notaries/applications (Admin only)
-router.get("/applications", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.get("/applications", requirePrivilege({ capability: 'NOTARY_APP_LIST' }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -329,7 +329,7 @@ router.get("/applications", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_
 
 
 // POST /api/notaries/applications/:id/approve (Admin only)
-router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_APP_APPROVE'), withMutation(), async (req, res) => {
+router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege({ capability: 'NOTARY_APP_APPROVE' }), withAction('NOTARY_APP_APPROVE'), withMutation(), async (req, res) => {
   const { id } = req.params;
   
   try {
@@ -401,7 +401,7 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
 });
 
 // 🛡️ [Hardening FIX B] Activation Recovery (Resend Token)
-router.post("/applications/:id/resend-activation", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_TOKEN_RESEND'), withMutation(), async (req, res) => {
+router.post("/applications/:id/resend-activation", withDomain('NOTARY'), requirePrivilege({ capability: 'NOTARY_TOKEN_RESEND' }), withAction('NOTARY_TOKEN_RESEND'), withMutation(), async (req, res) => {
   const { id } = req.params;
   try {
     const isReference = (id || "").startsWith('BBSNS-REG-');
@@ -435,7 +435,7 @@ router.post("/applications/:id/resend-activation", withDomain('NOTARY'), require
 });
 
 // POST /api/notaries/applications/:id/reject (Admin only)
-router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('NOTARY_APP_REJECT'), withMutation(), async (req, res) => {
+router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({ capability: 'NOTARY_APP_REJECT' }), withAction('NOTARY_APP_REJECT'), withMutation(), async (req, res) => {
   const { id } = req.params;
   try {
     const isReference = (id || "").startsWith('BBSNS-REG-');
@@ -482,7 +482,7 @@ router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({
 });
 
 // READ All Notaries
-router.get("/", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/", requirePrivilege({ capability: 'NOTARY_LIST' }), async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.username, COALESCE(na.full_name, u.name) as name, COALESCE(na.email, u.email) as email, u.role, u.wallet_address,
@@ -502,7 +502,7 @@ router.get("/", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }
 });
 
 // READ Notary by ID
-router.get("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/:id", requirePrivilege({ capability: 'NOTARY_READ' }), async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM users WHERE id = $1 AND role = 'notary'", [req.params.id]);
     if (result.rows.length === 0) {

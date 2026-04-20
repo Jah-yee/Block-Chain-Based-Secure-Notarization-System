@@ -8,6 +8,7 @@ const { ACTOR_IDS } = require('../constants/protocol');
 const { generateNonce } = require('../utils/nonce');
 const { ethers } = require('ethers');
 const ConfigService = require('../services/config.service');
+const ProviderService = require('../blockchain/provider-service');
 const { 
     IDENTITY_PROTOCOL, 
     buildSigningMessage 
@@ -85,12 +86,12 @@ const executeWithRetry = async (fn, retries = 3, label = "EXECUTE") => {
 async function signZeroTrustToken(user, walletAddress, zeroTrustStatus = 'VERIFIED', extraClaims = {}) {
   if (!user || !walletAddress) throw new Error("Missing user data for token signing");
   
-  let snapshotBlock = 0;
-  let snapshotChainId = 0;
+  let snapshotBlock = null;
+  let snapshotChainId = null;
 
   try {
     const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const provider = await ProviderService.getProvider();
     
     // Attempt resilient fetching of chain state
     const chainState = await executeWithRetry(async () => {
@@ -134,7 +135,7 @@ async function signZeroTrustToken(user, walletAddress, zeroTrustStatus = 'VERIFI
 }
 
 // POST /auth/pre-check - Verify account existence (Wallet-Only identity)
-router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH_PRECHECK'), async (req, res) => {
+router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH_PRECHECK'), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
   try {
     const { walletAddress } = req.body;
     if (!walletAddress) {
@@ -156,7 +157,7 @@ router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH
 });
 
 // POST /auth/nonce - Hardened blind-trust eliminator
-router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NONCE'), withMutation(), async (req, res) => {
+router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NONCE'), withMutation(), requirePrivilege({ capability: 'AUTH_NONCE', allowPublic: true }), async (req, res) => {
   try {
     const { wallet_address, purpose, payload } = req.body;
     if (!wallet_address) {
@@ -244,10 +245,10 @@ router.post('/nonce', withGuestContext, withDomain('AUTH'), withAction('AUTH_NON
 });
 
 // GET /auth/system-status - Required for Desktop App startup check
-router.get('/system-status', allowPublic, async (req, res) => {
+router.get('/system-status', allowPublic, requirePrivilege({ capability: 'AUTH_SYSTEM_STATUS', allowPublic: true }), async (req, res) => {
   try {
     const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const provider = await ProviderService.getProvider();
     
     // 🛡️ [RESILIENCE] Protected blockchain verification
     let adminCount = 1; 
@@ -299,7 +300,7 @@ router.get('/system-status', allowPublic, async (req, res) => {
 
 
 // POST /auth/genesis/onboard - The ONLY mutated path for Admin creation
-router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withAction('ADMIN_ONBOARD_GENESIS'), withMutation(), simpleRateLimiter(10, 3600000), async (req, res) => {
+router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withAction('ADMIN_ONBOARD_GENESIS'), withMutation(), simpleRateLimiter(10, 3600000), requirePrivilege({ capability: 'ADMIN_ONBOARD_GENESIS', allowPublic: true }), async (req, res) => {
   try {
     const { fullName, email, walletAddress, nationalId, signature, nonce } = req.body;
 
@@ -330,7 +331,7 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
 
     // 4. On-Chain Check
     const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const provider = await ProviderService.getProvider();
     const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)", "function getUserRole(address) view returns (uint8)"], provider);
     const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)", "function activationTimestamp() view returns (uint256)"], provider);
 
@@ -385,7 +386,7 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
 });
 
 // POST /auth/notary/onboard - Explicit path for on-chain Notaries to sync to DB
-router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withAction('NOTARY_ONBOARD'), withMutation(), simpleRateLimiter(5, 3600000), async (req, res) => {
+router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withAction('NOTARY_ONBOARD'), withMutation(), simpleRateLimiter(5, 3600000), requirePrivilege({ capability: 'NOTARY_ONBOARD', allowPublic: true }), async (req, res) => {
   try {
     const { fullName, walletAddress, nonce, signature } = req.body;
 
@@ -411,7 +412,7 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
 
     // 3. On-Chain Check
     const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const provider = await ProviderService.getProvider();
     const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)"], provider);
     const liveRole = await registry.getUserRole(normalizedWalletAddress);
 
@@ -443,7 +444,7 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
 });
 
 // POST /auth/login - The primary authority bridge
-router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestContext, withAction('AUTH_LOGIN'), withMutation(), async (req, res) => {
+router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestContext, withAction('AUTH_LOGIN'), withMutation(), requirePrivilege({ capability: 'AUTH_LOGIN', allowPublic: true }), async (req, res) => {
   try {
     const { email, password, walletAddress, signature, nationalId, signature_nonce, nonce } = req.body;
     const normalizedWalletAddress = (walletAddress || "").trim().toLowerCase();
@@ -460,7 +461,7 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
     let liveRoleValue, liveBanned;
     try {
       const liveConfig = await ConfigService.getConfig();
-      const provider = new ethers.JsonRpcProvider(liveConfig.rpcUrl);
+      const provider = await ProviderService.getProvider();
       const notaryRegistryAbi = ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"];
       const notaryRegistry = new ethers.Contract(liveConfig.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
@@ -652,7 +653,7 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
 // POST /auth/logout - Clear Session (Idempotent & Public)
 // allowPublic ensures users TRAPPED in a restricted state can still clear their session.
 // POST /auth/logout - Clear Session (Idempotent & Public)
-router.post('/logout', withDomain('AUTH'), allowPublic, withAction('AUTH_LOGOUT'), withMutation(), (req, res) => {
+router.post('/logout', withDomain('AUTH'), allowPublic, withAction('AUTH_LOGOUT'), withMutation(), requirePrivilege({ capability: 'AUTH_LOGOUT', allowPublic: true }), (req, res) => {
   res.clearCookie('token', COOKIE_OPTIONS);
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 });
@@ -661,7 +662,8 @@ router.post('/logout', withDomain('AUTH'), allowPublic, withAction('AUTH_LOGOUT'
  * 🛡️ [Hardening 2.9C-A] Activation Info
  * Purpose: Allows frontend to pre-fetch wallet address bound to an activation token.
  */
-router.get('/activation-info', withDomain('NOTARY'), allowPublic, async (req, res) => {
+// GET /auth/activation-info - Info for application activation
+router.get('/activation-info', withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY', allowPublic: true }), async (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).json({ error: 'Token is required' });
 
@@ -698,7 +700,7 @@ router.get('/activation-info', withDomain('NOTARY'), allowPublic, async (req, re
  * Responsibility: Transitions approved application to activated status and provisions user credentials.
  */
 // POST /auth/activate - Notary Activation flow
-router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_ACTIVATE'), withMutation(), async (req, res) => {
+router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_ACTIVATE'), withMutation(), requirePrivilege({ capability: 'NOTARY_ACTIVATE', allowPublic: true }), async (req, res) => {
   const { token, password, signature, nonce } = req.body;
   if (!token || !password || !signature || !nonce) {
     return res.status(400).json({ error: 'Token, password, signature, and nonce are required' });
@@ -807,7 +809,7 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
 });
 
 // GET /auth/me - Profile Source of Truth
-router.get('/me', allowPublic, async (req, res) => {
+router.get('/me', allowPublic, requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const tokenCookie = req.cookies.token;
@@ -877,90 +879,150 @@ router.get('/me', allowPublic, async (req, res) => {
 
 const { requireUnpaused } = require('../middleware/circuit-breaker');
 
-router.post('/remote/session', withGuestContext, async (req, res) => {
+// POST /auth/remote/session - Creation for desktop app
+router.post('/remote/session', withGuestContext, requirePrivilege({ capability: 'AUTH_REMOTE_SESSION', allowPublic: true }), async (req, res) => {
   try {
     const { device_id } = req.body;
     if (!device_id) return res.status(400).json({ error: 'device_id is required' });
 
     const challenge = `BBSNS-LOGIN-${crypto.randomBytes(16).toString('hex')}`;
+    const session_secret = crypto.randomUUID();
     const expires_at = new Date(Date.now() + 10 * 60 * 1000); 
 
     const result = await pool.query(
-      'INSERT INTO remote_auth_sessions (challenge, device_id, expires_at) VALUES ($1, $2, $3) RETURNING id',
-      [challenge, device_id, expires_at]
+      'INSERT INTO remote_auth_sessions (challenge, device_id, session_secret, expires_at) VALUES ($1, $2, $3, $4) RETURNING id',
+      [challenge, device_id, session_secret, expires_at]
     );
 
-    res.json({ sessionId: result.rows[0].id });
+    res.json({ sessionId: result.rows[0].id, sessionSecret: session_secret });
   } catch (error) {
     console.error('[AUTH] Remote session creation failed.');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.get('/remote/status/:sessionId', allowPublic, async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID format' });
-    
-    // 🛡️ [Hardening 10.1] Strict TTL and State Enforcement
-    const result = await pool.query(
-      `SELECT * FROM remote_auth_sessions 
-       WHERE id::text = $1 AND expires_at > NOW()`, 
-      [sessionId]
-    );
+// GET /auth/remote/status/:sessionId - Retrieval for desktop app
+router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ capability: 'REMOTE_STATUS_CONSUMPTION', allowPublic: true }), async (req, res) => {
+  const { sessionId } = req.params;
+  const requestId = req.headers['x-device-id'];
+  const requestSecret = req.headers['x-session-secret'];
 
-    if (result.rows.length === 0) {
-       return res.status(404).json({ error: 'Session not found, expired, or already consumed' });
-    }
+  if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID format' });
 
-    const session = result.rows[0];
+  return pool.runWithContext({ 
+    userId: ACTOR_IDS.GUEST, 
+    reason: 'REMOTE_STATUS_CONSUMPTION', 
+    route: 'AUTH_REMOTE_STATUS' 
+  }, async (auditClient) => {
+    try {
+      // 1. [LOCK & VALIDATE]
+      const result = await auditClient.query(
+        'SELECT * FROM remote_auth_sessions WHERE id::text = $1 FOR UPDATE',
+        [sessionId]
+      );
 
-    // 1. Handle Automatic Expiry Transition
-    if (session.status === 'pending' && new Date(session.expires_at) < new Date()) {
-      await pool.query("UPDATE remote_auth_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
-      return res.json({ status: 'expired' });
-    }
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
 
-    // 2. [CRITICAL] IDENTITY RETRIEVAL (Single-Use Consumption)
-    if (session.status === 'completed') {
+      const session = result.rows[0];
+
+      // 2. [EXPIRY GUARD]
+      if (new Date(session.expires_at) < new Date()) {
+        if (session.status !== 'expired' && session.status !== 'consumed') {
+          await auditClient.query("UPDATE remote_auth_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
+        }
+        if (session.status !== 'consumed') {
+          return res.json({ status: 'expired' });
+        }
+      }
+
+      // 3. [HANDSHAKE DISPATCHER]
+      // We decouple PUBLIC READ (Pending/Authorized) from PRIVATE CONSUMPTION (Completed/Consumed)
+
+      // --- [SCOPE A: PUBLIC READ] ---
+      if (session.status === 'pending' || session.status === 'authorized') {
+          return res.json({ status: session.status, challenge: session.challenge });
+      }
+
+      // --- [SCOPE B: PRIVATE CONSUMPTION (Triple-Bind Enforcement)] ---
+      // At this stage, the session has been signed/completed or already consumed.
+      // We REQUIRE original hardware proof (Device ID + Session Secret).
+
+      const isLegacy = !session.session_secret;
+      const deviceMatch = session.device_id === requestId;
+      const secretMatch = isLegacy || session.session_secret === requestSecret;
+
+      if (!deviceMatch || !secretMatch) {
+         console.warn(`[SECURITY] Identity Handover REJECTED: Proof Mismatch (sid=${sessionId.substring(0,8)})`);
+         return res.status(403).json({ error: 'Triple-Bind proof mismatch. Identity handover failed.' });
+      }
+
+      // 4. [ATOMIC CONSUMPTION]
+      if (session.status === 'completed') {
         const userId = session.user_id;
-        if (!userId) return res.status(500).json({ error: 'Session marked as completed but missing Identity Data' });
+        if (!userId) return res.status(500).json({ error: 'Session completed but missing Identity Data' });
 
-        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
-        if (userRes.rows.length === 0) return res.status(404).json({ error: 'User bound to session no longer exists' });
-
+        const userRes = await auditClient.query('SELECT * FROM users WHERE id = $1', [userId]);
+        if (userRes.rows.length === 0) return res.status(404).json({ error: 'User no longer exists' });
         const user = userRes.rows[0];
 
-        // 🛡️ Regenerate Token with Hardened Claims (Injected sid/source)
-        const token = await signZeroTrustToken(user, user.wallet_address, 'TRUSTED', {
+        // Mark as consumed
+        const updateRes = await auditClient.query(
+          "UPDATE remote_auth_sessions SET status = 'consumed', authorized_at = NOW() WHERE id = $1 AND status = 'completed' RETURNING *",
+          [sessionId]
+        );
+
+        if (updateRes.rowCount === 0) {
+           throw new Error('Consumption race condition observed');
+        }
+
+        const token = await signZeroTrustToken(user, user.wallet_address, 'VERIFIED', {
             source: 'remote_auth',
             sid: sessionId,
             binding_iat: Date.now()
         });
-
-        // 🛡️ Atomically Consume Session
-        await pool.query("UPDATE remote_auth_sessions SET status = 'consumed' WHERE id = $1", [sessionId]);
 
         return res.json({ 
             status: 'completed', 
             token, 
             user: { id: user.id, email: user.email, walletAddress: user.wallet_address, role: user.role } 
         });
-    }
+      }
 
-    // 3. Status Reporting
-    res.json({ status: session.status, challenge: session.challenge });
-  } catch (error) {
-    console.error('[AUTH] Remote status retrieval failed:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+      // 5. [IDEMPOTENCY]
+      if (session.status === 'consumed') {
+         const userRes = await auditClient.query('SELECT * FROM users WHERE id = $1', [session.user_id]);
+         const user = userRes.rows[0];
+         
+         const token = await signZeroTrustToken(user, user.wallet_address, 'VERIFIED', {
+             source: 'remote_auth',
+             sid: sessionId,
+             binding_iat: Date.now()
+         });
+
+         return res.json({ 
+             status: 'completed', 
+             token, 
+             user: { id: user.id, email: user.email, walletAddress: user.wallet_address, role: user.role } 
+         });
+      }
+
+      // 6. [FALLBACK]
+      res.json({ status: session.status, challenge: session.challenge });
+    } catch (error) {
+      console.error('[AUTH] Remote status retrieval failed:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 });
 
 /**
  * 🛡️ [Hardening 10.2] Identity Binding Completion
  * Moves session from 'pending' -> 'completed' by verifying current web session identity via Authorization Header.
  */
-router.post('/remote/complete', allowPublic, async (req, res) => {
+// POST /auth/remote/complete - Remote binding completion
+router.post('/remote/complete', allowPublic, requirePrivilege({ capability: 'REMOTE_IDENTITY_BINDING' }), async (req, res) => {
     try {
         const { sessionId } = req.body;
         const authHeader = req.headers.authorization;
@@ -1001,15 +1063,18 @@ router.post('/remote/complete', allowPublic, async (req, res) => {
 
             const session = sessionRes.rows[0];
 
-            // 🛡️ State Machine Enforcement: Must be 'pending'
-            if (session.status !== 'pending') {
-                await auditClient.query('ROLLBACK');
-                return { error: `Invalid operation: Session is already ${session.status}`, status: 400 };
+            // 🛡️ [Hardening] State Machine Enforcement: MUST have been 'authorized' first
+            // This prevents skipping the cryptographic proof of identity.
+            if (session.status !== 'authorized') {
+                await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                await auditClient.query('COMMIT');
+                return { error: `Illegal transition: Handshake must be 'authorized' before completion. Current state: ${session.status}`, status: 403 };
             }
 
-            // 🛡️ Identity Binding Enforcement: Must match intended wallet (if set during creation)
+            // 🛡️ Identity Binding Enforcement: Must match intended wallet
             if (session.wallet_address && session.wallet_address.toLowerCase() !== walletAddress) {
-                await auditClient.query('ROLLBACK');
+                await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                await auditClient.query('COMMIT');
                 return { error: 'Identity Binding Mismatch: Wallet does not match handshake request.', status: 403 };
             }
 
@@ -1023,16 +1088,27 @@ router.post('/remote/complete', allowPublic, async (req, res) => {
             return { success: true };
         });
 
-        if (result.error) return res.status(result.status).json({ error: result.error });
+        if (result.error) {
+            // 🛡️ [Hardening] Record Internal/Audit failures as explicitly 'failed' if they were already locked
+            if (result.status === 403 || result.status === 400) {
+                 await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+            }
+            return res.status(result.status).json({ error: result.error });
+        }
         res.json({ message: 'Identity bound successfully.' });
 
     } catch (err) {
         console.error('[REMOTE_COMPLETE_FATAL]', err);
+        // Ensure failure is recorded
+        if (req.body.sessionId && isValidUUID(req.body.sessionId)) {
+            await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [req.body.sessionId]).catch(() => {});
+        }
         res.status(500).json({ error: 'Internal system error during identity binding' });
     }
 });
 
-router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), async (req, res) => {
+// POST /auth/remote/authorize - Web-based approval for desktop
+router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), async (req, res) => {
   try {
     const { sessionId, signature, walletAddress } = req.body;
     if (!sessionId || !walletAddress || !signature) return res.status(400).json({ error: 'Missing data' });
@@ -1058,7 +1134,10 @@ router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), 
       return res.status(401).json({ error: 'Signature verification failed' });
     }
 
-    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) return res.status(401).json({ error: 'Address mismatch' });
+    if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
+       await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+       return res.status(401).json({ error: 'Address mismatch' });
+    }
 
     // 🛡️ [SECURITY] ONE-TIME CODE GENERATION (NO JWT IN POLL)
     const oneTimeCode = crypto.randomBytes(32).toString('hex');
@@ -1072,12 +1151,16 @@ router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), 
     res.json({ message: 'Authorized successfully. Returning to app...' });
   } catch (error) {
     console.error('[REMOTE_AUTHORIZE_FATAL]', error);
+    if (req.body.sessionId && isValidUUID(req.body.sessionId)) {
+        await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [req.body.sessionId]).catch(() => {});
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // 🛡️ [SECURITY] Hardened Atomic Token Exchange (Transactional with Row Lock)
-router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), async (req, res) => {
+// POST /auth/remote/exchange - Desktop app OTC exchange
+router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), requirePrivilege({ capability: 'REMOTE_STATUS_CONSUMPTION', allowPublic: true }), async (req, res) => {
   try {
     const { sessionId, code, device_id } = req.body;
     const result = await pool.runWithContext({
@@ -1127,7 +1210,7 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), a
 
         try {
           const config = await ConfigService.getConfig();
-          const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+          const provider = await ProviderService.getProvider();
           const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function getUserRole(address) view returns (uint8)", "function isBanned(address) view returns (bool)"], provider);
           
           const chainData = await executeWithRetry(async () => {
@@ -1218,7 +1301,8 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), a
  * Responsibility: Upgrade a DEGRADED session to VERIFIED if RPC connectivity returns.
  * Rule: Server is the SOLE authority for upgrades.
  */
-router.post('/remote/refresh-zero-trust', allowPublic, async (req, res) => {
+// POST /auth/remote/refresh-zero-trust - Session upgrade
+router.post('/remote/refresh-zero-trust', allowPublic, requirePrivilege({ capability: 'AUTH_LOGIN' }), async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7) : (req.cookies?.token);

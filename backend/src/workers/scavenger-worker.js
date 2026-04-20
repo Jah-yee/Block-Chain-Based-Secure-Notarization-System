@@ -40,6 +40,7 @@ async function runScavenger() {
       );
 
       if (stuckRes.rows.length === 0) {
+        await cleanupExpiredSessions(client);
         await client.query('COMMIT');
         return;
       }
@@ -146,6 +147,23 @@ async function finalizeIntent(client, intent, docId) {
 
   await client.query("UPDATE upload_intents SET status='COMPLETED', processing_lock_until=NULL, processing_node_id=NULL WHERE id=$1", [intent.id]);
   logger.info('RECOVERY_COMPLETED', { intent_id: intent.id });
+}
+
+/**
+ * 🧹 Remote Auth Hygiene
+ * Responsibility: Pruning dead sessions to prevent index bloat.
+ */
+async function cleanupExpiredSessions(client) {
+    try {
+        const res = await client.query(
+            "DELETE FROM remote_auth_sessions WHERE expires_at < NOW() - INTERVAL '24 hours'"
+        );
+        if (res.rowCount > 0) {
+            logger.info('SESSION_HYGIENE_SUCCESS', { deleted_count: res.rowCount });
+        }
+    } catch (err) {
+        logger.error('SESSION_HYGIENE_FAIL', { error: err.message });
+    }
 }
 
 module.exports = { runScavenger };

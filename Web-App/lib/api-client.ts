@@ -1,4 +1,22 @@
 import { ConfigValidator } from './config-validator';
+import { integrityStore } from './integrity-store';
+
+/**
+ * 🛡️ [INTEGRITY] Custom Error for Blockchain Resilience
+ */
+export class IntegrityError extends Error {
+    public status: number;
+    public retryAfter: number;
+    public requestId: string;
+
+    constructor(message: string, status: number, retryAfter: number, requestId: string) {
+        super(message);
+        this.name = 'IntegrityError';
+        this.status = status;
+        this.retryAfter = retryAfter;
+        this.requestId = requestId;
+    }
+}
 
 let BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "";
 let configFetched = false;
@@ -159,42 +177,79 @@ async function apiRequest(endpoint: string, options: RequestOptions = {}) {
         credentials: 'include', // CRITICAL: REQUIRED FOR HTTPONLY COOKIES
     };
 
-    if (data) {
-        config.body = data instanceof FormData ? data : JSON.stringify(data);
-    }
+    const requestTs = Date.now();
+    const requestId = Math.random().toString(36).substring(2, 9);
 
     try {
         const response = await fetch(url, config);
 
+        // 🛡️ [PHASE 1A] Signal Extraction & Store Update
+        // We only process integrity signals from JSON responses
+        const isJson = response.headers.get('Content-Type')?.includes('application/json');
+        let responsePayload: any = null;
+
+        if (isJson) {
+            responsePayload = await response.clone().json().catch(() => null);
+        }
+
+        // Handle 426 (Integrity Degraded) - Trigger Failure Escalation
+        if (response.status === 426) {
+            integrityStore.processEvent({ type: 'FAILURE_426', ts: requestTs });
+            
+            const currentFailureCount = integrityStore.getState().failureCount;
+            const delay = currentFailureCount >= 3 ? 10000 : 2000;
+            
+            console.warn(`[API_INTEGRITY] 🛑 Status 426 for ${endpoint}. Escalating delay to ${delay}ms (Fail #${currentFailureCount})`);
+            
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('bbs_unauthorized')); // Existing auth trigger
+            }
+
+            throw new IntegrityError(
+                responsePayload?.error || 'System Integrity Degraded',
+                426,
+                delay,
+                requestId
+            );
+        }
+
+        // Signal Store about successful/stale response
+        if (responsePayload?.security_context) {
+            const ctx = responsePayload.security_context;
+            if (ctx.stale) {
+                integrityStore.processEvent({ type: 'STALE_RESPONSE', ctx, ts: requestTs });
+            } else if (ctx.env === 'VERIFIED') {
+                integrityStore.processEvent({ type: 'STRONG_RESPONSE', ctx, ts: requestTs });
+            }
+        } else if (response.ok) {
+            // Signal a generic successful interaction to update lastUpdate timestamp
+            integrityStore.processEvent({ type: 'FAILURE_OTHER', ts: requestTs });
+        }
+
         // 🛡️ [AUTH] Handle Authentication Failures (Logout Required)
-        if (response.status === 401 || response.status === 426) {
-            const errorData = await response.json().catch(() => ({}));
+        if (response.status === 401) {
             if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('bbs_unauthorized'));
             }
             return Promise.reject({
                 status: response.status,
-                message: errorData.error || 'Unauthorized'
+                message: responsePayload?.error || 'Unauthorized'
             });
         }
 
         // 🛡️ [PERMISSION] Handle Authorization Failures (No Logout)
         if (response.status === 403) {
-            const errorData = await response.json().catch(() => ({}));
-            // We DO NOT trigger bbs_unauthorized here. 
-            // We want the user to stay logged in but see a restricted state.
             return Promise.reject({
                 status: 403,
-                message: errorData.error || 'Forbidden: Insufficient privileges',
-                detail: errorData.detail
+                message: responsePayload?.error || 'Forbidden: Insufficient privileges',
+                detail: responsePayload?.detail
             });
         }
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
             return Promise.reject({
                 status: response.status,
-                message: errorData.error || response.statusText
+                message: responsePayload?.error || response.statusText
             });
         }
 
@@ -205,8 +260,16 @@ async function apiRequest(endpoint: string, options: RequestOptions = {}) {
             return await response.blob();
         }
 
-        return await response.json();
+        // 🛡️ [PHASE 1A] Final Data Unwrapping
+        // If wrapped, return data. If legacy, return payload.
+        return responsePayload?.security_context ? responsePayload.data : responsePayload;
+
     } catch (error: any) {
+        if (error instanceof IntegrityError) throw error;
+
+        // Dispatch general failure
+        integrityStore.processEvent({ type: 'FAILURE_OTHER', ts: requestTs });
+
         return Promise.reject({
             status: 500,
             message: error.message || 'Network Error'

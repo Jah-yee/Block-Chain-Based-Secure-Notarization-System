@@ -297,10 +297,17 @@ async function runWithContext({ userId, reason, route, requestId, service, conte
 // 🛡️ [DATABASE_PROXY] (SENTINEL_2.0_PERIMETER)
 const dbProxy = new Proxy({}, {
     get: (target, prop) => {
+        // --- 🛡️ [SCOPE A: IMMUTABLE AUTHORITY] ---
+        // These are available even without an active pool
         if (prop === 'init') return init;
         if (prop === 'getPool') return () => pool;
         if (prop === 'runWithContext') return runWithContext;
         if (prop === 'end') return () => pool ? pool.end() : Promise.resolve();
+        if (prop === 'ACTOR_IDS') return ACTOR_IDS;
+        if (prop === 'BBSNSEnforcementError') return BBSNSEnforcementError;
+
+        // --- 🛡️ [SCOPE B: CONNECTION AUTHORITY] ---
+        if (!pool) return undefined;
 
         // 1. Connection Acquisition Methods
         if (typeof prop === 'string' && ['connect', 'getClient'].includes(prop)) {
@@ -326,6 +333,4 @@ const dbProxy = new Proxy({}, {
     }
 });
 
-dbProxy.ACTOR_IDS = ACTOR_IDS;
-dbProxy.BBSNSEnforcementError = BBSNSEnforcementError;
 module.exports = dbProxy;

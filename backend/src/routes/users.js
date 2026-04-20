@@ -23,7 +23,7 @@ const {
 } = require("../utils/identity-crypto");
 
 // REGISTER User (public)
-router.post("/register", withDomain('USERS'), allowPublic, withGuestContext, withRestoredContext(upload.single('nationalIdFile')), validateBody(userSchema), withAction('USERS_REGISTER'), withMutation(), async (req, res) => {
+router.post("/register", withDomain('USERS'), allowPublic, requirePrivilege({ capability: 'USERS_REGISTER' }), withGuestContext, withRestoredContext(upload.single('nationalIdFile')), validateBody(userSchema), withAction('USERS_REGISTER'), withMutation(), async (req, res) => {
   // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   
@@ -158,7 +158,7 @@ router.post("/register", withDomain('USERS'), allowPublic, withGuestContext, wit
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // CREATE User (Admin only)
-router.post("/", withDomain('USERS'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('USERS_CREATE'), withMutation(), validateBody(userSchema), async (req, res) => {
+router.post("/", withDomain('USERS'), requirePrivilege({ capability: 'USERS_CREATE' }), withAction('USERS_CREATE'), withMutation(), validateBody(userSchema), async (req, res) => {
   const { username, fullName: name, email, password, walletAddress: wallet_address, role } = req.body;
   try {
     const normalizedWalletAddress = wallet_address.toLowerCase();
@@ -183,7 +183,7 @@ router.post("/", withDomain('USERS'), requirePrivilege({ minRole: ROLES.ADMIN, r
 });
 
 // READ All Users
-router.get("/", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/", requirePrivilege({ capability: 'USERS_LIST' }), async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM users");
     res.json(result.rows);
@@ -193,7 +193,7 @@ router.get("/", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }
 });
 
 // READ User by ID
-router.get("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/:id", requirePrivilege({ capability: 'USERS_READ' }), async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM users WHERE id = $1", [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
@@ -204,7 +204,7 @@ router.get("/:id", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LO
 });
 
 // UPDATE User
-router.put("/:id", withDomain('USERS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('USERS_UPDATE'), withMutation(), async (req, res) => {
+router.put("/:id", withDomain('USERS'), requirePrivilege({ capability: 'USERS_UPDATE' }), withAction('USERS_UPDATE'), withMutation(), async (req, res) => {
   const { username, email, password, wallet_address, role, kyc_status, liveness_status, national_id_hash } = req.body;
 
   // Prevent wallet_address update
@@ -283,7 +283,7 @@ router.put("/:id", withDomain('USERS'), requirePrivilege({ minRole: ROLES.OWNER,
 });
 
 // SOFT DELETE User (Admin only)
-router.delete("/:id", withDomain('USERS'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('USERS_DEACTIVATE'), withMutation(), async (req, res) => {
+router.delete("/:id", withDomain('USERS'), requirePrivilege({ capability: 'USERS_DEACTIVATE' }), withAction('USERS_DEACTIVATE'), withMutation(), async (req, res) => {
   try {
     const result = await pool.query(
       "UPDATE users SET is_deactivated = true, deactivated_at = NOW() WHERE id = $1 RETURNING id, is_deactivated",

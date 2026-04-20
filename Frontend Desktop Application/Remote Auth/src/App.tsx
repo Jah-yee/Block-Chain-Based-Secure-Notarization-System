@@ -362,7 +362,30 @@ function App() {
 
         const { token } = await loginRes.json();
 
-        // 4. Bind the Identity Token to the Remote Session
+        // 4. [MANDATORY] Handshake Authorization (Proof of Connection)
+        // Before binding the Identity JWT, we must prove authority over this specific session
+        // by signing the session-specific challenge.
+        console.log(`[AUTH] Generating proof of handshake for challenge: ${challenge?.substring(0, 10)}...`);
+        const handshakeSignature = await signer.signMessage(challenge!);
+
+        const authRes = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            sessionId, 
+            walletAddress: address, 
+            signature: handshakeSignature 
+          })
+        });
+
+        if (!authRes.ok) {
+          const data = await authRes.json().catch(() => ({}));
+          throw new Error(data.error || "Handshake Authorization Failed");
+        }
+
+        console.log("[AUTH] Handshake authorized. Proceeding to identity binding...");
+
+        // 5. Bind the Identity Token to the Remote Session
         const bindRes = await fetch(`${API_BASE}/api/auth/remote/complete`, {
           method: "POST",
           headers: { 

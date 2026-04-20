@@ -337,6 +337,8 @@ async function startAuthFlow() {
         
         const rawData = response.data;
         const sessionId = rawData.sessionId || rawData.session_id;
+        const sessionSecret = rawData.sessionSecret;
+        const deviceId = getPersistentDeviceId();
 
         if (!sessionId) {
             log("ERROR", "AUTH_HANDSHAKE_FAIL", "INVALID_SESSION_ID");
@@ -366,7 +368,12 @@ async function startAuthFlow() {
                 }
 
                 const url = `${API_BASE_URL}/api/auth/remote/status/${sessionId}`;
-                const pollRes = await axios.get(url);
+                const pollRes = await axios.get(url, {
+                    headers: {
+                        'x-device-id': deviceId,
+                        'x-session-secret': sessionSecret
+                    }
+                });
                 
                 // [TRACE 1] Polling Response
                 const { status, token, user } = pollRes.data;
@@ -390,7 +397,7 @@ async function startAuthFlow() {
                     const ipcPayload = { 
                         status: 'authorized', 
                         user: user, 
-                        zeroTrustStatus: pollRes.data.zeroTrustStatus || 'TRUSTED',
+                        zeroTrustStatus: pollRes.data.zeroTrustStatus || 'VERIFIED',
                         traceId: currentTraceId 
                     };
                     

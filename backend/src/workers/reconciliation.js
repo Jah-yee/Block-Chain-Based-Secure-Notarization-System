@@ -14,8 +14,9 @@ async function reconcile() {
 
     try {
         // 1. Authoritative Configuration Resolution
+        const ProviderService = require('../blockchain/provider-service');
         const config = await ConfigService.getConfig();
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const provider = await ProviderService.getProvider();
         const contractAddress = config.contracts.documentRegistry;
 
         if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {

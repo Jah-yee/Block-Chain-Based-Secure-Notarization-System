@@ -16,7 +16,7 @@ const transactionApprovalSchema = Joi.object({
 });
 
 // POST /transactions - Create a transaction (Approval/Rejection flow)
-router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('TX_APPROVE_VOTE'), withMutation(), async (req, res) => {
+router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ capability: 'TX_APPROVE_VOTE' }), withAction('TX_APPROVE_VOTE'), withMutation(), async (req, res) => {
     try {
         const actor = req.actor;
         if (!actor) return res.status(401).json({ error: 'Actor header required' });
@@ -75,7 +75,7 @@ router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ minRole: ROLES.N
 });
 
 // GET /transactions - Get transactions with filters
-router.get('/', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/', requirePrivilege({ capability: 'TX_LIST' }), async (req, res) => {
     console.log('[DEBUG_TX] Hit GET /transactions');
     try {
         const actor = req.actor;
@@ -121,7 +121,7 @@ router.get('/', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }
 });
 
 // GET /transactions/:id - Get specific transaction
-router.get('/:id', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/:id', requirePrivilege({ capability: 'TX_READ' }), async (req, res) => {
     try {
         const { id } = req.params;
         const r = await pool.query('SELECT * FROM ntkr_transactions WHERE id=$1', [id]);

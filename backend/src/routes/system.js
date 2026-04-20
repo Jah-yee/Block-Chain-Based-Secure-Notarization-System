@@ -7,7 +7,7 @@ const ConfigService = require('../services/config.service');
 const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../middleware/actor.js');
 
 // GET /api/system/config - Public configuration for client initialization
-router.get('/config', allowPublic, async (req, res) => {
+router.get('/config', allowPublic, requirePrivilege({ capability: 'SYSTEM_READ' }), async (req, res) => {
     try {
         const config = await ConfigService.getConfig();
         res.json(config);
@@ -23,7 +23,7 @@ router.get('/config', allowPublic, async (req, res) => {
 /**
  * 🛡️ POST /api/system/config - AUTHORITATIVE CONFIG UPDATE
  */
-router.post('/config', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post('/config', requirePrivilege({ capability: 'SYSTEM_CONFIG_UPDATE' }), async (req, res) => {
     const { newConfig, expectedVersion, reason } = req.body;
     const adminId = req.actor.id;
 
@@ -43,7 +43,7 @@ router.post('/config', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVEL
 /**
  * 🛡️ POST /api/system/config/rollback - AUTHORITATIVE ROLLBACK
  */
-router.post('/config/rollback', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post('/config/rollback', requirePrivilege({ capability: 'SYSTEM_CONFIG_UPDATE' }), async (req, res) => {
     const { targetVersion } = req.body;
     const adminId = req.actor.id;
 
@@ -60,7 +60,7 @@ router.post('/config/rollback', requirePrivilege({ minRole: ROLES.ADMIN, risk: R
 });
 
 // GET /api/system/health - Real-time system health check
-router.get('/health', allowPublic, async (req, res) => {
+router.get('/health', allowPublic, requirePrivilege({ capability: 'AUTH_SYSTEM_STATUS' }), async (req, res) => {
     const health = {
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -75,9 +75,9 @@ router.get('/health', allowPublic, async (req, res) => {
         await pool.query('SELECT 1');
         health.checks.database = 'OK';
 
-        const { ethers } = require('ethers');
+        const ProviderService = require('../blockchain/provider-service');
         const config = await ConfigService.getConfig();
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const provider = await ProviderService.getProvider();
         const network = await provider.getNetwork();
         
         if (Number(network.chainId) === Number(config.chainId)) {
@@ -104,7 +104,7 @@ router.get('/health', allowPublic, async (req, res) => {
 });
 
 // 🛡️ GET /api/system/sync/events - Authoritative Flight Recorder Stream
-router.get('/sync/events', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/sync/events', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
     try {
         const { limit = 50, cursor } = req.query;
         const boundedLimit = Math.min(parseInt(limit), 50);
@@ -132,7 +132,7 @@ router.get('/sync/events', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_L
 });
 
 // GET /api/system/logs - Fetch REAL system logs (Admin only)
-router.get('/logs', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/logs', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
     console.log("REQ HEADERS", req.headers);
     const store = dbContext.getStore();
     console.log("CTX TRACE", store);
@@ -161,7 +161,7 @@ router.get('/logs', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.L
 });
 
 // GET /api/system/bootstrap-genesis
-router.get('/bootstrap-genesis', allowPublic, async (req, res) => {
+router.get('/bootstrap-genesis', allowPublic, requirePrivilege({ capability: 'ADMIN_ONBOARD_GENESIS' }), async (req, res) => {
     const { wallet } = req.query;
     if (!wallet || !wallet.startsWith('0x')) return res.status(400).json({ error: 'Valid wallet address required' });
 
@@ -182,7 +182,7 @@ router.get('/bootstrap-genesis', allowPublic, async (req, res) => {
 });
 
 // 🛡️ GET /api/system/sync/health - Authoritative Monitoring
-router.get('/sync/health', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/sync/health', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
     try {
         const stats = await pool.query(`
             SELECT 
@@ -215,7 +215,7 @@ router.get('/sync/health', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_L
 });
 
 // 🛡️ POST /api/system/sync/retry/:id - Atomic Individual Retry
-router.post('/sync/retry/:id', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post('/sync/retry/:id', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
     const { id } = req.params;
     const { type } = req.body; 
 
@@ -248,7 +248,7 @@ router.post('/sync/retry/:id', requirePrivilege({ minRole: ROLES.ADMIN, risk: RI
 });
 
 // 🛡️ POST /api/system/sync/retry - Atomic Batch Retry
-router.post('/sync/retry', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post('/sync/retry', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
     try {
         const result = await pool.query(`
             UPDATE users 

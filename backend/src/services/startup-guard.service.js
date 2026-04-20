@@ -115,7 +115,7 @@ class StartupGuard {
       // 🛡️ Resolve Authoritative Configuration (DB or Atomic Seed from AWS)
       const config = await ConfigService.getConfig();
       
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      const provider = await require('../blockchain/provider-service').getProvider();
       const network = await provider.getNetwork();
       const chainId = Number(network.chainId);
       const expectedChainId = Number(config.chainId || process.env.CHAIN_ID || 97);

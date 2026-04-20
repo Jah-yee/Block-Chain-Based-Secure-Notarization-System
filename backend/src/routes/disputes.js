@@ -20,7 +20,7 @@ const reputationService = require('../services/reputation.service');
 // POST /disputes
 // Owner submits a dispute on a document with a reason.
 // ─────────────────────────────────────────────────────
-router.post('/', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.post('/', requirePrivilege({ capability: 'DISPUTE_SUBMIT' }), async (req, res) => {
   try {
     const actor = req.actor;
     if (!actor) return res.status(401).json({ error: 'Actor header required' });
@@ -79,7 +79,7 @@ router.post('/', requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW 
 // ─────────────────────────────────────────────────────
 // GET /disputes  (Admin only — full queue view)
 // ─────────────────────────────────────────────────────
-router.get('/', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get('/', requirePrivilege({ capability: 'DISPUTE_LIST' }), async (req, res) => {
   try {
     const { status = 'open' } = req.query;
     const result = await pool.query(
@@ -103,7 +103,7 @@ router.get('/', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }
 // Admin resolves a dispute. If valid=true, fires DISPUTE event on notary.
 // Correction 5: notary_id always fetched from documents table.
 // ─────────────────────────────────────────────────────
-router.patch('/:id/resolve', requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.patch('/:id/resolve', requirePrivilege({ capability: 'DISPUTE_RESOLVE' }), async (req, res) => {
   try {
     const { id } = req.params;
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid dispute ID' });

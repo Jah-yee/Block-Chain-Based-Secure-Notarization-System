@@ -27,54 +27,9 @@ const connectBNB = async () => {
         throw new Error("FATAL: DOCUMENT_REGISTRY_ADDRESS not configured in SSoT");
     }
 
-    // 2. Resolve RPC Endpoints (Prioritize Config, Fallback to Env for bootstrap)
-    const rpcUrls = [
-        config.rpcUrl,
-        process.env.BNB_TESTNET_RPC_URL,
-        process.env.RPC_URL
-    ].filter(url => url && url.trim().length > 0);
-
-    if (rpcUrls.length === 0) {
-        throw new Error("FATAL: No blockchain RPC URLs found in SSoT or Env");
-    }
-
-    let provider = null;
-    let lastError = null;
-
-    // 3. Resilient Connection Loop (Backoff + Fallback)
-    for (const url of rpcUrls) {
-        let attempt = 0;
-        const maxAttempts = 3;
-
-        while (attempt < maxAttempts) {
-            try {
-                console.log(`📡 [BLOCKCHAIN] Connecting to ${url} (Attempt ${attempt + 1})...`);
-                const tempProvider = new ethers.JsonRpcProvider(url.trim(), undefined, {
-                    staticNetwork: true // Performance: skip detectNetwork calls
-                });
-                
-                // Active verification
-                await tempProvider.getNetwork();
-                console.log(`✅ [BLOCKCHAIN] Connected to ${url}`);
-                
-                provider = tempProvider;
-                break; // Succession!
-            } catch (err) {
-                attempt++;
-                lastError = err;
-                console.error(`⚠️ [BLOCKCHAIN] Connection to ${url} failed: ${err.message}`);
-                if (attempt < maxAttempts) {
-                    const delay = Math.pow(2, attempt) * 1000;
-                    await new Promise(r => setTimeout(r, delay));
-                }
-            }
-        }
-        if (provider) break; // Found a working RPC
-    }
-
-    if (!provider) {
-        throw new Error(`FATAL: All RPC connection attempts failed. Last error: ${lastError?.message}`);
-    }
+    // 2. Resolve Multi-Tier Provider (Phase 2.3)
+    const ProviderService = require("./provider-service");
+    const provider = await ProviderService.getProvider();
 
     // 4. Signer Resolver (KMS or Private Key)
     let signer;

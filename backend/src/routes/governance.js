@@ -5,6 +5,7 @@ const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require("../middle
 const { ethers } = require("ethers");
 const path = require("path");
 const ConfigService = require("../services/config.service");
+const ProviderService = require("../blockchain/provider-service");
 const { withDomain, withAction, withMutation } = require("../middleware/policy.js");
 
 // UUID validation helper - prevents Postgres cast errors on invalid session IDs
@@ -14,7 +15,7 @@ const isValidUUID = (str) => UUID_REGEX.test(str);
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // GET /api/governance/proposals
-router.get("/proposals", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/proposals", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
     try {
         let query = `
             SELECT p.*, u.name as proposer_name 
@@ -39,7 +40,7 @@ router.get("/proposals", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEV
 });
 
 // GET /api/governance/alerts/count
-router.get("/alerts/count", allowPublic, async (req, res) => {
+router.get("/alerts/count", allowPublic, requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
     try {
         const result = await pool.query("SELECT COUNT(*) FROM governance_proposals WHERE status = 'active'");
         res.json({ count: parseInt(result.rows[0].count) });
@@ -49,7 +50,7 @@ router.get("/alerts/count", allowPublic, async (req, res) => {
 });
 
 // POST /api/governance/proposals (Admin only)
-router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('GOV_PROPOSAL_CREATE'), withMutation(), async (req, res) => {
+router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_PROPOSAL_CREATE' }), withAction('GOV_PROPOSAL_CREATE'), withMutation(), async (req, res) => {
     const { title, description, type, target_id, target_notaries, expires_in_days } = req.body;
 
     if (!title || !type) {
@@ -72,7 +73,7 @@ router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ minRole: 
 });
 
 // POST /api/governance/proposals/:id/vote (Admin/Notary depending on type - keeping Admin for now but checking threshold)
-router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('GOV_VOTE_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_VOTE_SUBMIT' }), withAction('GOV_VOTE_SUBMIT'), withMutation(), async (req, res) => {
     const { decision, signature } = req.body;
     const proposalId = req.params.id;
 
@@ -128,7 +129,7 @@ router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ 
 });
 
 // GET /api/governance/multisig/settings
-router.get("/multisig/settings", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/multisig/settings", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
     try {
         const config = await ConfigService.getConfig();
         const rpcUrl = config.rpcUrl;
@@ -145,7 +146,7 @@ router.get("/multisig/settings", requirePrivilege({ minRole: ROLES.OWNER, risk: 
             });
         }
 
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const provider = await ProviderService.getProvider();
         // Load ABI from artifacts
         const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
         const artifact = require(artifactPath);
@@ -183,7 +184,7 @@ router.get("/multisig/settings", requirePrivilege({ minRole: ROLES.OWNER, risk: 
 });
 
 // GET /api/governance/multisig/transactions
-router.get("/multisig/transactions", requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), async (req, res) => {
+router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
     try {
         // Returns recent multisig transactions associated with proposals
         // Matches the structure expected by the frontend enrichment logic
@@ -221,7 +222,7 @@ router.get("/multisig/transactions", requirePrivilege({ minRole: ROLES.OWNER, ri
 });
 
 // POST /api/governance/proposals/:id/prepare-on-chain
-router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
     const proposalId = req.params.id;
     try {
         const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
@@ -234,7 +235,7 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES
         const chainId = Number(config.chainId);
 
         // 2. Load MultiSig Contract to get Version
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const provider = await ProviderService.getProvider();
         const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
         const artifact = require(artifactPath);
         const contract = new ethers.Contract(multisigAddress, artifact.abi, provider);
@@ -279,7 +280,7 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ minRole: ROLES
 });
 
 // POST /api/governance/proposals/:id/submit-on-chain
-router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.HIGH }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
     const proposalId = req.params.id;
     const { signature } = req.body;
 
@@ -335,7 +336,7 @@ router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requireP
 // ================= REMOTE GOVERNANCE VOTING ==================
 
 // POST /api/governance/remote/vote/session - Initialize remote voting session
-router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), withAction('GOV_REMOTE_INIT'), withMutation(), async (req, res) => {
+router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_REMOTE_INIT' }), withAction('GOV_REMOTE_INIT'), withMutation(), async (req, res) => {
     try {
         const { proposalId, decision } = req.body;
         if (!proposalId || !decision) {
@@ -358,7 +359,7 @@ router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({
 });
 
 // GET /api/governance/remote/vote/status/:sessionId - Poll for voting session status
-router.get('/remote/vote/status/:sessionId', allowPublic, async (req, res) => {
+router.get('/remote/vote/status/:sessionId', allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_INIT' }), async (req, res) => {
     try {
         const { sessionId } = req.params;
         if (!isValidUUID(sessionId)) {
@@ -392,7 +393,7 @@ router.get('/remote/vote/status/:sessionId', allowPublic, async (req, res) => {
 });
 
 // POST /api/governance/remote/vote/authorize - Submit signature for remote vote
-router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE' }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
     try {
         const { sessionId, walletAddress, signature } = req.body;
 

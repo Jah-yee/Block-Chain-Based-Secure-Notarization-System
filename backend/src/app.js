@@ -52,8 +52,8 @@ app.get("/health", allowPublic, async (req, res) => {
     try {
         const config = await ConfigService.getConfig();
         configStatus = 'OK';
-        const { ethers } = require('ethers');
-        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        const ProviderService = require('./blockchain/provider-service');
+        const provider = await ProviderService.getProvider();
         await provider.getBlockNumber();
         rpcStatus = 'OK';
     } catch (e) {}

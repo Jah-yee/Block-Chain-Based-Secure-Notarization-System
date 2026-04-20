@@ -99,7 +99,7 @@ function uuidToBytes32(uuid) {
 }
 
 // ─── POST /api/documents/initiate ─────────────────────────────────────────
-router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, withRestoredContext(memoryUpload.single('file')), async (req, res) => {
+router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({ capability: 'DOC_UPLOAD_INITIATE' }), withAction('DOC_UPLOAD_INITIATE'), withMutation(), uploadLimiter, withRestoredContext(memoryUpload.single('file')), async (req, res) => {
   try {
 
     const actor = req.actor;
@@ -217,7 +217,7 @@ router.post('/initiate', withDomain('DOCS'), requireUnpaused, requirePrivilege({
 });
 
 // ─── POST /api/documents/confirm ──────────────────────────────────────────
-router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPLOAD_CONFIRM'), withMutation(), async (req, res) => {
+router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ capability: 'DOC_UPLOAD_CONFIRM' }), withAction('DOC_UPLOAD_CONFIRM'), withMutation(), async (req, res) => {
   const { intent_id, tx_hash } = req.body;
   if (!intent_id || !tx_hash) {
     return res.status(400).json({ error: 'intent_id and tx_hash are required' });
@@ -276,7 +276,8 @@ router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ 
 
     // ── ON-CHAIN VERIFICATION ──
     const config = await ConfigService.getConfig();
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const ProviderService = require('../blockchain/provider-service');
+    const provider = await ProviderService.getProvider();
     
     // Lock for this API node (Lease)
     const lockUntil = new Date(Date.now() + 60000); // 1 minute lease
@@ -388,7 +389,7 @@ router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ 
 
 // ─── GET /api/documents/intent/:id ────────────────────────────────────────
 // Frontend polls this while waiting for user to complete their wallet TX.
-router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_INTENT_READ'), async (req, res) => {
+router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_INTENT_READ' }), withAction('DOC_INTENT_READ'), async (req, res) => {
   try {
     const r = await pool.query(
       `SELECT id, status, file_hash, amount, amount_wei, expires_at, created_at, payment_tx_hash, filepath, storage_key
@@ -427,7 +428,7 @@ router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.
 
 const maintenanceService = require('../services/maintenance.service');
 
-router.get('/', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_LIST'), async (req, res) => {
+router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' }), withAction('DOC_LIST'), async (req, res) => {
   console.error('[DEBUG_DOCS] Hit GET /documents');
   try {
     if (!req.actor) return res.status(401).json({ error: 'Actor header required' });
@@ -478,7 +479,7 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, ris
 
 // GET /api/documents/:id/signature-payload
 // Provides the EIP-712 payload for a notary to sign
-router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.LOW }), withAction('DOC_SIGNATURE_PAYLOAD'), async (req, res) => {
+router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_SIGNATURE_PAYLOAD' }), withAction('DOC_SIGNATURE_PAYLOAD'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     const { status } = req.query; // 'approved' or 'rejected'
@@ -579,7 +580,7 @@ router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ minR
   }
 });
 
-router.get('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_READ'), async (req, res) => {
+router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ' }), withAction('DOC_READ'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     let query;
@@ -633,7 +634,7 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, 
 
 // ─── GET /api/documents/:id/preview ───────────────────────────────────────
 // NEW: Cloud-First Preview Endpoint (Phase 2)
-router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_READ'), async (req, res) => {
+router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ' }), withAction('DOC_READ'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     const docQuery = await pool.query('SELECT * FROM documents WHERE id=$1 AND is_deleted=false', [paramId]);
@@ -666,7 +667,7 @@ router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ minRole: ROLES
 });
 
 // Download Document File
-router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_DOWNLOAD'), async (req, res) => {
+router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_DOWNLOAD' }), withAction('DOC_DOWNLOAD'), async (req, res) => {
   try {
     const { id: paramId } = req.params;
     const r = await pool.query('SELECT * FROM documents WHERE id=$1 AND is_deleted=false', [paramId]);
@@ -705,12 +706,12 @@ router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OW
 // ─── ARBORIZATION: Split Bimodal PATCH into /update and /approve ─────────
 
 // Method A: Metadata Update (OWNER)
-router.patch('/:id/update', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_UPDATE'), withMutation(), async (req, res) => {
+router.patch('/:id/update', withDomain('DOCS'), requireUnpaused, requirePrivilege({ capability: 'DOC_UPDATE' }), withAction('DOC_UPDATE'), withMutation(), async (req, res) => {
   return handleDocumentPatch(req, res);
 });
 
 // Method B: Notary Approval (NOTARY)
-router.post('/:id/approve', withDomain('DOCS'), requireUnpaused, requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), withAction('DOC_APPROVE'), withMutation(), async (req, res) => {
+router.post('/:id/approve', withDomain('DOCS'), requireUnpaused, requirePrivilege({ capability: 'DOC_APPROVE' }), withAction('DOC_APPROVE'), withMutation(), async (req, res) => {
   return handleDocumentPatch(req, res);
 });
 
@@ -1012,7 +1013,7 @@ async function handleDocumentPatch(req, res) {
 }
 
 // Status change (Notary/Admin) - Supported via PUT for Desktop compatibility
-router.put('/:id', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.HIGH }), async (req, res) => {
+router.put('/:id', requirePrivilege({ capability: 'DOC_APPROVE' }), async (req, res) => {
   try {
     const { id } = req.params;
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid document ID format' });
@@ -1045,7 +1046,7 @@ router.put('/:id', requirePrivilege({ minRole: ROLES.NOTARY, risk: RISK_LEVELS.H
   }
 });
 
-router.delete('/:id', withDomain('DOCS'), requirePrivilege({ minRole: ROLES.OWNER, risk: RISK_LEVELS.LOW }), withAction('DOC_DELETE'), withMutation(), async (req, res) => {
+router.delete('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_DELETE' }), withAction('DOC_DELETE'), withMutation(), async (req, res) => {
   try {
     const { id } = req.params;
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid document ID format' });

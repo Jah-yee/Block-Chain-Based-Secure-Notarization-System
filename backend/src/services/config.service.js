@@ -318,7 +318,8 @@ class ConfigService {
    * 🛡️ verifyConnectivity() - Live pre-activation check with TIMEOUT protection
    */
   async verifyConnectivity(config) {
-    const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    const ProviderService = require("../blockchain/provider-service");
+    const provider = await ProviderService.getProvider();
     
     let timer;
     const timeoutPromise = new Promise((_, reject) => {
