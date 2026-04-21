@@ -21,6 +21,7 @@ const logger = new Logger('API_DOCUMENTS');
 const reputationService = require('../services/reputation.service');
 const storageService = require('../services/storage.service');
 const ConfigService = require('../services/config.service');
+const DocumentStatusService = require('../services/document-status.service');
 
 // Configure Multer for secure memory-safe uploads
 const memoryUpload = multer({
@@ -791,31 +792,33 @@ async function handleDocumentPatch(req, res) {
       const statusInt = status === 'rejected' ? 2 : 1;
       const dbStatus = status === 'rejected' ? 'rejected' : 'submitted_to_blockchain';
 
-      // 🔐 ATOMIC CLAIM + LOCK + INTENT (Hardened Phase 3 + Observability Phase 7)
+      // 🔐 ATOMIC CLAIM + LOCK + INTENT (Hardened Phase 3 + Lockdown Phase 1)
       const correlationId = req.correlationId;
-      const claimRes = await client.query(
-        `UPDATE documents SET
-           idempotency_key = file_hash,
-           tx_status = 'initiated',
-           processing_started_at = NOW(),
-           notary_id = $1,
-           document_summary = $2,
-           rejection_reason = $3,
-           correlation_id = $4,
-           status_updated_at = NOW()
-         WHERE id = $5 
-           AND (idempotency_key IS NULL OR tx_status = 'failed' OR tx_status = 'initiated')
-           AND chain_confirmed = false
-         RETURNING *`,
-        [actor.id, document_summary, rejection_reason, correlationId, id]
+      const statusResult = await DocumentStatusService.updateStatus(
+        client,
+        id,
+        doc.submission_state,
+        doc.revision,
+        doc.submission_state, // Stay in current state (e.g. pending) but take ownership
+        {
+          idempotency_key: 'file_hash',
+          tx_status: "'initiated'",
+          processing_started_at: 'NOW()',
+          notary_id: actor.id,
+          document_summary: document_summary,
+          rejection_reason: rejection_reason,
+          correlation_id: correlationId,
+          status_updated_at: 'NOW()'
+        },
+        "AND (idempotency_key IS NULL OR tx_status = 'failed' OR tx_status = 'initiated') AND chain_confirmed = false"
       );
 
-      if (claimRes.rows.length === 0) {
+      if (statusResult.error === 'STATE_CONFLICT') {
         return res.status(403).json({ error: 'Document is already being processed or is confirmed.' });
       }
 
       const previous_state = doc.submission_state;
-      const claimedDoc = claimRes.rows[0];
+      const claimedDoc = statusResult.document;
       logger.info('TASK_CLAIMED', { 
         id, 
         correlation_id: correlationId, 
@@ -833,11 +836,26 @@ async function handleDocumentPatch(req, res) {
       
       if (onChainData.exists && Number(onChainData.status) > 0) {
         logger.info('DUPLICATE_PREVENTED', { id, correlation_id: correlationId, reason: 'Already on-chain' });
-        const finalRes = await client.query(
-          "UPDATE documents SET submission_state = $1, chain_confirmed = true, tx_status = 'confirmed', status_updated_at = NOW() WHERE id = $2 RETURNING *",
-          [onChainData.status === 1n ? 'submitted_to_blockchain' : 'rejected', id]
+        const targetSyncState = onChainData.status === 1n ? 'submitted_to_blockchain' : 'rejected';
+        
+        const statusResult = await DocumentStatusService.updateStatus(
+          client, 
+          id, 
+          doc.submission_state, 
+          doc.revision, 
+          targetSyncState, 
+          { chain_confirmed: true, tx_status: 'confirmed' }
         );
-        return res.json(sanitizeDocument(finalRes.rows[0]));
+
+        if (statusResult.error === 'STATE_CONFLICT') {
+            return res.status(409).json({ 
+                error: 'STATE_CONFLICT', 
+                current_state: statusResult.currentState, 
+                revision: statusResult.currentRevision 
+            });
+        }
+        
+        return res.json(sanitizeDocument(statusResult.document));
       }
 
       // 🔐 SIGNATURE RECOVERY & BROADCAST
@@ -879,7 +897,7 @@ async function handleDocumentPatch(req, res) {
         const expectedAddress = (actor.address || actor.wallet_address || "").toLowerCase();
         
         if (!recoveredSigner || recoveredSigner.toLowerCase() !== expectedAddress) {
-          await client.query("UPDATE documents SET tx_status = 'failed' WHERE id = $1", [id]);
+          await DocumentStatusService.updateStatus(client, id, claimedDoc.submission_state, claimedDoc.revision, claimedDoc.submission_state, { tx_status: "'failed'" });
           return res.status(401).json({ error: 'Invalid signature or recovery failure.' });
         }
 
@@ -905,18 +923,33 @@ async function handleDocumentPatch(req, res) {
           duration_ms: txSendDuration
         });
 
-        // Update DB to 'pending' with tx_hash
-        const updateRes = await client.query(
-          `UPDATE documents SET
-            submission_state = $1,
-            tx_hash = $2,
-            tx_status = 'pending',
-            needs_cleanup = true,
-            updated_at = NOW(),
-            status_updated_at = NOW()
-           WHERE id = $3 RETURNING *`,
-          [dbStatus, txResult.txHash, id]
+        // Update DB to 'pending' with tx_hash and atomic revision lock
+        const statusResult = await DocumentStatusService.updateStatus(
+          client,
+          id,
+          claimedDoc.submission_state,
+          claimedDoc.revision,
+          dbStatus,
+          {
+            tx_hash: txResult.txHash,
+            tx_status: "'pending'",
+            needs_cleanup: 'true',
+            updated_at: 'NOW()',
+            status_updated_at: 'NOW()'
+          }
         );
+
+        if (statusResult.error === 'STATE_CONFLICT') {
+            logger.error('TX_BROADCAST_CONFLICT', { id, correlation_id: correlationId, tx_hash: txResult.txHash });
+            return res.status(409).json({
+                error: 'STATE_CONFLICT',
+                detail: 'Transaction broadcasted but document state changed simultaneously.',
+                current_state: statusResult.currentState,
+                revision: statusResult.currentRevision
+            });
+        }
+
+        const updateRes = statusResult.document;
 
         // Fire reputation event (non-blocking)
         try {
@@ -951,7 +984,7 @@ async function handleDocumentPatch(req, res) {
                             }
                         }
                         
-                        await pool.query('UPDATE documents SET needs_cleanup = false WHERE id=$1', [id]);
+                        await DocumentStatusService.updateStatus(pool, id, freshDoc.submission_state, freshDoc.revision, freshDoc.submission_state, { needs_cleanup: "'false'" });
                         logger.info('FILE_DELETED_SUCCESSFULLY', { id, storage_key: freshDoc.storage_key });
                     }
                 } catch (err) {
@@ -970,9 +1003,20 @@ async function handleDocumentPatch(req, res) {
           previous_state: claimedDoc.submission_state,
           new_state: 'failed'
         }, txErr);
-        await client.query(
-          "UPDATE documents SET tx_status = 'failed', last_error = $1, updated_at = NOW(), status_updated_at = NOW() WHERE id = $2", 
-          [JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.SEND, message: txErr.message }), id]
+        await DocumentStatusService.updateStatus(
+          client, 
+          id, 
+          claimedDoc.submission_state, 
+          claimedDoc.revision, 
+          claimedDoc.submission_state, 
+          { 
+            tx_status: "'failed'", 
+            last_error: '$5', 
+            updated_at: 'NOW()', 
+            status_updated_at: 'NOW()' 
+          },
+          "",
+          [JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.SEND, message: txErr.message })]
         );
         return res.status(502).json({ error: 'Blockchain alignment failed.', details: txErr.message });
       }
@@ -994,13 +1038,25 @@ async function handleDocumentPatch(req, res) {
     }
 
     const { name, type } = value;
-    const r = await client.query(
-      `UPDATE documents SET
-        title=COALESCE($1, title),
-        updated_at=NOW()
-       WHERE id=$2 RETURNING *`,
-      [name, id]
+    const statusResult = await DocumentStatusService.updateStatus(
+      client,
+      id,
+      doc.submission_state,
+      doc.revision,
+      doc.submission_state,
+      {
+        title: 'COALESCE($5, title)',
+        updated_at: 'NOW()'
+      },
+      "",
+      [name]
     );
+
+    if (statusResult.error === 'STATE_CONFLICT') {
+        return res.status(409).json({ error: 'STATE_CONFLICT', current_state: statusResult.currentState, revision: statusResult.currentRevision });
+    }
+
+    const r = { rows: [statusResult.document] };
 
     res.status(200).json(sanitizeDocument(r.rows[0]));
   } catch (err) {
@@ -1029,15 +1085,26 @@ router.put('/:id', requirePrivilege({ capability: 'DOC_APPROVE' }), async (req, 
     const docQuery = await pool.query('SELECT * FROM documents WHERE id=$1 AND is_deleted=false', [parseInt(id)]);
     if (docQuery.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
 
-    const result = await pool.query(
-      `UPDATE documents SET
-        submission_state = $1,
-        rejection_reason = $2,
-        notary_id = $3,
-        updated_at = NOW()
-       WHERE id = $4 RETURNING *`,
-      [status, rejection_reason, actor.id, id]
+    const statusResult = await DocumentStatusService.updateStatus(
+      pool,
+      id,
+      docQuery.rows[0].submission_state,
+      docQuery.rows[0].revision,
+      status,
+      {
+        rejection_reason: '$5',
+        notary_id: actor.id,
+        updated_at: 'NOW()'
+      },
+      "",
+      [rejection_reason]
     );
+
+    if (statusResult.error === 'STATE_CONFLICT') {
+        return res.status(409).json({ error: 'STATE_CONFLICT', current_state: statusResult.currentState, revision: statusResult.currentRevision });
+    }
+
+    const result = { rows: [statusResult.document] };
 
     res.json(sanitizeDocument(result.rows[0]));
   } catch (err) {
@@ -1062,7 +1129,7 @@ router.delete('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_DE
       return res.status(403).json({ error: 'Only owner or admin can delete document' });
     }
 
-    await pool.query('UPDATE documents SET is_deleted=true WHERE id=$1', [id]);
+    await DocumentStatusService.updateStatus(pool, id, doc.submission_state, doc.revision, doc.submission_state, { is_deleted: "'true'" });
     res.status(204).send();
   } catch (err) {
     console.error(err);
