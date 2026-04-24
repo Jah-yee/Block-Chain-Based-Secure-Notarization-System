@@ -16,6 +16,7 @@
  *   Penalize −10 raw_reputation if |notary_rate - system_avg| > 0.40
  */
 
+require('dotenv').config();
 const pool = require('../db/index');
 const lockService = require('../services/lock.service');
 const { runWithSystemContext } = require('../middleware/actor');
@@ -186,3 +187,8 @@ function startReputationWorker() {
 }
 
 module.exports = { runReputationWorker, startReputationWorker };
+
+if (require.main === module) {
+  pool.init();
+  startReputationWorker();
+}

@@ -14,6 +14,8 @@ function App() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [config, setConfig] = useState<any>(null);
+  const [handshakeDomain, setHandshakeDomain] = useState<any>(null);
+  const [handshakeTypes, setHandshakeTypes] = useState<any>(null);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -136,6 +138,8 @@ function App() {
         setStatus("authorized");
       } else {
         setChallenge(data.challenge);
+        if (data.handshakeDomain) setHandshakeDomain(data.handshakeDomain);
+        if (data.handshakeTypes) setHandshakeTypes(data.handshakeTypes);
         setStatus("ready");
       }
     } catch (err: any) {
@@ -325,10 +329,56 @@ function App() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Authorization failed on server");
         }
+      } else if (handshakeDomain && handshakeTypes) {
+        // 🛡️ [Hardening 11.3] Atomic Single-Signature Handshake
+        // Consolidates identity verification and session binding into one EIP-712 prompt.
+        console.log(`[AUTH] Initiating Atomic Handshake for sessionId: ${sessionId}`);
+        
+        const timestamp = Math.floor(Date.now() / 1000);
+        const message = {
+          action: 'Remote Login Authorization',
+          sessionId: sessionId,
+          challenge: challenge,
+          timestamp: timestamp
+        };
+
+        console.log("[AUTH] EIP-712 Payload:", { domain: handshakeDomain, types: handshakeTypes, message });
+
+        let signature;
+        try {
+            signature = await signer.signTypedData(handshakeDomain, handshakeTypes, message);
+            console.log("[AUTH] Atomic signature obtained. Sending to binding authority...");
+        } catch (signErr) {
+            console.error("[AUTH_FAIL] Atomic signing failed:", signErr);
+            setError(`Single-signature failed: ${signErr.message}. Falling back to Legacy mode...`);
+            // Trigger Legacy Fallback by clearing the local domain/types
+            setHandshakeDomain(null);
+            setHandshakeTypes(null);
+            return;
+        }
+
+        const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            signature,
+            walletAddress: address,
+            timestamp
+          })
+        });
+
+        if (!bindRes.ok) {
+          const data = await bindRes.json().catch(() => ({}));
+          throw new Error(data.error || "Atomic Binding Evaluation Failed");
+        }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 3000);
       } else {
         // 🛡️ [Hardening 10.3] Standard Identity Binding Flow
         // We perform a full protocol login to get a valid JWT, then bind it to the SessionId.
-        console.log(`[AUTH] Initiating Secure Identity Binding for sessionId: ${sessionId}`);
+        console.log(`[AUTH] Falling back to Legacy Dual-Signature flow for sessionId: ${sessionId}`);
         
         const provider = new ethers.BrowserProvider((window as any).ethereum);
         const signer = await provider.getSigner();

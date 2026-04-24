@@ -162,8 +162,14 @@ function GovernanceHealthWidget({ settings }: { settings: SystemSettings | null 
                     <Shield className="h-3 w-3 text-primary/20" />
                 </div>
                 <div className="flex items-baseline gap-1">
-                    <span className="text-xl font-black text-primary">{settings.threshold || 0}</span>
-                    <span className="text-[10px] font-bold text-primary/40 uppercase">/ {Array.isArray(settings?.signers) ? settings.signers.length : 0} Signers</span>
+                    {settings.threshold !== undefined ? (
+                        <>
+                            <span className="text-xl font-black text-primary">{settings.threshold}</span>
+                            <span className="text-[10px] font-bold text-primary/40 uppercase">/ {Array.isArray(settings?.signers) ? settings.signers.length : "..."} Signers</span>
+                        </>
+                    ) : (
+                        <span className="text-[10px] font-bold text-primary/40 uppercase animate-pulse">Calculating Quorum...</span>
+                    )}
                 </div>
             </div>
 
@@ -173,8 +179,14 @@ function GovernanceHealthWidget({ settings }: { settings: SystemSettings | null 
                     <Clock className="h-3 w-3 text-amber-500/20" />
                 </div>
                 <div className="flex items-baseline gap-1">
-                    <span className="text-xl font-black text-amber-500">{settings.timelockDelay / 3600}</span>
-                    <span className="text-[10px] font-bold text-amber-500/40 uppercase">Hours Active</span>
+                    {settings.timelockDelay !== undefined ? (
+                        <>
+                            <span className="text-xl font-black text-amber-500">{settings.timelockDelay / 3600}</span>
+                            <span className="text-[10px] font-bold text-amber-500/40 uppercase">Hours Active</span>
+                        </>
+                    ) : (
+                        <span className="text-[10px] font-bold text-amber-500/40 uppercase animate-pulse">Syncing Delay...</span>
+                    )}
                 </div>
             </div>
 
@@ -643,11 +655,11 @@ export function Governance({ role, user }: GovernanceProps) {
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <div className="space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Safe Threshold</p>
-                                            <p className="text-xl font-black text-primary">{systemSettings.threshold || 0} <span className="text-xs text-primary/40">OF {Array.isArray(systemSettings.signers) ? systemSettings.signers.length : 0}</span></p>
+                                            <p className="text-xl font-black text-primary">{systemSettings.threshold ?? "..."} <span className="text-xs text-primary/40">OF {Array.isArray(systemSettings.signers) ? systemSettings.signers.length : "..."}</span></p>
                                         </div>
                                         <div className="space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Timelock Delay</p>
-                                            <p className="text-xl font-black text-primary">{(systemSettings.timelockDelay / 3600).toFixed(1)} <span className="text-xs text-primary/40">HOURS</span></p>
+                                            <p className="text-xl font-black text-primary">{systemSettings.timelockDelay !== undefined ? (systemSettings.timelockDelay / 3600).toFixed(1) : "..."} <span className="text-xs text-primary/40">HOURS</span></p>
                                         </div>
                                         <div className="md:col-span-2 space-y-1">
                                             <p className="text-[9px] font-bold text-primary/40 uppercase">Signer Signatures</p>

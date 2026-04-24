@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Eye, Download, Loader2, FileText } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 import { useToast } from "@/hooks/use-toast"
+import { normalizeStatus, getDisplayStatus } from "@/lib/status-utils"
 import {
   Dialog,
   DialogContent,
@@ -36,7 +37,15 @@ export function DocumentsTable() {
   const fetchDocuments = async () => {
     try {
       const data = await apiClient.get('/api/documents')
-      setDocuments(data || [])
+      const rawDocs = data || []
+      
+      // [NORMALIZE ONCE] Force all documents to Backend Authority tokens
+      const normalizedDocs = rawDocs.map((doc: any) => ({
+        ...doc,
+        status: normalizeStatus(doc.status)
+      }))
+      
+      setDocuments(normalizedDocs)
     } catch (err: any) {
       console.error("Failed to fetch documents:", err)
       // Silently handle errors for document fetching to prevent unwanted toasts for users with no records
@@ -51,13 +60,14 @@ export function DocumentsTable() {
   }, [])
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "verified":
-      case "approved":
+    const s = normalizeStatus(status);
+    switch (s) {
+      case "KYC_VERIFIED":
+      case "APPROVED":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-      case "pending":
+      case "PENDING":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-      case "rejected":
+      case "REJECTED":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300"
@@ -96,7 +106,7 @@ export function DocumentsTable() {
               </TableCell>
               <TableCell>
                 <Badge className={getStatusColor(doc.status)}>
-                  {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
+                  {getDisplayStatus(doc.status)}
                 </Badge>
               </TableCell>
               <TableCell className="text-muted-foreground">
@@ -135,7 +145,7 @@ export function DocumentsTable() {
                           <span className="text-sm font-medium text-right">Status:</span>
                           <span className="col-span-3">
                             <Badge className={getStatusColor(doc.status)}>
-                              {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
+                              {getDisplayStatus(doc.status)}
                             </Badge>
                           </span>
                         </div>

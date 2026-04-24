@@ -306,7 +306,7 @@ router.get("/applications", requirePrivilege({ capability: 'NOTARY_APP_LIST' }),
         na.nationality,
         na.phone,
         na.experience,
-        na.national_id_number,
+        na.national_id_number as national_id,
         na.status,
         na.created_at as application_date
       FROM notary_applications na

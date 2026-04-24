@@ -108,7 +108,8 @@ function requirePrivilege(config) {
       return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
     }
 
-    const { address, snapshotBlock, snapshotChainId, issuedAt } = decoded;
+    const { address, snapshotBlock, snapshotChainId, iat } = decoded;
+    const issuedAt = iat * 1000; // Protocol uses standard unix seconds
 
     // 3. Chain ID Integrity (Server-Authoritative)
     const config = await ConfigService.getConfig();
@@ -116,7 +117,14 @@ function requirePrivilege(config) {
       return res.status(426).json({ error: 'Upgrade Required: Incorrect Network Context' });
     }
 
-    // 4. Block Continuity & Sanity Checks
+    // 4. Hard Session Expiry (Identity Persistence Limit: 48h + 60s skew)
+    const HARD_LIMIT = 48 * 3600 * 1000;
+    const CLOCK_SKEW = 60000;
+    if (!issuedAt || (Date.now() - issuedAt > HARD_LIMIT + CLOCK_SKEW)) {
+      return res.status(401).json({ error: 'Session Expired: Handshake Required', code: 'HARD_EXPIRY' });
+    }
+
+    // 5. Block Continuity & Sanity Checks
     let currentBlock;
     try {
       const { ethers } = require('ethers');
@@ -128,8 +136,12 @@ function requirePrivilege(config) {
         return res.status(426).json({ error: 'Upgrade Required: Forward Block Drift Detected' });
       }
 
-      // Staleness check (24h Window / ~28k blocks on BSC)
-      if (currentBlock - snapshotBlock > 43200) {
+      // Staleness check (24h Window / ~43200 blocks on BSC)
+      const HEALING_ENABLED = true; // 🛡️ [SAFETY] Temporary Kill Switch
+      const STALE_ALLOWED_CAPABILITIES = new Set(['AUTH_PRECHECK', 'AUTH_LOGIN']);
+      const isStale = (currentBlock - snapshotBlock > 43200);
+
+      if (isStale && (!HEALING_ENABLED || !STALE_ALLOWED_CAPABILITIES.has(config?.capability))) {
         return res.status(426).json({ error: 'Upgrade Required: Session State Stale' });
       }
     } catch (rpcErr) {

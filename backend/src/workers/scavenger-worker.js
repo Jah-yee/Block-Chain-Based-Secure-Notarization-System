@@ -1,3 +1,4 @@
+require('dotenv').config();
 const pool = require('../db/index');
 const crypto = require('crypto');
 const { ethers } = require('ethers');
@@ -167,3 +168,13 @@ async function cleanupExpiredSessions(client) {
 }
 
 module.exports = { runScavenger };
+
+// Run every 60 seconds if called directly
+if (require.main === module) {
+    pool.init();
+    const INTERVAL = process.env.SCAVENGER_INTERVAL || 60000;
+    console.log(`🚀 Scavenger Worker active. Polling interval: ${INTERVAL}ms`);
+
+    runScavenger();
+    setInterval(runScavenger, INTERVAL);
+}

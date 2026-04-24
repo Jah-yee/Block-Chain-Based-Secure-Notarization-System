@@ -10,6 +10,7 @@ import { Upload, Eye, Download, Plus, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { useEffect } from "react"
 import { apiClient } from "@/lib/api-client"
+import { normalizeStatus, getDisplayStatus } from "@/lib/status-utils"
 
 export function VersioningInterface() {
   const [documents, setDocuments] = useState<any[]>([])
@@ -21,7 +22,15 @@ export function VersioningInterface() {
     const fetchDocs = async () => {
       try {
         const data = await apiClient.get('/api/documents')
-        setDocuments(data || [])
+        const rawDocs = data || []
+        
+        // [NORMALIZE ONCE] Force all documents to Backend Authority tokens
+        const normalizedDocs = rawDocs.map((doc: any) => ({
+          ...doc,
+          status: normalizeStatus(doc.status)
+        }))
+        
+        setDocuments(normalizedDocs)
       } catch (err) {
         console.error("Failed to fetch documents for versioning:", err)
       } finally {
@@ -83,12 +92,14 @@ export function VersioningInterface() {
   }
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "verified":
+    const s = normalizeStatus(status);
+    switch (s) {
+      case "KYC_VERIFIED":
+      case "APPROVED":
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-      case "pending":
+      case "PENDING":
         return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-      case "rejected":
+      case "REJECTED":
         return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
       default:
         return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300"
@@ -158,7 +169,7 @@ export function VersioningInterface() {
                       <TableCell>{new Date(version.uploadDate).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Badge className={getStatusColor(version.status)}>
-                          {version.status.charAt(0).toUpperCase() + version.status.slice(1)}
+                          {getDisplayStatus(version.status)}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-sm">{version.hash.substring(0, 20)}...</TableCell>

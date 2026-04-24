@@ -61,7 +61,7 @@ export function AuthStatusBar({ user, isLocked = false }: AuthStatusBarProps) {
         {/* Session TTL */}
         <div className="flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full">
           <Clock size={12} className="text-blue-400" />
-          <span className="text-[10px] font-mono font-bold text-blue-400">SESSION EXPIRES: {sessionTime}</span>
+          <span className="text-[10px] font-mono font-bold text-blue-400 uppercase tracking-widest leading-none">Secure Session Active</span>
         </div>
 
         {/* Identity Icon (Pruned text to avoid redundancy with Sidebar) */}

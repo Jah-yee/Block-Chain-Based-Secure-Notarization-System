@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
 import api from "../../services/api";
+import { normalizeStatus, getDisplayStatus } from "../../utils/status";
+
 
 function unwrapResponse(res: any) {
   if (res?.status === "ok" && Array.isArray(res.data)) {
@@ -46,10 +48,14 @@ export function ManageNotaries() {
       
       const applicationsArray = unwrapResponse(applicationsRes).map((app: any) => ({
         ...app,
-        id: app.application_id || app.id // Normalize application_id
+        id: app.application_id || app.id, // Normalize application_id
+        status: normalizeStatus(app.status) // [NORMALIZE ONCE] Force to Backend Authority
       }));
       
-      const activeNotaries = unwrapResponse(activeNotariesRes);
+      const activeNotaries = unwrapResponse(activeNotariesRes).map((notary: any) => ({
+        ...notary,
+        status: normalizeStatus(notary.status || 'ACTIVATED')
+      }));
 
       const merged = [...applicationsArray];
 
@@ -85,11 +91,12 @@ export function ManageNotaries() {
   // ===============================
   // FILTER LOGIC
   // ===============================
-  const visibleStatuses = ["pending", "verified", "approved", "rejected", "activated"];
+  const visibleStatuses = ["PENDING", "KYC_VERIFIED", "APPROVED", "REJECTED", "ACTIVATED"];
 
   const filteredApplications = (Array.isArray(applications) ? applications : []).filter((app) => {
     if (!app) return false;
-    const status = (app.status || "").toLowerCase();
+    const status = normalizeStatus(app.status);
+
 
     if (!visibleStatuses.includes(status)) return false;
 
@@ -99,7 +106,7 @@ export function ManageNotaries() {
 
     const matchesFilter =
       filterStatus === "all" ||
-      status === filterStatus.toLowerCase();
+      status === filterStatus.toUpperCase();
 
     return matchesSearch && matchesFilter;
   });
@@ -115,11 +122,14 @@ export function ManageNotaries() {
     if (!confirmDialog.application) return;
 
     try {
+      const targetId = confirmDialog.application.id || confirmDialog.application.application_id;
+      console.log(`[NOTARY_ACTION_TRACE] Initiating ${confirmDialog.action} for target: ${targetId}`, confirmDialog.application);
+
       if (confirmDialog.action === "approve") {
-        await api.approveNotaryApplication(confirmDialog.application.application_id);
+        await api.approveNotaryApplication(targetId);
         toast.success("Application approved successfully");
       } else {
-        await api.rejectNotaryApplication(confirmDialog.application.application_id);
+        await api.rejectNotaryApplication(targetId);
         toast.success("Application rejected");
       }
 
@@ -156,17 +166,20 @@ export function ManageNotaries() {
     if (!status) return null;
 
     const variants: Record<string, string> = {
-      approved: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
-      activated: "bg-emerald-600/10 text-emerald-600 border-emerald-600/20",
-      rejected: "bg-rose-500/10 text-rose-500 border-rose-500/20",
-      verified: "bg-purple-500/10 text-purple-500 border-purple-500/20",
-      pending: "bg-amber-500/10 text-amber-500 border-amber-500/20",
+      APPROVED: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+      ACTIVATED: "bg-emerald-600/10 text-emerald-600 border-emerald-600/20",
+      REJECTED: "bg-rose-500/10 text-rose-500 border-rose-500/20",
+      KYC_VERIFIED: "bg-purple-500/10 text-purple-500 border-purple-500/20",
+      PENDING: "bg-amber-500/10 text-amber-500 border-amber-500/20",
     };
 
+    const s = normalizeStatus(status);
+
     return (
-      <Badge className={`${variants[status.toLowerCase()] || variants.pending} border`}>
-        {status}
+      <Badge className={`${variants[s] || variants.PENDING} border`}>
+        {getDisplayStatus(s)}
       </Badge>
+
     );
   };
 
@@ -206,10 +219,10 @@ export function ManageNotaries() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="verified">Verified</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="PENDING">Pending</SelectItem>
+              <SelectItem value="KYC_VERIFIED">Verified</SelectItem>
+              <SelectItem value="APPROVED">Approved</SelectItem>
+              <SelectItem value="ACTIVATED">Active Notaries</SelectItem>
               <SelectItem value="activated">Activated</SelectItem>
             </SelectContent>
           </Select>
@@ -237,8 +250,9 @@ export function ManageNotaries() {
                 </TableRow>
               ) : (
                 filteredApplications.map((app) => {
-                  const status = (app.status || "").toLowerCase();
-                  const canAdminAct = status === "verified";
+                  const status = normalizeStatus(app.status);
+                  const canAdminAct = status === "KYC_VERIFIED";
+
 
                   return (
                     <TableRow key={app.id}>
@@ -385,7 +399,8 @@ export function ManageNotaries() {
               <h4 className="text-sm font-medium text-muted-foreground">Status & Verification</h4>
               <div className="flex items-center gap-3">
                 {getStatusBadge(viewDialog.application?.status)}
-                {viewDialog.application?.status?.toLowerCase() === 'verified' && (
+                {viewDialog.application?.status === 'KYC_VERIFIED' && (
+
                   <div className="flex items-center gap-2 text-xs text-emerald-500 font-medium">
                     <CheckCircle size={14} /> Identity Integrity Verified by System
                   </div>
@@ -407,6 +422,42 @@ export function ManageNotaries() {
               </p>
             </div>
           </div>
+          {/* 🛡️ [ACTION_BRIDGE] Bunker V3.6.1: Integrated Modal Control */}
+          <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t border-border/50">
+            {viewDialog.application?.status === 'KYC_VERIFIED' && (
+
+              <div className="flex gap-2 w-full justify-end">
+                <Button 
+                  onClick={() => {
+                    setViewDialog({ ...viewDialog, open: false });
+                    handleAction("reject", viewDialog.application);
+                  }}
+                  variant="destructive"
+                  className="bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 border border-rose-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter"
+                >
+                  <UserX size={14} className="mr-2" />
+                  Reject Application
+                </Button>
+                <Button 
+                  onClick={() => {
+                    setViewDialog({ ...viewDialog, open: false });
+                    handleAction("approve", viewDialog.application);
+                  }}
+                  className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter"
+                >
+                  <UserCheck size={14} className="mr-2" />
+                  Approve Notary
+                </Button>
+              </div>
+            )}
+            <Button 
+              variant="ghost" 
+              onClick={() => setViewDialog({ ...viewDialog, open: false })}
+              className="text-[10px] font-bold uppercase tracking-widest text-slate-500"
+            >
+              Close Profile
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

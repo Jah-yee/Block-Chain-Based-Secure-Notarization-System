@@ -7,8 +7,13 @@ import { Suspense } from "react"
 import Script from "next/script"
 
 export const metadata: Metadata = {
-    title: "BBSNS - Blockchain Based Secure Notarization System",
-    description: "Secure Document Notarization with Blockchain Technology",
+    title: "BBSNS | Secure Notarization",
+    description: "Blockchain-Based Secure Notarization System - Administrative Authority",
+    icons: {
+        icon: "/icon.svg",
+        shortcut: "/icon.svg",
+        apple: "/icon.svg",
+    }
 }
 
 import { ConfigProvider } from "@/providers/ConfigProvider"
@@ -26,12 +31,12 @@ export default function RootLayout({
                 <link rel="stylesheet" href="/globals.css" />
             </head>
             <body className="font-sans antialiased">
-                <ResilienceBanner />
                 <ConfigProvider>
                     <ConfigBarrier>
                         <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading Authority...</div>}>
                             <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
                                 <WalletProvider>
+                                    <ResilienceBanner />
                                     {children}
                                     <Toaster />
                                 </WalletProvider>

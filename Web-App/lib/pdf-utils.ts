@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf"
 import QRCode from "qrcode"
+import { normalizeStatus } from "./status-utils"
 
 interface CertificateData {
   filename: string
@@ -39,7 +40,8 @@ export async function generateCertificatePDF(data: CertificateData) {
   doc.text("Blockchain Based Secure Notarization System", 105, 30, { align: "center" })
 
   // 2. Status Badge
-  const isApproved = data.status.toLowerCase() === "approved" || data.status.toLowerCase() === "verified"
+  const s = normalizeStatus(data.status)
+  const isApproved = s === "APPROVED" || s === "KYC_VERIFIED"
   if (isApproved) {
     doc.setFillColor(accentColor[0], accentColor[1], accentColor[2])
     doc.roundedRect(85, 50, 40, 10, 2, 2, "F")

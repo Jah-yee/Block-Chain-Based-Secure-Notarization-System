@@ -63,14 +63,6 @@ class UserService {
       logger.info('USER_CREATED', { email: user.email, userId: user.id, state: user.identity_state });
       return user;
     } catch (err) {
-      // 🛡️ [Hardening 4.2] Idempotency Guard: Handle concurrent creation race
-      if (err.code === '23505') {
-        logger.warn('USER_CREATION_CONCURRENCY_SUPPRESSED', { 
-          wallet: userData.wallet_address, 
-          msg: 'User already exists, likely created by concurrent request.' 
-        });
-        return null;
-      }
       logger.error('USER_CREATION_FAILED', { error: err.message }, err);
       throw err;
     }

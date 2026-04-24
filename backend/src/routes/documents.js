@@ -67,7 +67,7 @@ function mapToDetailedDoc(doc) {
     file_hash: doc.file_hash,
     storage_key: doc.storage_key || null,
     storage_state: doc.storage_state || 'STORED',
-    type: (doc.storage_key || '').split('.').pop() || null,
+    type: doc.mimetype || null,
     status: derivedStatus,
     state: doc.submission_state, // Raw backend state
     code: uxCode, // Transformed UX Contract code
@@ -398,6 +398,7 @@ router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DO
       [req.params.id, req.actor.id]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Intent not found' });
+    const i = r.rows[0];
     const expired = i.status === 'AWAITING_PAYMENT' && new Date(i.expires_at) < new Date();
     
     // Time-Aware perception
@@ -430,7 +431,6 @@ router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DO
 const maintenanceService = require('../services/maintenance.service');
 
 router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' }), withAction('DOC_LIST'), async (req, res) => {
-  console.error('[DEBUG_DOCS] Hit GET /documents');
   try {
     if (!req.actor) return res.status(401).json({ error: 'Actor header required' });
 
@@ -966,32 +966,8 @@ async function handleDocumentPatch(req, res) {
         const isChainSuccess = txResult.receipt && txResult.receipt.status === 1;
         const isFinalized = isChainSuccess && isApprovedOrRejected;
 
-        if (isFinalized) {
-            setImmediate(async () => {
-                try {
-                    const freshDocRes = await pool.query('SELECT storage_key, storage_state FROM documents WHERE id=$1', [id]);
-                    if (freshDocRes.rows.length > 0) {
-                        const freshDoc = freshDocRes.rows[0];
-                        if (freshDoc.storage_state === 'UPLOADED' || (freshDoc.storage_key && freshDoc.storage_key.startsWith('intents/'))) {
-                            await storageService.deleteFile(freshDoc.storage_key).catch(err => {
-                                logger.error('FILE_DELETE_FAILED', { id, key: freshDoc.storage_key, error: err.message });
-                            });
-                        } else {
-                            let localPath = freshDoc.storage_key;
-                            if (localPath) {
-                                if (!path.isAbsolute(localPath)) localPath = path.join(__dirname, '../../', localPath);
-                                if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-                            }
-                        }
-                        
-                        await DocumentStatusService.updateStatus(pool, id, freshDoc.submission_state, freshDoc.revision, freshDoc.submission_state, { needs_cleanup: "'false'" });
-                        logger.info('FILE_DELETED_SUCCESSFULLY', { id, storage_key: freshDoc.storage_key });
-                    }
-                } catch (err) {
-                    logger.error('FILE_DELETE_FAILED', { id, error: err.message });
-                }
-            });
-        }
+        // 🛡️ [SECURITY] File cleanup is handled exclusively by the reconciliation worker
+        // after on-chain confirmation to prevent race conditions and ensure finality.
 
         return res.json(sanitizeDocument(updateRes.rows[0]));
       } catch (txErr) {

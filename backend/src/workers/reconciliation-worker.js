@@ -23,13 +23,13 @@ async function reconcile() {
         return;
     }
 
-    const lockId = 1001; 
-    if (!(await lockService.tryLock(lockId))) {
-        return;
-    }
-
-    // 🛡️ [PHASE 6.2] Wrap reconciliation cycle in System Audit Context
+    // 🛡️ [SYSTEM_AUDIT] All worker operations must have an authoritative context
     await runWithSystemContext('RECONCILIATION_WORKER', 'Settling blockchain transactions and cleaning storage', async () => {
+        const lockId = 1001; 
+        if (!(await lockService.tryLock(lockId))) {
+            return;
+        }
+
         try {
             WorkerRegistry.heartbeat('reconciliation', 'OK');
             const { provider, contract } = await require("../blockchain/connection").connectBNB();
@@ -185,14 +185,15 @@ async function reconcile() {
         } catch (err) {
             console.error("❌ Reconciliation Master Error:", err.message);
             WorkerRegistry.heartbeat('reconciliation', 'FAIL', { error: err.message });
+        } finally {
+            await lockService.unlock(lockId);
         }
     });
-
-    await lockService.unlock(lockId);
 }
 
 // Run every 30 seconds if called directly
 if (require.main === module) {
+    pool.init();
     const INTERVAL = process.env.RECONCILIATION_INTERVAL || 30000;
     console.log(`🚀 Reconciliation Worker active. Polling interval: ${INTERVAL}ms`);
 

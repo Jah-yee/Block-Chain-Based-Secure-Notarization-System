@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shield, Loader2, AlertCircle, Sun, Moon, CheckCircle2, ShieldAlert, RefreshCw } from "lucide-react";
+import { Shield, Loader2, AlertCircle, Sun, Moon, CheckCircle2, ShieldAlert, RefreshCw, WifiOff } from "lucide-react";
 import { RoleSelection } from "./components/RoleSelection";
 import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDashboard } from "./components/admin/AdminDashboard";
@@ -233,36 +233,43 @@ export default function App() {
       // 2. Fetch session from main process bridge (Secondary Authority)
       const session = await (window as any).electronAPI.auth.getSession();
       
-      if (!session || !session.authenticated) {
-        console.log("[SESSION] No authenticated session found in OS vault.");
-        setAppState("role-selection");
+      if (session && session.authenticated) {
+        const u = session.user || {};
+        const ROLE_MAP: Record<string | number, string> = {
+          1: 'owner', 2: 'notary', 3: 'admin',
+          'admin': 'admin', 'notary': 'notary', 'owner': 'owner'
+        };
+        const role = ROLE_MAP[u.role] || (u.role && typeof u.role === 'string' ? u.role.toLowerCase() : 'none');
+        
+        setUser({ 
+          ...u, 
+          role, 
+          zeroTrustStatus: session.zeroTrustStatus || u.zeroTrustStatus || "UNKNOWN" 
+        });
+
+        if (role === 'admin') setAppState("admin-app");
+        else if (role === 'notary') setAppState("notary-app");
+        else if (role === 'owner') setAppState("owner-app");
+        else setAppState("role-selection");
+
+        pollAlerts();
         setIsRecovering(false);
         return;
       }
 
-      const userProfile = session.user || {};
-      const ROLE_MAP: Record<string | number, string> = {
-        1: 'owner', 2: 'notary', 3: 'admin',
-        'admin': 'admin', 'notary': 'notary', 'owner': 'owner'
-      };
-
-      const normalizedRole = ROLE_MAP[userProfile.role] || (userProfile.role && typeof userProfile.role === 'string' ? userProfile.role.toLowerCase() : "none");
-      
-      setUser({ 
-        ...userProfile, 
-        role: normalizedRole,
-        zeroTrustStatus: session.zeroTrustStatus || 'DEGRADED' 
-      });
-
-      if (normalizedRole === "admin") {
-        setAppState("admin-app");
-      } else if (normalizedRole === "notary") {
-        setAppState("notary-app");
-      } else if (normalizedRole === "owner") {
-        setAppState("owner-app");
+      // 🛡️ [RESILIENCE] If session resolution failed, check the local vault physically
+      const hasToken = await (window as any).electronAPI.auth.checkSession();
+      if (hasToken) {
+        console.warn("[SESSION] Resolution failed but token exists (Invalid/Expired). Purging...");
+        setRecoveryError("Your session has expired. Please log in again.");
+        await (window as any).electronAPI.auth.logout(); // 🛡️ [Hardening] Purge invalid identity
+        setAppState("role-selection");
+      } else {
+        console.warn("[SESSION] No token found in vault. Redirecting to login.");
+        setAppState("role-selection");
       }
       
-      pollAlerts();
+      setIsRecovering(false);
     } catch (err: any) {
       console.error("[SESSION] Recovery Error:", err.message);
       setRecoveryError(err.message);
@@ -299,7 +306,7 @@ export default function App() {
                 
                 setUser({
                     ...finalState.user,
-                    zeroTrustStatus: data.zeroTrustStatus || 'VERIFIED'
+                    zeroTrustStatus: data.zeroTrustStatus || 'UNKNOWN'
                 });
                 setAppState(finalState.appState as any);
                 setAdminScreen('dashboard');
@@ -381,9 +388,9 @@ export default function App() {
 
   return (
     <div className="relative">
-      {user && user.zeroTrustStatus === 'DEGRADED' && (
+      {user && user.zeroTrustStatus === 'UNKNOWN' && (
           <div style={{
-            background: 'linear-gradient(90deg, #ff9800, #f44336)',
+            background: 'linear-gradient(90deg, #ff4b2b, #ff416c)',
             color: 'white',
             padding: '8px 16px',
             fontSize: '13px',
@@ -393,12 +400,11 @@ export default function App() {
             alignItems: 'center',
             justifyContent: 'center',
             gap: '12px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
             zIndex: 9999,
-            transition: 'all 0.3s ease'
           }}>
-            <span style={{ fontSize: '18px' }}>⚠️</span> 
-            <span>SECURITY DEGRADED: Blockchain authority unreachable during login. High-risk actions restricted.</span>
+            <ShieldAlert size={18} />
+            <span>SECURITY UNCERTAIN: Session integrity verification failed. Manual handshake required.</span>
             
             <div style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
                 <button 
@@ -406,8 +412,13 @@ export default function App() {
                   onClick={async () => {
                     setIsUpgrading(true);
                     try {
+                        console.log("[RECOVERY] Manual integrity re-check initiated.");
                         await (window as any).electronAPI.auth.triggerRecovery();
+                        // 🛡️ [UI_SYNC] Force immediate local state poll
+                        await recoverSession();
                     } catch (e) {
+                        console.error("[RECOVERY_FAIL]", e);
+                    } finally {
                         setIsUpgrading(false);
                     }
                   }}
@@ -445,7 +456,40 @@ export default function App() {
             </div>
           </div>
         )}
-      <ResilienceBanner mode={mode} onRetry={retry} />
+
+      {user && user.zeroTrustStatus === 'DEGRADED' && (
+          <div style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.08)',
+            borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
+            color: '#f59e0b',
+            padding: '4px 16px',
+            fontSize: '11px',
+            fontWeight: '700',
+            textAlign: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            letterSpacing: '0.02em',
+            zIndex: 9998
+          }}>
+            <WifiOff size={12} />
+            <span className="uppercase">Resilience Active:</span>
+            <span className="opacity-80">Limited blockchain confirmation. System operational in degraded mode.</span>
+            
+            <button 
+              onClick={() => setLogoutDialogOpen(true)}
+              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
+              style={{ fontSize: '10px', textDecoration: 'underline', border: 'none', background: 'none', cursor: 'pointer', color: 'inherit' }}
+            >
+              LOGOUT
+            </button>
+          </div>
+        )}
+      <ResilienceBanner mode={mode} onRetry={() => {
+        retry();
+        recoverSession();
+      }} />
       
       {appState === "initialize-system" && (
         <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">

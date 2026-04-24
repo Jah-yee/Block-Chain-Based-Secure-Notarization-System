@@ -27,7 +27,10 @@ export function DashboardOverview() {
   }, [])
 
   const totalDocuments = documents.length
-  const verifiedDocuments = documents.filter((doc) => doc.status === "verified" || doc.status === "approved").length
+  const verifiedDocuments = documents.filter((doc) => {
+    const s = normalizeStatus(doc.status);
+    return s === "KYC_VERIFIED" || s === "APPROVED";
+  }).length
   const pendingDocuments = documents.filter((doc) => doc.status === "pending").length
   const rejectedDocuments = documents.filter((doc) => doc.status === "rejected").length
 

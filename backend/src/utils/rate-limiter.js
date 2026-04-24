@@ -10,7 +10,8 @@ const pool = require('../db/index');
  */
 const distributedRateLimiter = (limit, windowMs) => {
     return async (req, res, next) => {
-        const wallet = req.body.wallet_address || req.body.walletAddress || 'anon';
+        // 🛡️ [SAFETY] Guard against undefined body (e.g. GET requests)
+        const wallet = (req.body && (req.body.wallet_address || req.body.walletAddress)) || req.query.wallet || 'anon';
         const key = `${req.ip}-${wallet}-${req.path}`;
         const now = new Date();
 

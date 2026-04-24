@@ -7,7 +7,7 @@ const ConfigService = require('../services/config.service');
 const { requirePrivilege, allowPublic, ROLES, RISK_LEVELS } = require('../middleware/actor.js');
 
 // GET /api/system/config - Public configuration for client initialization
-router.get('/config', allowPublic, requirePrivilege({ capability: 'SYSTEM_READ' }), async (req, res) => {
+router.get('/config', allowPublic, requirePrivilege({ capability: 'SYSTEM_READ', allowPublic: true }), async (req, res) => {
     try {
         const config = await ConfigService.getConfig();
         res.json(config);
@@ -60,7 +60,7 @@ router.post('/config/rollback', requirePrivilege({ capability: 'SYSTEM_CONFIG_UP
 });
 
 // GET /api/system/health - Real-time system health check
-router.get('/health', allowPublic, requirePrivilege({ capability: 'AUTH_SYSTEM_STATUS' }), async (req, res) => {
+router.get('/health', allowPublic, requirePrivilege({ capability: 'AUTH_SYSTEM_STATUS', allowPublic: true }), async (req, res) => {
     const health = {
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -104,7 +104,7 @@ router.get('/health', allowPublic, requirePrivilege({ capability: 'AUTH_SYSTEM_S
 });
 
 // 🛡️ GET /api/system/sync/events - Authoritative Flight Recorder Stream
-router.get('/sync/events', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
+router.get('/sync/events', requirePrivilege({ capability: 'SYSTEM_LOGS', minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), async (req, res) => {
     try {
         const { limit = 50, cursor } = req.query;
         const boundedLimit = Math.min(parseInt(limit), 50);
@@ -133,9 +133,7 @@ router.get('/sync/events', requirePrivilege({ capability: 'SYSTEM_LOGS' }), asyn
 
 // GET /api/system/logs - Fetch REAL system logs (Admin only)
 router.get('/logs', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
-    console.log("REQ HEADERS", req.headers);
     const store = dbContext.getStore();
-    console.log("CTX TRACE", store);
     try {
         const result = await pool.query(`
             SELECT id, level, message, source, metadata, created_at as timestamp 
@@ -160,26 +158,28 @@ router.get('/logs', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req,
     }
 });
 
-// GET /api/system/bootstrap-genesis
+// GET /api/system/bootstrap-genesis - [RETIRED] Legacy bootstrap route
 router.get('/bootstrap-genesis', allowPublic, requirePrivilege({ capability: 'ADMIN_ONBOARD_GENESIS' }), async (req, res) => {
     const { wallet } = req.query;
-    if (!wallet || !wallet.startsWith('0x')) return res.status(400).json({ error: 'Valid wallet address required' });
+    const { logAction } = require('../utils/logger');
+    
+    // 🛡️ [RETIREMENT_TRACKER] Capture forensic data for the 14-day observation window
+    logAction('BOOTSTRAP_LEGACY_HIT', 'Attempted use of retired legacy bootstrap route.', 'system', {
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        walletParam: wallet || 'MISSING',
+        timestamp: new Date().toISOString(),
+        route: req.originalUrl
+    });
 
-    try {
-        const check = await pool.query('SELECT id FROM users LIMIT 1');
-        if (check.rows.length > 0) return res.status(403).json({ error: 'System already initialized' });
-
-        const result = await pool.query(`
-            INSERT INTO users (username, name, email, wallet_address, password_hash, role, kyc_verified, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, 'admin', true, NOW(), NOW())
-            RETURNING id, wallet_address, role
-        `, [`genesis_admin_${wallet.slice(0, 6)}`, 'Genesis Admin', `admin@bbsns.online`, wallet.toLowerCase(), 'BOOTSTRAPPED_SIGNATURE_AUTH_ONLY']);
-
-        res.json({ message: 'System successfully bootstrapped.', admin: result.rows[0], next_step: 'Please login via Desktop.' });
-    } catch (err) {
-        res.status(500).json({ error: 'Bootstrap failed', detail: err.message });
-    }
+    res.status(410).json({ 
+        error: "Legacy bootstrap retired", 
+        message: "This endpoint is no longer supported for security reasons.",
+        replacement: "/api/auth/genesis/onboard",
+        documentation: "https://docs.bbsns.online/onboarding"
+    });
 });
+
 
 // 🛡️ GET /api/system/sync/health - Authoritative Monitoring
 router.get('/sync/health', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req, res) => {
@@ -268,6 +268,17 @@ router.post('/sync/retry', requirePrivilege({ capability: 'SYSTEM_LOGS' }), asyn
         res.json({ message: `Batch retry initiated for ${result.rows.length} users.` });
     } catch (err) {
         res.status(500).json({ error: 'Batch retry failed', detail: err.message });
+    }
+});
+
+// 🛡️ POST /api/system/sync/reset-providers - Manual RPC Recovery
+router.post('/sync/reset-providers', requirePrivilege({ capability: 'SYSTEM_CONFIG_UPDATE', minRole: ROLES.ADMIN }), async (req, res) => {
+    try {
+        const ProviderService = require('../blockchain/provider-service');
+        ProviderService.reset();
+        res.json({ status: 'ok', message: 'Provider tiers re-indexed. Blacklist purged.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Reset failed', detail: err.message });
     }
 });
 

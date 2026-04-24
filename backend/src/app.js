@@ -93,7 +93,7 @@ app.get(['/api/system/config', '/system/config'], allowPublic, async (req, res) 
  * Authoritative Worker Status Manifest
  */
 const WorkerRegistry = require('./services/worker-registry.service');
-app.get("/api/system/health/deep", requirePrivilege({ minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), (req, res) => {
+app.get("/api/system/health/deep", requirePrivilege({ capability: 'SYSTEM_LOGS', minRole: ROLES.ADMIN, risk: RISK_LEVELS.LOW }), (req, res) => {
     res.json({
         status: "OK",
         timestamp: new Date().toISOString(),

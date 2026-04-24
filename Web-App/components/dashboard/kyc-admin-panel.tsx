@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient } from "@/lib/api-client"
+import { normalizeStatus, getDisplayStatus, isKycVerified, getStatusBadgeVariant } from "@/lib/status-utils"
 
 interface User {
     id: string
@@ -62,7 +63,15 @@ export function KYCAdminPanel() {
         setIsAppLoading(true)
         try {
             const response = await apiClient.get('/notaries/applications')
-            setApplications(response.data || [])
+            const rawApps = response.data || []
+            
+            // [NORMALIZE ONCE] Force all applications to Backend Authority tokens
+            const normalizedApps = rawApps.map((app: any) => ({
+                ...app,
+                status: normalizeStatus(app.status)
+            }))
+            
+            setApplications(normalizedApps)
         } catch (err: any) {
             toast({
                 title: "Error",
@@ -320,18 +329,14 @@ export function KYCAdminPanel() {
                                                     </TableCell>
                                                     <TableCell>
                                                         <Badge 
-                                                            variant={
-                                                                app.status === 'activated' ? "default" : 
-                                                                app.status === 'approved' ? "outline" : 
-                                                                app.status === 'rejected' ? "destructive" : "secondary"
-                                                            } 
+                                                            variant={getStatusBadgeVariant(app.status)} 
                                                             className="capitalize"
                                                         >
-                                                            {app.status}
+                                                            {getDisplayStatus(app.status)}
                                                         </Badge>
                                                     </TableCell>
                                                     <TableCell className="text-right space-x-2">
-                                                        {app.status === 'verified' && (
+                                                        {isKycVerified(app.status) && (
                                                             <>
                                                                 <Button
                                                                     size="sm"

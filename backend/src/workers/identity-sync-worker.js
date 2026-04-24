@@ -1,5 +1,6 @@
 'use strict';
 
+require('dotenv').config();
 const pool = require('../db/index');
 const SyncLogger = require('../services/SyncLogger');
 const { runWithSystemContext } = require('../middleware/actor');
@@ -87,6 +88,7 @@ async function startWorker() {
 }
 
 if (require.main === module) {
+  pool.init();
   startWorker();
 }
 

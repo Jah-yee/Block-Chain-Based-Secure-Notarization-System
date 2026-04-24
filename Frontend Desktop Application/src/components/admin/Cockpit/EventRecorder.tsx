@@ -1,4 +1,4 @@
-import { Terminal, Database, ShieldCheck, AlertCircle, ExternalLink, RefreshCw } from "lucide-react";
+import { Terminal, Database, ShieldCheck, AlertCircle, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 
 interface SyncEvent {
@@ -16,6 +16,7 @@ export function EventRecorder() {
   const [events, setEvents] = useState<SyncEvent[]>([]);
   const [isLive, setIsLive] = useState(true);
   const [lastSeen, setLastSeen] = useState<string | null>(null);
+  const [hasFetched, setHasFetched] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const fetchEvents = useCallback(async () => {
@@ -28,16 +29,21 @@ export function EventRecorder() {
       const data = await (window as any).electronAPI.api.call(url);
       
       // 🛡️ [PROTECTION] Enforce array type for telemetry data
-      if (data && Array.isArray(data) && data.length > 0) {
-        setEvents(prev => {
-          // Merge and sort by timestamp
-          const combined = [...data, ...prev].slice(0, 50);
-          return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        });
-        setLastSeen(data[0].created_at);
+      if (data && Array.isArray(data)) {
+        if (data.length > 0) {
+            setEvents(prev => {
+              // Merge and sort by timestamp
+              const combined = [...data, ...prev].slice(0, 50);
+              return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            });
+            setLastSeen(data[0].created_at);
+        }
+        setHasFetched(true);
       }
     } catch (e) {
       console.warn("[EVENT_RECORDER] Telemetry link degraded.");
+    } finally {
+      setHasFetched(true);
     }
   }, [lastSeen]);
 
@@ -80,10 +86,15 @@ export function EventRecorder() {
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-6 space-y-2 font-mono text-[10px] scrollbar-thin scrollbar-thumb-white/10 relative z-10"
       >
-        {events.length === 0 ? (
+        {!hasFetched ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-700 gap-2 italic">
-            <Database size={24} className="opacity-20" />
+            <Loader2 size={24} className="animate-spin opacity-20" />
             <span>Establishing telemetry handshake...</span>
+          </div>
+        ) : events.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-700 gap-2 italic">
+            <ShieldCheck size={24} className="opacity-20 text-emerald-500" />
+            <span>Telemetry Stable - System Idle</span>
           </div>
         ) : (
           events.map((event, i) => (
@@ -117,7 +128,7 @@ export function EventRecorder() {
 
       {/* Footer */}
       <div className="px-6 py-2 bg-black/40 border-t border-white/5 text-slate-600 text-[8px] flex justify-between font-mono italic relative z-10">
-        <span>BBSNS.MONITOR.NODE_1</span>
+        <span>CONSOLE.DESKTOP.BUNKER_3.6</span>
         <span>AUTH: AUTHORITATIVE</span>
       </div>
     </div>

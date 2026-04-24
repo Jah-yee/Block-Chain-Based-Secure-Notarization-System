@@ -110,8 +110,8 @@ export function AdminDashboard({ onNavigate, isDarkMode, user: initialUser }: { 
           </div>
         </div>
 
-        {/* 5. Trust Boundary Overlay (Only show if not loading and user is missing) */}
-        {(!isLoading && !user) && (
+        {/* 5. Trust Boundary Overlay (Only show if total identity & data isolation occurred) */}
+        {(!isLoading && !user && isCritical) && (
           <div className="absolute inset-0 bg-[#07090e]/80 backdrop-blur-2xl z-50 flex items-center justify-center p-8 animate-in fade-in duration-700">
             <div className="max-w-md w-full text-center space-y-6">
                 <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-3xl flex items-center justify-center mx-auto mb-4 animate-pulse">

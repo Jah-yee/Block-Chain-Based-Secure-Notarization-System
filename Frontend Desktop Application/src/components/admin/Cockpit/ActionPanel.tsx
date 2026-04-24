@@ -34,8 +34,12 @@ export function ActionPanel({ stuckCount, isCritical = false, isDegraded = false
   const handleAuditChain = async () => {
     setIsAuditInProgress(true);
     try {
-      await new Promise(r => setTimeout(r, 1500));
-      toast.success("Chain audit complete. Local state aligned with BNB Pulse.");
+      // 🛡️ [RESILIENCE] 1. Force Provider Sweep (Clears Blacklist)
+      await (window as any).electronAPI.api.call("/api/system/sync/reset-providers", "POST");
+      
+      // 🛡️ [RESILIENCE] 2. Authoritative Sync Verification
+      await (window as any).electronAPI.api.call("/api/system/health");
+      toast.success("Tier Sweep Complete. Successfully found healthy RPC node.");
     } catch (e: any) {
       toast.error("Audit failed: " + e.message);
     } finally {
@@ -78,13 +82,15 @@ export function ActionPanel({ stuckCount, isCritical = false, isDegraded = false
             <div className="flex items-center gap-3">
                 <Button 
                     onClick={handleRetryAll}
-                    disabled={isRetrying || isDegraded}
-                    className={`flex-1 font-black text-[10px] tracking-widest rounded-xl h-10 transition-all ${isDegraded ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed' : (isCritical ? 'bg-red-500 hover:bg-red-400 text-white' : 'bg-yellow-500 hover:bg-yellow-400 text-[#07090e]')}`}
+                    disabled={isRetrying}
+                    className={`flex-1 font-black text-[10px] tracking-widest rounded-xl h-10 transition-all ${isDegraded ? 'bg-amber-500/20 text-amber-500 border-amber-500/50 hover:bg-amber-500/30' : (isCritical ? 'bg-red-500 hover:bg-red-400 text-white' : 'bg-emerald-500 hover:bg-emerald-500/90 text-white')}`}
                 >
-                    {isDegraded ? (
-                      <span className="flex items-center gap-2 italic"><ShieldCheck size={12} /> RE-AUTH REQUIRED</span>
-                    ) : (
-                      isRetrying ? <RefreshCw className="animate-spin w-4 h-4" /> : (isCritical ? "EXECUTE EMERGENCY RECOVERY" : "PROCEED WITH RETRY SWEEP")
+                    {isRetrying ? <Loader2 className="animate-spin w-4 h-4" /> : (
+                      isDegraded ? (
+                        <span className="flex items-center gap-2 italic"><ShieldCheck size={12} /> PROCEED (DEGRADED SESSION)</span>
+                      ) : (
+                        isCritical ? "EXECUTE EMERGENCY RECOVERY" : "PROCEED WITH RETRY SWEEP"
+                      )
                     )}
                 </Button>
             </div>

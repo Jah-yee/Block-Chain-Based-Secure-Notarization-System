@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db/index.js');
+const BBSNSEnforcementError = pool.BBSNSEnforcementError;
 const dbContext = require('../db/context');
 const ConfigService = require('../services/config.service');
 
@@ -14,10 +15,26 @@ const normalizeRole = (role) => {
   return normalized !== undefined ? normalized : 0;
 };
 
-// Legacy shim for non-refactored routes (Transition phase)
 async function loadActor(req, res, next) {
+  // 🛡️ [SANITATION] Multi-Layer Token Firewall
+  let token = null;
   const authHeader = req.headers.authorization;
-  const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7) : (req.cookies?.token);
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const rawToken = authHeader.substring(7);
+    
+    // Defensive Normalization
+    if (rawToken === 'null' || rawToken === 'undefined') {
+      console.warn(`[AUTH_SANITIZE] Neutralized invalid token string (Legacy): "${rawToken}" from ${req.originalUrl}`);
+      token = null;
+    } else if (typeof rawToken !== 'string' || rawToken.length < 20) {
+      token = null; 
+    } else {
+      token = rawToken;
+    }
+  } else {
+    token = req.cookies?.token;
+  }
 
   if (!token) {
     req.actor = null;
@@ -75,109 +92,152 @@ async function restrictDocumentUpdate(req, res, next) {
 }
 
 // Zero-Trust Authority Enforcement Middleware
-function requirePrivilege(config) {
-  const { minRole, risk, capability } = config || {};
+function requirePrivilege(mwConfig) {
+  const { minRole, risk, capability } = mwConfig || {};
   const middleware = async function requirePrivilege(req, res, next) {
+    // 🛡️ Fetch Authoritative System Config
+    const systemConfig = await ConfigService.getConfig();
+    // 🛡️ [RESILIENCE] Late-binding Dependencies (Bunker V3.6.3)
+    const ProviderService = require('../blockchain/provider-service');
+    const blockCache = require('../utils/block-cache');
+
     // 1. Authoritative Capability Resolution & Default-Deny
     if (!capability) {
-        console.error(`[AUTH_CRITICAL] Route PROTECTED but NO capability declared: ${req.originalUrl}`);
-        return res.status(500).json({ error: 'Security Engine Error: Missing Capability Declaration' });
+      console.error(`[AUTH_CRITICAL] Route PROTECTED but NO capability declared: ${req.originalUrl}`);
+      return res.status(500).json({ error: 'Security Engine Error: Missing Capability Declaration' });
     }
 
     const actionConfig = ACTION_POLICIES[capability] || { requiresStrong: true };
     const effectiveMinRole = minRole !== undefined ? minRole : (actionConfig.actor ? ROLES[actionConfig.actor] : ROLES.ADMIN);
+    const isPublicActor = actionConfig.actor === 'GUEST' || actionConfig.actor === 'ANY';
 
-    // 2. JWT Extraction & Basic Validation
+    // 2. [SANITATION] Multi-Layer Token Firewall
+    let token = null;
     const authHeader = req.headers.authorization;
-    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7) : (req.cookies?.token);
+
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const rawToken = authHeader.substring(7);
+      
+      // Defensive Normalization
+      if (rawToken === 'null' || rawToken === 'undefined') {
+        console.warn(`[AUTH_SANITIZE] Neutralized invalid token string: "${rawToken}" from ${req.originalUrl}`);
+        token = null;
+      } else if (typeof rawToken !== 'string' || rawToken.length < 20) {
+        console.warn(`[AUTH_SANITIZE] Rejected malformed token: length=${rawToken?.length || 0} endpoint=${req.originalUrl}`);
+        token = null;
+      } else {
+        token = rawToken;
+      }
+    } else {
+      token = req.cookies?.token;
+    }
 
     if (!token) {
-        // Allow public access ONLY if action is explicitly marked as GUEST and not requiring strong environment
-        if (actionConfig.actor === 'GUEST' && !actionConfig.requiresStrong && config.allowPublic) {
-            return next();
-        }
-        return res.status(401).json({ error: 'Unauthorized: Missing session token' });
+      // Allow public access ONLY if action is explicitly marked as GUEST/ANY and not requiring strong environment
+      if (isPublicActor && !actionConfig.requiresStrong && mwConfig.allowPublic) {
+
+        return next();
+      }
+      return res.status(401).json({ error: 'Unauthorized: Missing session token' });
     }
+
 
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
+      if (isPublicActor && !actionConfig.requiresStrong && mwConfig.allowPublic) {
+        console.warn(`[AUTH_RESILIENCE] Proceeding as guest on public route despite invalid token from ${req.ip}`);
+        req.actor = null;
+        return next();
+      }
       return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
     }
+
 
     const { address, snapshotBlock, snapshotChainId, issuedAt, role: tokenRole } = decoded;
 
     // 🛡️ [SECURITY] Bunker V3.6: Ground-Truth Environment Recomputation (Step 4, 6 & 7)
     // We strictly distinguish between session confidence (token) and runtime reality.
     let runtimeEnv = 'VERIFIED';
-    
+
     if (!snapshotBlock) {
-        runtimeEnv = 'UNKNOWN'; // Ceiling for weak sessions (Step 4)
-        console.warn(`[ACTOR_HANDSHAKE] Weak session detected (no snapshot block) for ${address}. Mapping to UNKNOWN.`);
+      runtimeEnv = 'UNKNOWN'; // Ceiling for weak sessions (Step 4)
+      console.warn(`[ACTOR_HANDSHAKE] Weak session detected (no snapshot block) for ${address}. Mapping to UNKNOWN.`);
     } else {
-        try {
-            // Step 6: Attempt to recompute environment state per request (Ground Truth)
-            const ProviderService = require('../blockchain/provider-service');
-            const blockCache = require('../utils/block-cache');
+      try {
+        // Step 6: Attempt to recompute environment state per request (Ground Truth)
 
-            // 🛡️ [PHASE 2.2] Hierarchical Consensus Truth
-            // We replace single JsonRpcProvider with fault-tolerant ProviderService
-            const provider = await ProviderService.getProvider();
+        // 🛡️ [PHASE 2.2] Hierarchical Consensus Truth
+        // We replace single JsonRpcProvider with fault-tolerant ProviderService
+        const provider = await ProviderService.getProvider();
 
-            // 🛡️ Step 5: Protect against RPC storms via Single-Flight Cache
-            // 🛡️ Step 7: Tie environment integrity to lastGoodBlockTimestamp (Grace Window)
-            const cacheResult = await blockCache.getLatest(provider);
-            const currentBlock = cacheResult.block;
-            const lastSeenAt = cacheResult.timestamp;
-            
-            const cacheAgeMs = Date.now() - lastSeenAt;
-            const GRACE_WINDOW_MS = 30000; // 🛡️ Bunker V3.6: Expanded Grace Window (10s -> 30s)
+        // 🛡️ Step 5: Protect against RPC storms via Single-Flight Cache
+        // 🛡️ Step 7: Tie environment integrity to lastGoodBlockTimestamp (Grace Window)
+        const cacheResult = await blockCache.getLatest(provider);
+        const currentBlock = cacheResult.block;
+        const lastSeenAt = cacheResult.timestamp;
 
-            // Step 1: Check Chain Divergence
-            const currentChainId = Number(config.chainId);
-            if (Number(snapshotChainId) !== currentChainId) {
-                runtimeEnv = 'UNKNOWN';
-                console.error(`[ACTOR_HANDSHAKE] Chain ID mismatch: Token(${snapshotChainId}) vs Active(${currentChainId})`);
-            } 
-            // Step 7: Enforcement of the Grace Window using ProviderService health
-            else if (cacheAgeMs > GRACE_WINDOW_MS || !ProviderService.isSystemHealthy()) {
-                runtimeEnv = 'UNKNOWN'; // Integrity lost due to lack of recent chain confirmation from ANY tier
-                console.error(`[ACTOR_HANDSHAKE] Integrity bridge lost (Grace window or Provider blackout). Age: ${cacheAgeMs}ms`);
-            }
-            else {
-                // Step 2: Check Block Staleness
-                const age = currentBlock - snapshotBlock;
+        const cacheAgeMs = Date.now() - lastSeenAt;
+        const GRACE_WINDOW_MS = 120000; // 🛡️ Bunker V3.6.1: Expanded Grace Window (30s -> 120s) for reliability
 
-                if (age < 0) {
-                    // 🛡️ Possible chain reorg or provider lag
-                    runtimeEnv = 'DEGRADED';
-                    console.warn(`[ACTOR_HANDSHAKE] Block regression detected: Snapshot(${snapshotBlock}) > Current(${currentBlock})`);
-                } else if (age > 50) { // PROTOCOL_LIMITS.BLOCK_STALENESS_LIMIT
-                    runtimeEnv = 'DEGRADED';
-                } else {
-                    runtimeEnv = 'VERIFIED';
-                }
-            }
-        } catch (envErr) {
-            console.error(`[ACTOR_HANDSHAKE] Critical environment error for ${address}: ${envErr.message}`);
-            runtimeEnv = 'UNKNOWN';
+        // Step 1: Check Chain Divergence
+        const currentChainId = Number(systemConfig.chainId);
+        if (Number(snapshotChainId) !== currentChainId) {
+          runtimeEnv = 'UNKNOWN';
+          console.error(`[ACTOR_HANDSHAKE] Chain ID mismatch: Token(${snapshotChainId}) vs Active(${currentChainId})`);
         }
+        // Step 7: Enforcement of the Grace Window using ProviderService health
+        else if (ProviderService.lastGoodBlock > 0 && (cacheAgeMs > GRACE_WINDOW_MS || !ProviderService.isSystemHealthy())) {
+          runtimeEnv = 'UNKNOWN'; // Integrity lost due to lack of recent chain confirmation from ANY tier
+          console.error(`[ACTOR_HANDSHAKE] Integrity bridge lost (Grace window or Provider blackout). Age: ${cacheAgeMs}ms`);
+        }
+        else if (ProviderService.lastGoodBlock === 0) {
+          // 🛡️ [RESILIENCE] Cold-Start Grace: Allow DEGRADED entry while bridge is warming up
+          runtimeEnv = 'DEGRADED';
+          console.info(`[ACTOR_HANDSHAKE] Integrity bridge initializing. Allowing temporary DEGRADED access.`);
+        }
+        else {
+          // Step 2: Check Block Staleness
+          const age = currentBlock - snapshotBlock;
+
+          // 🛡️ [SECURITY] Bunker V3.6.2: Self-Healing Active Recovery Gate
+          // Staleness check (24h Window / ~43200 blocks on BSC)
+          const HEALING_ENABLED = true; // 🛡️ [SAFETY] Temporary Kill Switch
+          const STALE_ALLOWED_CAPABILITIES = new Set(['AUTH_PRECHECK', 'AUTH_LOGIN']);
+          const isStale = (age > 43200);
+
+          if (isStale && (!HEALING_ENABLED || !STALE_ALLOWED_CAPABILITIES.has(capability))) {
+            runtimeEnv = 'UNKNOWN';
+            console.error(`[ACTOR_HANDSHAKE] Terminal Staleness for ${address}: Age=${age} blocks. BypassAllowed=${STALE_ALLOWED_CAPABILITIES.has(capability)}`);
+          } else if (age < 0) {
+            // 🛡️ Possible chain reorg or provider lag
+            runtimeEnv = 'DEGRADED';
+            console.warn(`[ACTOR_HANDSHAKE] Block regression detected: Snapshot(${snapshotBlock}) > Current(${currentBlock})`);
+          } else if (age > 50) { // PROTOCOL_LIMITS.BLOCK_STALENESS_LIMIT
+            runtimeEnv = 'DEGRADED';
+          } else {
+            runtimeEnv = 'VERIFIED';
+          }
+        }
+      } catch (envErr) {
+        console.error(`[ACTOR_HANDSHAKE] Critical environment error for ${address}: ${envErr.message}`);
+        runtimeEnv = 'UNKNOWN';
+      }
     }
 
-    // 🛡️ [ENFORCEMENT] Step 4: Weak-Session & Integrity Ceiling
-    // Mutations and high-risk actions are strictly blocked if environment is NOT VERIFIED.
-    if (actionConfig.requiresStrong && runtimeEnv !== 'VERIFIED') {
-        const errorDetail = runtimeEnv === 'UNKNOWN' 
-            ? 'Your session is in UNKNOWN mode (Weak Session or RPC failure). High-integrity mutations are blocked.'
-            : 'Your session is DEGRADED (stale block). Please refresh your session to proceed with this high-integrity action.';
-            
-        console.warn(`[AUTH_BLOCK] Integrity violation: '${capability}' requires VERIFIED environment, but runtime state is ${runtimeEnv} for ${address}`);
-        return res.status(403).json({ 
-            error: 'Forbidden: High-Integrity action blocked',
-            detail: errorDetail,
-            runtimeEnv: runtimeEnv
-        });
+    // 🛡️ [ENFORCEMENT] Step 4: Integrity Ceiling
+    // Mutations and high-risk actions are strictly blocked ONLY if environment is UNKNOWN.
+    if (actionConfig.requiresStrong && runtimeEnv === 'UNKNOWN') {
+      const errorDetail = 'Your session is in UNKNOWN mode (Weak Session or RPC failure). High-integrity mutations are blocked.';
+
+      console.warn(`[AUTH_BLOCK] Integrity violation: '${capability}' requires VERIFIED/DEGRADED environment, but runtime state is ${runtimeEnv} for ${address}`);
+      return res.status(403).json({
+        error: 'Forbidden: High-Integrity action blocked',
+        detail: errorDetail,
+        runtimeEnv: runtimeEnv
+      });
     }
 
     // 6. Live Authority Check (Mandatory for High Integrity, optional refresh for others)
@@ -187,13 +247,12 @@ function requirePrivilege(config) {
     if (needsLiveRefresh) {
       try {
         const { ethers } = require('ethers');
-        const ProviderService = require('./blockchain/provider-service');
         const provider = await ProviderService.getProvider();
         const notaryRegistryAbi = [
           "function getUserRole(address) view returns (uint8)",
           "function isBanned(address) view returns (bool)"
         ];
-        const notaryRegistry = new ethers.Contract(config.contracts.notaryRegistry, notaryRegistryAbi, provider);
+        const notaryRegistry = new ethers.Contract(systemConfig.contracts.notaryRegistry, notaryRegistryAbi, provider);
 
         const [liveRole, isBanned] = await Promise.all([
           notaryRegistry.getUserRole(address),
@@ -215,21 +274,21 @@ function requirePrivilege(config) {
         // 🛡️ CRITICAL GUARD: Explicitly Block REJECTED Identities
         if (identityState === 'REJECTED') {
           console.warn(`[AUTH_DENY] Rejected identity attempted access: ${address}`);
-          return res.status(403).json({ 
+          return res.status(403).json({
             error: 'Forbidden: User identity rejected',
             detail: 'Your identity verification was rejected by a system administrator. Please contact support.'
           });
         }
 
         const kycEnforced = process.env.ENFORCE_KYC === 'true';
-        
+
         if (!kycEnforced) {
           if (isDeactivated || identityState === 'DEACTIVATED') {
             console.warn(`[AUTH_DENY] Deactivated/Blocked user attempted access: ${address}`);
             return res.status(403).json({ error: 'Forbidden: Account Blocked' });
           }
           if (identityState !== 'ACTIVE') {
-            return res.status(403).json({ 
+            return res.status(403).json({
               error: 'Forbidden: Identity not active',
               detail: `Your current status is: ${identityState}. Please wait for verification.`
             });
@@ -240,7 +299,7 @@ function requirePrivilege(config) {
 
           if (!isDbActive || !isChainValid) {
             console.warn(`[AUTH_DENY] Double-Lock Failure for ${address}. DB: ${identityState}, Chain Role: ${liveRole}`);
-            return res.status(403).json({ 
+            return res.status(403).json({
               error: 'Forbidden: User identity not fully verified',
               detail: `Identity verification required. DB: ${identityState}, Chain: ${liveRole}`
             });
@@ -259,16 +318,33 @@ function requirePrivilege(config) {
         }
       } catch (err) {
         console.error(`[AUTH_ERROR] Live check failed for ${address}:`, err.message);
+        
+        // 🛡️ [RESILIENCE] Admin Identity Persistence (Bunker V3.6.4)
+        // If the live on-chain check fails but the bearer is an Admin, allow the request 
+        // to proceed in DEGRADED mode to prevent administrative deadlocks.
+        if (normalizeRole(tokenRole) >= ROLES.ADMIN) {
+          console.warn(`[AUTH_RESILIENCE] Admin ${address} allowed via Token Persistence (RPC Blackout)`);
+          req.actor = { 
+            id: decoded.id, 
+            address, 
+            role: ROLES.ADMIN, 
+            isDegraded: true,
+            identityState: 'ACTIVE' // Optimization for Admin routes
+          };
+          return next();
+        }
+
         return res.status(503).json({ error: 'Service Unavailable: Authority Verification Failed' });
       }
     } else {
-        // 7. JWT Authority (Fresh & Risk Low) - Actor from Token
-        req.actor = { 
-            id: decoded.id, 
-            address, 
-            role: normalizeRole(decoded.role), 
-            isDegraded: zeroTrustStatus === 'DEGRADED' 
-        };
+      // 7. JWT Authority (Fresh & Risk Low) - Actor from Token
+      req.actor = {
+        id: decoded.id,
+        address,
+        role: normalizeRole(decoded.role),
+        isDegraded: decoded.zeroTrustStatus === 'DEGRADED'
+      };
+
     }
 
     // 8. Eligibility Enforcement
@@ -293,12 +369,12 @@ function requirePrivilege(config) {
     }
 
     // 3. Write-Once Corruption Guard: Prevent cross-request or same-role/different-user collisions
-    if (store.actor && (store.actor !== req.actor.role || store.actorId !== req.actor.id)) {
+    if (store.actor && store.actor !== 'GUEST' && req.actor && (store.actor !== req.actor.role || store.actorId !== req.actor.id)) {
       throw new pool.BBSNSEnforcementError(`SECURITY_ERROR: Audit context corruption detected for request ${store.requestId}`);
     }
 
     // 4. Authorized Promotion: Finalize identity affinity for the remainder of the trace
-    if (!store.actor) {
+    if ((!store.actor || store.actor === 'GUEST') && req.actor) {
       store.actor = req.actor.role;
       store.actorId = req.actor.id;
       store.service = 'USER_API';
@@ -313,9 +389,19 @@ function requirePrivilege(config) {
   return middleware;
 }
 
-// Audit compliance shim
+// Audit compliance shim: Ensures even public routes have a trace context for the sentinel
 function allowPublic(req, res, next) {
-  next();
+  const context = {
+    requestId: req.id || req.headers['x-request-id'] || 'PUBLIC-' + Date.now(),
+    service: 'PUBLIC_API',
+    actor: 'GUEST',
+    actorId: 0,
+    timestamp: new Date()
+  };
+
+  dbContext.run(context, () => {
+    next();
+  });
 }
 Object.defineProperty(allowPublic, 'name', { value: 'allowPublic' });
 
@@ -325,25 +411,34 @@ Object.defineProperty(allowPublic, 'name', { value: 'allowPublic' });
  * mutations while ensuring they remain isolated from the web request lifecycle.
  */
 function runWithSystemContext(service, reason, fn) {
+  const run = () => {
     const store = dbContext.getStore();
-    
-    // 🛡️ [ENFORCEMENT] structural Execution Isolation
-    if (process.env.BBSNS_RUNTIME !== 'worker') {
-        console.error(`❌ [ISOLATION_VIOLATION] from ${process.env.BBSNS_RUNTIME || 'WEB_ROUTER'}`);
-        throw new BBSNSEnforcementError('ISOLATION_VIOLATION: System context structural forbidden');
-    }
-
     if (!store) {
-        throw new BBSNSEnforcementError("STRUCTURAL_ERROR: System context used before root initialization");
+      // This should be impossible inside dbContext.run()
+      throw new BBSNSEnforcementError("STRUCTURAL_ERROR: Context creation failed");
     }
-
-    // Mutate existing store
     store.userId = ACTOR_IDS.SYSTEM;
     store.actorId = ACTOR_IDS.SYSTEM;
     store.reason = `SYSTEM_ACTION: ${reason}`;
     store.service = service || 'BACKGROUND_WORKER';
+    store.contextType = 'SYSTEM';
 
     return fn();
+  };
+
+  // 🛡️ [ENFORCEMENT] structural Execution Isolation
+  if (process.env.BBSNS_RUNTIME !== 'worker') {
+    console.error(`❌ [ISOLATION_VIOLATION] from ${process.env.BBSNS_RUNTIME || 'WEB_ROUTER'}`);
+    throw new BBSNSEnforcementError('ISOLATION_VIOLATION: System context structural forbidden');
+  }
+
+  const existingStore = dbContext.getStore();
+  if (existingStore) {
+    return run();
+  } else {
+    // 🔄 [BRIDGE] Initialize root context for standalone worker process
+    return dbContext.run({}, run);
+  }
 }
 
 /**
@@ -352,33 +447,32 @@ function runWithSystemContext(service, reason, fn) {
  * "GUEST" audit context. Combined with Sentinel table-restrictions.
  */
 function withGuestContext(req, res, next) {
-    const store = dbContext.getStore();
-    console.log("CTX INIT CHECK:", !!store);
+  const store = dbContext.getStore();
 
-    if (!store) {
-        throw new BBSNSEnforcementError("STRUCTURAL_ERROR: Guest Context used before root initialization");
-    }
+  if (!store) {
+    throw new BBSNSEnforcementError("STRUCTURAL_ERROR: Guest Context used before root initialization");
+  }
 
-    // Mutate standardized object properties
-    store.actor = 'GUEST';
-    store.actorId = ACTOR_IDS.GUEST;
-    store.userId = ACTOR_IDS.GUEST;
-    store.service = 'GUEST_API';
+  // Mutate standardized object properties
+  store.actor = 'GUEST';
+  store.actorId = ACTOR_IDS.GUEST;
+  store.userId = ACTOR_IDS.GUEST;
+  store.service = 'GUEST_API';
 
-    return next();
+  return next();
 }
 Object.defineProperty(withGuestContext, 'name', { value: 'withGuestContext' });
 
-module.exports = { 
-  loadActor, 
-  requireRole, 
-  requirePrivilege, 
-  allowPublic, 
-  withGuestContext, 
+module.exports = {
+  loadActor,
+  requireRole,
+  requirePrivilege,
+  allowPublic,
+  withGuestContext,
   runWithSystemContext,
   ACTOR_IDS,
-  ROLES, 
-  RISK_LEVELS, 
-  rejectTransactionModification, 
-  restrictDocumentUpdate 
+  ROLES,
+  RISK_LEVELS,
+  rejectTransactionModification,
+  restrictDocumentUpdate
 };

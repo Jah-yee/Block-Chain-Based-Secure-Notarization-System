@@ -15,6 +15,7 @@ import dynamic from "next/dynamic"
 import apiClient from "@/lib/api-client"
 import { ethers } from "ethers"
 import { cn } from "@/lib/utils"
+import { normalizeStatus } from "@/lib/status-utils"
 
 const LivenessCheck = dynamic(
   () => import("@/components/auth/liveness-check").then((mod) => mod.LivenessCheck),
@@ -131,8 +132,9 @@ export default function RegisterNotaryPage() {
                 if (statusData && statusData.id) setApplicationId(statusData.id);
                 if (statusData && statusData.reference_id) setReferenceId(statusData.reference_id);
                 
-                const TERMINAL_STATES = ['APPLIED', 'KYC_VERIFIED', 'approved', 'activated', 'submitted'];
-                if (statusData && TERMINAL_STATES.includes(statusData.status)) {
+                const TERMINAL_STATES = ['APPLIED', 'KYC_VERIFIED', 'APPROVED', 'ACTIVATED', 'SUBMITTED'];
+                const currentStatus = normalizeStatus(statusData.status);
+                if (statusData && TERMINAL_STATES.includes(currentStatus)) {
                     toast({ 
                         title: "Application Locked", 
                         description: "Our records show an active or pending application for this identity. Redirecting to Home in 6 seconds...",
@@ -209,7 +211,8 @@ export default function RegisterNotaryPage() {
             }
 
             // CASE 2: Identity already fully registered or in advanced review
-            if (application && (application.status === 'verified' || application.status === 'approved' || application.status === 'activated')) {
+            const currentStatus = normalizeStatus(application?.status);
+            if (application && (currentStatus === 'KYC_VERIFIED' || currentStatus === 'APPROVED' || currentStatus === 'ACTIVATED')) {
                 toast({ 
                     title: "Registration In Progress", 
                     description: "This identity is already being processed or is active in our system. Redirecting to home...",

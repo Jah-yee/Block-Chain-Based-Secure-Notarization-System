@@ -13,6 +13,7 @@ import { Search, CheckCircle, XCircle, AlertCircle, Loader2 } from "lucide-react
 import { apiClient } from "@/lib/api-client"
 import { useConfig } from "@/providers/ConfigProvider"
 import { connectWallet, signNotarizeAction } from "@/lib/web3"
+import { normalizeStatus, getDisplayStatus } from "@/lib/status-utils"
 
 interface VerificationResult {
   id?: string
@@ -51,7 +52,7 @@ export function VerificationInterface() {
         isValid: true,
         documentTitle: doc.filename,
         uploadDate: doc.created_at,
-        status: doc.status,
+        status: normalizeStatus(doc.status) as any, // [NORMALIZE ONCE]
         hash: doc.file_hash
       })
       toast({ title: "Document Found", description: "Details fetched from authoritative records." })
@@ -119,8 +120,9 @@ export function VerificationInterface() {
 
   const getStatusIcon = (status: string, isValid: boolean) => {
     if (!isValid) return <XCircle className="h-5 w-5 text-red-500" />
-    if (status === "verified" || status === "approved") return <CheckCircle className="h-5 w-5 text-green-500" />
-    if (status === "pending") return <AlertCircle className="h-5 w-5 text-yellow-500" />
+    const s = normalizeStatus(status);
+    if (s === "KYC_VERIFIED" || s === "APPROVED") return <CheckCircle className="h-5 w-5 text-green-500" />
+    if (s === "PENDING") return <AlertCircle className="h-5 w-5 text-yellow-500" />
     return <XCircle className="h-5 w-5 text-red-500" />
   }
 
@@ -158,9 +160,9 @@ export function VerificationInterface() {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 text-xs">
                   <span className="font-semibold">Status:</span>
-                  <Badge variant="outline" className="w-fit">{verificationResult.status}</Badge>
+                  <Badge variant="outline" className="w-fit">{getDisplayStatus(verificationResult.status)}</Badge>
                 </div>
-                {verificationResult.status === 'pending' && canNotarize && (
+                {normalizeStatus(verificationResult.status) === 'PENDING' && canNotarize && (
                   <div className="flex gap-2 pt-2">
                     <Button
                       size="sm"

@@ -51,7 +51,6 @@ const UserService = require('../services/UserService');
 const distributedRateLimiter = require('../utils/rate-limiter');
 const simpleRateLimiter = distributedRateLimiter; // Alias for backward compatibility in this file
 
-
 /**
  * 🛡️ [RESILIENCE] RPC Timeout Wrapper
  * Prevents sequential blocking by enforcing a strict SLA on blockchain queries.
@@ -68,14 +67,16 @@ const withTimeout = (promise, ms, label = "RPC_TIMEOUT") => {
 };
 
 /**
- * 🛡️ [RESILIENCE] Retry Logic with Exponential Backoff
+ * 🛡️ [RESILIENCE] Hierarchical Backoff Retry
+ * Handles transient network/RPC stalls during critical auth handshakes.
  */
-const executeWithRetry = async (fn, retries = 3, label = "EXECUTE") => {
-  for (let i = 0; i < retries; i++) {
+async function executeWithRetry(fn, maxRetries = 3, label = "AUTH_TASK") {
+  let lastErr;
+  for (let i = 0; i < maxRetries; i++) {
     try {
       return await withTimeout(fn(), 1500, `${label}_ATTEMPT_${i+1}`);
     } catch (err) {
-      if (i === retries - 1) throw err;
+      if (i === maxRetries - 1) throw err;
       const delay = 200 * (i + 1);
       await new Promise(r => setTimeout(r, delay));
     }
@@ -259,18 +260,35 @@ router.get('/system-status', allowPublic, requirePrivilege({ capability: 'AUTH_S
       const registry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)"], provider);
       const genesisContract = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], provider);
 
-      // 🛡️ [RESILIENCE] Race RPC calls against 3s timeout
-      const [chainAdminCount, chainActivated] = await Promise.all([
-        withTimeout(registry.adminCount().catch(() => 1n), 3000, "AdminCount"),
-        withTimeout(genesisContract.activated().catch(() => false), 3000, "SystemActivation")
-      ]);
-      
-      adminCount = Number(chainAdminCount);
-      activated = !!chainActivated;
+      // 🛡️ [RESILIENCE] Try Primary Provider first (10s)
+      try {
+        const [chainAdminCount, chainActivated] = await Promise.all([
+          withTimeout(registry.adminCount().catch(() => 1n), 10000, "AdminCount"),
+          withTimeout(genesisContract.activated().catch(() => false), 10000, "SystemActivation")
+        ]);
+        
+        adminCount = Number(chainAdminCount);
+        activated = !!chainActivated;
+      } catch (primaryErr) {
+        console.log(`[AUTH_RESCUE] Primary provider stalled (${primaryErr.message}). Initiating Atomic Rescue...`);
+        
+        // 🚨 [ATOMIC_RESCUE] Direct HTTPS Fallback to bypass sticky WebSocket/stalled node
+        const rescueProvider = new ethers.JsonRpcProvider(config.rpcUrl, { chainId: 97, name: 'bnbt' }, { staticNetwork: true });
+        const rescueRegistry = new ethers.Contract(config.contracts.notaryRegistry, ["function adminCount() view returns (uint256)"], rescueProvider);
+        const rescueGenesis = new ethers.Contract(config.contracts.genesisActivation, ["function activated() view returns (bool)"], rescueProvider);
+
+        const [rescueAdminCount, rescueActivated] = await Promise.all([
+          withTimeout(rescueRegistry.adminCount().catch(() => 1n), 5000, "RescueAdminCount"),
+          withTimeout(rescueGenesis.activated().catch(() => false), 5000, "RescueActivation")
+        ]);
+
+        adminCount = Number(rescueAdminCount);
+        activated = !!rescueActivated;
+        console.log(`[AUTH_RESCUE] 💊 Rescue successful. System state recovered via direct HTTPS.`);
+      }
     } catch (rpcErr) {
-      console.warn("[AUTH_WARN] RPC query failed or timed out for system-status:", rpcErr.message);
+      console.warn("[AUTH_FATAL] All RPC providers failed for system-status:", rpcErr.message);
       isChainUp = false;
-      // Note: activated remains null to signal uncertainty to the UI
     }
 
     // DB Check (Local Authority Signal)
@@ -380,6 +398,9 @@ router.post('/genesis/onboard', withDomain('ADMIN'), withGuestContext, withActio
 
     res.json({ success: true, message: 'Genesis Admin Onboarded Successfully' });
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Admin profile already exists' });
+    }
     console.error('Onboarding failed:', error);
     res.status(500).json({ error: 'Onboarding failed internally' });
   }
@@ -438,6 +459,9 @@ router.post('/notary/onboard', withDomain('NOTARY'), withGuestContext, withActio
 
     res.json({ success: true, message: 'Notary profile created successfully' });
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Notary profile already exists' });
+    }
     console.error('Notary onboarding error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -809,7 +833,7 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
 });
 
 // GET /auth/me - Profile Source of Truth
-router.get('/me', allowPublic, requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
+router.get('/me', allowPublic, simpleRateLimiter(10, 60000), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true, allowStale: true }), async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const tokenCookie = req.cookies.token;
@@ -851,7 +875,6 @@ router.get('/me', allowPublic, requirePrivilege({ capability: 'AUTH_PRECHECK', a
         });
 
         // 🛡️ [Hardening 4.2B] Authoritative Re-Fetch
-        // This ensures that even the 'loser' of a concurrent creation race returns the authoritative record.
         const reFetchResult = await pool.query(
           'SELECT id, username, name, email, wallet_address, role, kyc_verified, liveness_status, identity_state FROM users WHERE LOWER(wallet_address) = $1',
           [normalizedWallet]
@@ -860,11 +883,72 @@ router.get('/me', allowPublic, requirePrivilege({ capability: 'AUTH_PRECHECK', a
       }
 
       if (!user) return res.json({ user: null });
+
+      // 🛡️ [SELF-HEALING] Bunker V3.7: Hardened Authority Rotation
+      let refreshedToken = null;
+      let zeroTrustStatus = decoded.zeroTrustStatus || 'VERIFIED';
+      const requestId = (dbContext.getStore() || {}).requestId || 'UNKNOWN';
+
+      try {
+          const config = await ConfigService.getConfig();
+          const provider = await ProviderService.getProvider();
+          const blockCache = require('../utils/block-cache');
+          const cacheResult = await blockCache.getLatest(provider);
+          const currentBlock = cacheResult.block;
+          
+          const age = currentBlock - (decoded.snapshotBlock || 0);
+          zeroTrustStatus = (age > 50 || age < 0) ? 'DEGRADED' : 'VERIFIED';
+          
+          // 🛡️ [OPTIMIZATION] Bunker V3.7: Strict Intent Binding
+          // Only rotate if gap is meaningful (>20 blocks) OR session is already DEGRADED.
+          const MIN_REFRESH_THRESHOLD = 20;
+          const isProactive = req.query.refresh === 'true';
+          const needsRefresh = (age > MIN_REFRESH_THRESHOLD) || zeroTrustStatus === 'DEGRADED' || isProactive;
+
+          if (needsRefresh) {
+              refreshedToken = await signZeroTrustToken(user, user.wallet_address, zeroTrustStatus, {
+                  snapshotBlock: currentBlock,
+                  snapshotChainId: Number(config.chainId)
+              });
+              
+              // 🩺 [OBSERVABILITY] Forensic Heal Log
+              console.log(JSON.stringify({
+                event: "SESSION_HEAL",
+                wallet: normalizedWallet,
+                request_id: requestId,
+                source: req.headers['x-client-source'] || 'web',
+                old_block: decoded.snapshotBlock,
+                new_block: currentBlock,
+                gap: age,
+                reason: isProactive ? "PROACTIVE" : "BLOCK_STALE",
+                result: "SUCCESS"
+              }));
+          } else {
+             // Refusal Logic: Skip rotation for trivial gaps
+             if (isProactive) {
+                 console.log(JSON.stringify({
+                   event: "SESSION_HEAL",
+                   wallet: normalizedWallet,
+                   request_id: requestId,
+                   reason: "FORCED_REFRESH_DENIED",
+                   detail: "Gap below MIN_REFRESH_THRESHOLD",
+                   result: "SKIPPED"
+                 }));
+             }
+          }
+      } catch (healErr) {
+          console.error(JSON.stringify({
+             event: "SESSION_HEAL",
+             wallet: normalizedWallet,
+             request_id: requestId,
+             error: healErr.message,
+             result: "FAILED"
+          }));
+      }
+
       res.json({ 
-        user: { 
-          ...user, 
-          zeroTrustStatus: decoded.zeroTrustStatus || 'VERIFIED' 
-        } 
+        user: { ...user, zeroTrustStatus },
+        token: refreshedToken || token // Return healed token
       });
     } catch (jwtErr) {
       return res.json({ user: null });
@@ -942,7 +1026,32 @@ router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ cap
 
       // --- [SCOPE A: PUBLIC READ] ---
       if (session.status === 'pending' || session.status === 'authorized') {
-          return res.json({ status: session.status, challenge: session.challenge });
+          const response = { status: session.status, challenge: session.challenge };
+          
+          // 🛡️ [Hardening 11.1] Inject Dynamic EIP-712 Domain Authority
+          if (process.env.ENABLE_ATOMIC_AUTH === 'true') {
+              try {
+                  const config = await ConfigService.getConfig();
+                  response.handshakeDomain = {
+                      name: 'BBSNS_Protocol',
+                      version: '2',
+                      chainId: config.chainId,
+                      verifyingContract: config.contracts.documentRegistry
+                  };
+                  response.handshakeTypes = {
+                      Handshake: [
+                          { name: 'action', type: 'string' },
+                          { name: 'sessionId', type: 'string' },
+                          { name: 'challenge', type: 'string' },
+                          { name: 'timestamp', type: 'uint256' }
+                      ]
+                  };
+              } catch (e) {
+                  console.warn('[AUTH_WARN] Failed to inject handshake domain authority:', e.message);
+              }
+          }
+          
+          return res.json(response);
       }
 
       // --- [SCOPE B: PRIVATE CONSUMPTION (Triple-Bind Enforcement)] ---
@@ -1022,7 +1131,7 @@ router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ cap
  * Moves session from 'pending' -> 'completed' by verifying current web session identity via Authorization Header.
  */
 // POST /auth/remote/complete - Remote binding completion
-router.post('/remote/complete', allowPublic, requirePrivilege({ capability: 'REMOTE_IDENTITY_BINDING' }), async (req, res) => {
+router.post('/remote/complete', allowPublic, requirePrivilege({ capability: 'REMOTE_IDENTITY_BINDING', allowPublic: true }), async (req, res) => {
     try {
         const { sessionId } = req.body;
         const authHeader = req.headers.authorization;
@@ -1104,6 +1213,136 @@ router.post('/remote/complete', allowPublic, requirePrivilege({ capability: 'REM
             await pool.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [req.body.sessionId]).catch(() => {});
         }
         res.status(500).json({ error: 'Internal system error during identity binding' });
+    }
+});
+
+/**
+ * 🛡️ [Hardening 11.2] Atomic Single-Signature Handshake
+ * Consolidates Identity Verification + Handshake Authorization into a single EIP-712 prompt.
+ */
+// POST /auth/remote/atomic-bind - Consolidated atomic auth
+router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: 'REMOTE_IDENTITY_BINDING', allowPublic: true }), async (req, res) => {
+    if (process.env.ENABLE_ATOMIC_AUTH !== 'true') {
+        return res.status(501).json({ error: 'Atomic Authentication is not enabled on this authority.' });
+    }
+
+    try {
+        const { sessionId, signature, walletAddress, timestamp } = req.body;
+
+        if (!sessionId || !signature || !walletAddress || !timestamp) {
+            return res.status(400).json({ error: 'Missing required binding parameters' });
+        }
+
+        if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID' });
+
+        // 1. [Hardening] Timestamp skew and expiry protection (+/- 60s skew + 300s TTL)
+        const now = Math.floor(Date.now() / 1000);
+        const diff = Math.abs(now - Number(timestamp));
+        if (diff > 360) {
+            return res.status(401).json({ error: 'Handshake expired or clock skew too high. Please ensure your device time is correct.' });
+        }
+
+        const result = await pool.runWithContext({
+            userId: ACTOR_IDS.GUEST,
+            reason: 'REMOTE_ATOMIC_BIND',
+            route: req.originalUrl
+        }, async (auditClient) => {
+            await auditClient.query('BEGIN');
+
+            const sessionRes = await auditClient.query(
+                'SELECT * FROM remote_auth_sessions WHERE id::text = $1 AND expires_at > NOW() FOR UPDATE',
+                [sessionId]
+            );
+
+            if (sessionRes.rows.length === 0) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'Session not found or expired', status: 404 };
+            }
+
+            const session = sessionRes.rows[0];
+
+            if (session.status !== 'pending') {
+                await auditClient.query('ROLLBACK');
+                return { error: `Session already in state: ${session.status}`, status: 403 };
+            }
+
+            // 2. [CRYPTO] Recover EIP-712 Wallet Identity
+            let recoveredAddress;
+            try {
+                const config = await ConfigService.getConfig();
+                const domain = {
+                    name: 'BBSNS_Protocol',
+                    version: '2',
+                    chainId: config.chainId,
+                    verifyingContract: config.contracts.documentRegistry
+                };
+                const types = {
+                    Handshake: [
+                        { name: 'action', type: 'string' },
+                        { name: 'sessionId', type: 'string' },
+                        { name: 'challenge', type: 'string' },
+                        { name: 'timestamp', type: 'uint256' }
+                    ]
+                };
+                const message = {
+                    action: 'Remote Login Authorization',
+                    sessionId: sessionId,
+                    challenge: session.challenge,
+                    timestamp: Number(timestamp)
+                };
+
+                recoveredAddress = ethers.verifyTypedData(domain, types, message, signature);
+            } catch (e) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'Cryptographic identity verification failed', status: 401 };
+            }
+
+            if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+                await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                await auditClient.query('COMMIT');
+                return { error: 'Identity Mismatch: Signer does not match provided wallet.', status: 403 };
+            }
+
+            // 3. Resolve Database User
+            const userRes = await auditClient.query(
+                'SELECT id FROM users WHERE LOWER(wallet_address) = $1 AND identity_state = $2',
+                [walletAddress.toLowerCase(), 'ACTIVE']
+            );
+
+            if (userRes.rows.length === 0) {
+                await auditClient.query('ROLLBACK');
+                return { error: 'Account not found or inactive. Please register on the web app first.', status: 404 };
+            }
+
+            const userId = userRes.rows[0].id;
+
+            // 4. [ATOMIC UPDATE] Complete the Handshake
+            const oneTimeCode = crypto.randomBytes(32).toString('hex');
+            const codeExpiry = new Date(Date.now() + 60 * 1000);
+
+            await auditClient.query(
+                `UPDATE remote_auth_sessions 
+                 SET status = 'completed', 
+                     user_id = $1, 
+                     wallet_address = $2, 
+                     one_time_code = $3, 
+                     code_expires_at = $4,
+                     authorized_at = NOW() 
+                 WHERE id = $5`,
+                [userId, walletAddress.toLowerCase(), oneTimeCode, codeExpiry, sessionId]
+            );
+
+            await auditClient.query('COMMIT');
+            return { success: true };
+        });
+
+        if (result.error) return res.status(result.status).json({ error: result.error });
+
+        res.json({ message: 'Atomic Handshake Successful.' });
+
+    } catch (err) {
+        console.error('[REMOTE_ATOMIC_FATAL]', err);
+        res.status(500).json({ error: 'Internal system error during atomic binding' });
     }
 });
 
@@ -1302,7 +1541,7 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), r
  * Rule: Server is the SOLE authority for upgrades.
  */
 // POST /auth/remote/refresh-zero-trust - Session upgrade
-router.post('/remote/refresh-zero-trust', allowPublic, requirePrivilege({ capability: 'AUTH_LOGIN' }), async (req, res) => {
+router.post('/remote/refresh-zero-trust', allowPublic, simpleRateLimiter(2, 60000), requirePrivilege({ capability: 'AUTH_LOGIN', allowStale: true }), async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.substring(7) : (req.cookies?.token);
@@ -1316,13 +1555,22 @@ router.post('/remote/refresh-zero-trust', allowPublic, requirePrivilege({ capabi
       return res.status(401).json({ status: 'REAUTH_REQUIRED', error: 'Invalid or expired token' });
     }
 
-    // 1. Idempotency: If already verified, no need to upgrade
-    if (decoded.zeroTrustStatus === 'VERIFIED') {
-      return res.json({ status: 'VERIFIED', message: 'Session already verified' });
-    }
-
     const { address, id } = decoded;
     const normalizedAddress = address.toLowerCase();
+    const requestId = (dbContext.getStore() || {}).requestId || 'UNKNOWN';
+
+    // 1. Idempotency: If already verified and block gap is fresh, no need to upgrade
+    let currentBlock;
+    try {
+        const config = await ConfigService.getConfig();
+        const provider = await ProviderService.getProvider();
+        currentBlock = await provider.getBlockNumber();
+        const gap = currentBlock - (decoded.snapshotBlock || 0);
+        
+        if (decoded.zeroTrustStatus === 'VERIFIED' && gap < 20) {
+          return res.json({ status: 'VERIFIED', message: 'Session already verified' });
+        }
+    } catch(e) { /* proceed to on-chain check */ }
 
     // 2. Definitive On-Chain Verification (Server Authority)
     try {
@@ -1348,7 +1596,16 @@ router.post('/remote/refresh-zero-trust', allowPublic, requirePrivilege({ capabi
 
       const newToken = await signZeroTrustToken(userResult.rows[0], normalizedAddress, 'VERIFIED');
 
-      console.log(`[AUTH_UPGRADE] Session upgraded to VERIFIED for ${normalizedAddress}`);
+      // 🩺 [OBSERVABILITY] Forensic Heal Log
+      console.log(JSON.stringify({
+        event: "SESSION_HEAL",
+        wallet: normalizedAddress,
+        request_id: requestId,
+        source: "desktop_worker",
+        reason: "RECOVERY_HANDSHAKE",
+        result: "SUCCESS"
+      }));
+
       return res.json({ 
         status: 'VERIFIED', 
         token: newToken,
@@ -1356,8 +1613,13 @@ router.post('/remote/refresh-zero-trust', allowPublic, requirePrivilege({ capabi
       });
 
     } catch (rpcErr) {
-      // 🛡️ Fail-Safe: RPC still down? Stay DEGRADED.
-      console.warn(`[AUTH_REFRESH_RETRY] Blockchain still unreachable for ${normalizedAddress}: ${rpcErr.message}`);
+      console.error(JSON.stringify({
+         event: "SESSION_HEAL",
+         wallet: normalizedAddress,
+         request_id: requestId,
+         error: rpcErr.message,
+         result: "FAILED"
+      }));
       return res.json({ status: 'DEGRADED', message: 'Blockchain still unreachable' });
     }
   } catch (err) {

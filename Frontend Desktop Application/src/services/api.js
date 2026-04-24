@@ -76,8 +76,12 @@ const api = {
         }
     }
 
-    // 🛡️ [LEGACY] Fallback Path (localStorage)
-    const token = localStorage.getItem('bbsns_token');
+    // 🛡️ [SANITATION] Multi-Layer Token Firewall
+    const isValidToken = (t) => typeof t === 'string' && t.length > 20 && t !== 'null' && t !== 'undefined';
+
+    const rawToken = localStorage.getItem('bbsns_token');
+    const token = isValidToken(rawToken) ? rawToken : null;
+
     const headers = {
       'Content-Type': 'application/json',
       ...options.headers

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const pool = require('../db/index.js');
 const { attachNotaryRegistry } = require('../blockchain/notary-registry.js');
 const SyncLogger = require('../services/SyncLogger.js');
@@ -13,6 +14,8 @@ async function startWorker() {
   console.log("[ROLE_WORKER] Started. Hardened Privilege Synchronization active.");
 
   while (true) {
+    // 🛡️ [SYSTEM_AUDIT] authoritative worker context
+    await require('../middleware/actor').runWithSystemContext('ROLE_SYNC_WORKER', 'Promoting users to on-chain Notary roles', async () => {
     try {
     // 🛡️ ATOMIC CLAIM (Hardened Pattern)
     // 1. FOR UPDATE SKIP LOCKED ensures zero-duplication
@@ -72,10 +75,11 @@ async function startWorker() {
       });
     }
 
-  } catch (err) {
-    console.error("[ROLE_WORKER] 🚨 FATAL LOOP ERROR:", err.message);
-  }
-    
+    } catch (err) {
+      console.error("[ROLE_WORKER] 🚨 FATAL LOOP ERROR:", err.message);
+    }
+    });
+
     await new Promise(resolve => setTimeout(resolve, SYNC_INTERVAL_MS));
   }
 }
@@ -183,6 +187,7 @@ async function handleFailure(user, errorMessage) {
 }
 
 if (require.main === module) {
+  pool.init();
   startWorker();
 }
 

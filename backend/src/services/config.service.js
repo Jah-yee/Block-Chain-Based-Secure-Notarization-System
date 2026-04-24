@@ -43,7 +43,7 @@ class ConfigService {
   constructor() {
     this.cache = null;
     this._version = 0;
-    this.VERIFICATION_TIMEOUT_MS = 5000; // 5s Fail-Fast SLA
+    this.VERIFICATION_TIMEOUT_MS = 10000; // 10s Fail-Fast SLA (Relaxed for Testnet)
     this.ongoingVerification = null; // 🛡️ Single-Flight Lock
   }
 
