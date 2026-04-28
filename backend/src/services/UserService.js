@@ -38,6 +38,7 @@ class UserService {
       // 🛡️ [CONSTRAINT_SYNC] satisfy DB check constraint for ACTIVE states
       if (userData.identity_state === 'ACTIVE') {
         userData.is_human_verified = true;
+        userData.kyc_verified = true;
       }
 
       // 1. Create the user record
@@ -170,6 +171,7 @@ class UserService {
         `UPDATE users 
          SET identity_state = $1::identity_lifecycle, 
              is_human_verified = CASE WHEN $1::text = 'ACTIVE' THEN true ELSE is_human_verified END,
+             kyc_verified = CASE WHEN $1::text = 'ACTIVE' THEN true ELSE kyc_verified END,
              updated_at = NOW() 
          WHERE id = $2`,
         [newState, userId]

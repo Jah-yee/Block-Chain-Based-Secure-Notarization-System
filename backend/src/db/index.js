@@ -238,7 +238,7 @@ async function executeAuditedQuery(target, originalMethod, ...args) {
 
     // TRANSIT CHANNEL (Identity Required for Mutations)
     if (isMutation) {
-        if (!store || (!store.actorId && !store.userId)) {
+        if (!store || (store.actorId === undefined && store.userId === undefined)) {
             const reason = 'SENTINEL_BLOCK_MISSING_ACTOR_CONTEXT: Mutation requires authenticated actor context.';
             writeEnforcementLog('BLOCKED', reason);
             throw new BBSNSEnforcementError(reason, logContext);

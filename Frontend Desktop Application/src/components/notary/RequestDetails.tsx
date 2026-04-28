@@ -128,7 +128,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 finalPayload.rejection_reason = rejectionReason;
             }
 
-            await api.updateDocument(requestId, finalPayload);
+            await api.approveDocument(requestId, finalPayload);
 
             toast.success(`Request ${status} successfully.`);
             setConfirmDialog({ open: false, action: null });
@@ -154,7 +154,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     if (!request) return null;
 
     // Derive file type from filename or mime if available
-    const isImage = request.filename.match(/\.(jpg|jpeg|png)$/i);
+    const isImage = request.filename.match(/\.(jpg|jpeg|png|webp|gif|bmp)$/i);
     const fileType = isImage ? "Image" : "PDF";
 
     return (
@@ -173,9 +173,11 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                                 <ArrowLeft size={16} className="mr-2" />
                                 Back
                             </Button>
-                            <h1 className="text-foreground">Request Details</h1>
+                            <h1 className="text-foreground truncate max-w-[500px]" title={request.title || request.filename}>
+                                {request.title || request.filename}
+                            </h1>
                         </div>
-                        <p className="text-sm text-muted-foreground">Review and process notarization request</p>
+                        <p className="text-sm text-muted-foreground">Document ID: #{request.id} • Review and process notarization request</p>
                         <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-500/20 dark:text-yellow-500 dark:border-yellow-500/30">
                             {request.status}
                         </Badge>
@@ -194,7 +196,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             ) : (
                                 <ImageIcon className="text-purple-600 dark:text-purple-400" size={20} />
                             )}
-                            <span className="text-muted-foreground">File Type: {fileType}</span>
+                            <span className="text-muted-foreground">File Type: {fileType} • {request.filename}</span>
                         </div>
 
                         {fileType === "Image" && (
@@ -274,8 +276,16 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             </h3>
                             <div className="space-y-3">
                                 <div className="bg-muted/50 rounded-xl p-4">
-                                    <p className="text-xs text-muted-foreground mb-1">User ID</p>
-                                    <p className="text-sm text-foreground font-mono">{request.user_id}</p>
+                                    <p className="text-xs text-muted-foreground mb-1">Full Name</p>
+                                    <p className="text-sm text-foreground font-medium">{request.owner_name || 'Anonymous User'}</p>
+                                </div>
+                                <div className="bg-muted/50 rounded-xl p-4">
+                                    <p className="text-xs text-muted-foreground mb-1">Email Address</p>
+                                    <p className="text-sm text-foreground">{request.owner_email || 'N/A'}</p>
+                                </div>
+                                <div className="bg-muted/50 rounded-xl p-4">
+                                    <p className="text-xs text-muted-foreground mb-1">Wallet Address</p>
+                                    <p className="text-sm text-foreground font-mono text-[10px] break-all">{request.owner_wallet}</p>
                                 </div>
                             </div>
                         </div>
@@ -284,7 +294,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         <div className="bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30 rounded-xl p-4">
                             <div className="flex items-center gap-2 mb-2">
                                 <Hash className="text-emerald-700 dark:text-emerald-500" size={16} />
-                                <p className="text-xs text-emerald-700 dark:text-emerald-500">File Hash Generated</p>
+                                <p className="text-xs text-emerald-700 dark:text-emerald-500">File Hash Verified</p>
                             </div>
                             <p className="text-xs text-muted-foreground font-mono break-all">{request.file_hash}</p>
                         </div>

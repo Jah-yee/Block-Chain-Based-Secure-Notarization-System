@@ -268,13 +268,16 @@ const ALLOWED_ROUTES = [
 
     // 📂 DOCUMENT FLOW
     { path: /^\/api\/documents$/, methods: ["GET"] },
-    { path: /^\/api\/documents\/[\w-]+$/, methods: ["GET", "PATCH"] },
+    { path: /^\/api\/documents\/[\w-]+$/, methods: ["GET"] },
+    { path: /^\/api\/documents\/[\w-]+\/update$/, methods: ["PATCH"] },
+    { path: /^\/api\/documents\/[\w-]+\/approve$/, methods: ["POST"] },
     { path: /^\/api\/documents\/[\w-]+\/file$/, methods: ["GET"] },
     { path: /^\/api\/documents\/[\w-]+\/signature-payload$/, methods: ["GET"] },
 
     // ⚖️ GOVERNANCE (Dashboard Visibility)
     { path: /^\/api\/governance\/proposals$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/settings$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/multisig\/stats$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/transactions$/, methods: ["GET"] },
     { path: /^\/api\/governance\/alerts\/count$/, methods: ["GET"] },
 
@@ -284,7 +287,10 @@ const ALLOWED_ROUTES = [
 
     // 🔬 SYSTEM TELEMETRY
     { path: /^\/api\/system\/logs$/, methods: ["GET"] },
-    { path: /^\/api\/system\/sync\/events$/, methods: ["GET"] }
+    { path: /^\/api\/system\/sync\/events$/, methods: ["GET"] },
+
+    // 🪙 TOKEN FLOW
+    { path: /^\/api\/tokens\/onchain\/[\w-]+\/[\w-]+$/, methods: ["GET"] }
 ];
 
 function validateRequest(endpoint, method) {

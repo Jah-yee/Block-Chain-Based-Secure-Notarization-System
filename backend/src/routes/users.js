@@ -23,7 +23,7 @@ const {
 } = require("../utils/identity-crypto");
 
 // REGISTER User (public)
-router.post("/register", withDomain('USERS'), allowPublic, requirePrivilege({ capability: 'USERS_REGISTER' }), withGuestContext, withRestoredContext(upload.single('nationalIdFile')), validateBody(userSchema), withAction('USERS_REGISTER'), withMutation(), async (req, res) => {
+router.post("/register", withDomain('USERS'), allowPublic, requirePrivilege({ capability: 'USERS_REGISTER', allowPublic: true }), withGuestContext, withRestoredContext(upload.single('nationalIdFile')), validateBody(userSchema), withAction('USERS_REGISTER'), withMutation(), async (req, res) => {
   // 🛡️ [Hardening] Backend is the final authority for input normalization
   const body = req.body || {};
   

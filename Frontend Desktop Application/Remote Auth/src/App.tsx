@@ -400,8 +400,7 @@ function App() {
           body: JSON.stringify({
             walletAddress: address,
             signature,
-            nonce,
-            email: "remote_user@bbsns.online" // Provisioning fallback for remote flows
+            nonce
           })
         });
 

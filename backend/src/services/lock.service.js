@@ -40,7 +40,7 @@ class LockService {
     }
 
     // Stable Lock IDs for Worker Tasks
-    static get KEYS() {
+    get KEYS() {
         return {
             RECONCILIATION: 1001,
             REPUTATION: 1002,

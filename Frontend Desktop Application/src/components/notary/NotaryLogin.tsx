@@ -32,8 +32,8 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
     if ((window as any).electronAPI?.auth) {
       (window as any).electronAPI.auth.onStatusChanged((data: any) => {
         if (data.status === "authorized") {
-          const userRole = data.user.role;
-          if (userRole === 2 || userRole === 3) { // Notary or Admin
+          const userRole = String(data.user.role).toLowerCase();
+          if (userRole === "2" || userRole === "3" || userRole === "notary" || userRole === "admin") { // Notary or Admin
             setAuthStatus("authorized");
             toast.success("Login Successful!");
             onLogin();
@@ -56,37 +56,64 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
     setError("");
 
     try {
-      const res = await fetch(`${api.baseUrl}/auth/pre-check`, {
+      const res = await fetch(`${api.baseUrl}/auth/verify-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: userId.toLowerCase().trim() }),
+        body: JSON.stringify({ 
+          email: userId.toLowerCase().trim(),
+          password: password 
+        }),
       });
 
-      if (!res.ok) throw new Error("Server verification failed");
+      const data = await res.json();
 
-      const { exists, role } = await res.json();
-
-      if (!exists) {
-        setError("Account does not exist. Please check your credentials.");
-        return;
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || "Authentication failed");
       }
 
-      if (role !== 'notary' && role !== 'admin') {
-        setError("Unauthorized: This account is not a Notary or Admin.");
-        return;
+      if (data.role !== 'notary' && data.role !== 'admin') {
+        throw new Error("Unauthorized: This account is not a Notary or Admin.");
       }
 
       setStep(2);
+      toast.success("Credentials Verified");
     } catch (err: any) {
-      setError(err.message || "Failed to verify account existence.");
+      setError(err.message || "Failed to verify credentials.");
+      toast.error("Auth Failure");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStep2Verify = () => {
-    if (nationalId) {
+  const handleStep2Verify = async () => {
+    if (!nationalId) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${api.baseUrl}/auth/verify-identity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          email: userId.toLowerCase().trim(),
+          nationalId: nationalId
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || "Identity verification failed");
+      }
+
       setStep(3);
+      toast.success("Identity Verified Sucessfully");
+    } catch (err: any) {
+      setError(err.message || "Failed to verify identity");
+      toast.error("Verification Failed");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -246,7 +273,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
                   <Input
                     id="nationalId"
                     value={nationalId}
-                    onChange={(e) => setNationalId(e.target.value.replace(/[^a-zA-Z0-9]/g, ""))}
+                    onChange={(e) => setNationalId(e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase())}
                     placeholder="Enter your national ID"
                     className="bg-background border-input text-foreground mt-2 h-11"
                   />

@@ -17,6 +17,8 @@ const {
     verifyProtocolSignature 
 } = require('../utils/identity-crypto');
 const { loginSchema, validateBody } = require('../utils/validation');
+const UserService = require('../services/UserService');
+const bcrypt = require('bcrypt');
 
 const APP_NAME = 'BBSNS';
 const getJWTSecret = () => {
@@ -45,7 +47,6 @@ const COOKIE_OPTIONS = {
 
 const { requirePrivilege, allowPublic, withGuestContext, ROLES, RISK_LEVELS } = require('../middleware/actor');
 const { withDomain, withAction, withMutation } = require('../middleware/policy');
-const UserService = require('../services/UserService');
 
 // Hardened Rate Limiter: IP + Wallet + Endpoint binding with cooldown escalation
 const distributedRateLimiter = require('../utils/rate-limiter');
@@ -136,15 +137,18 @@ async function signZeroTrustToken(user, walletAddress, zeroTrustStatus = 'VERIFI
 }
 
 // POST /auth/pre-check - Verify account existence (Wallet-Only identity)
-router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH_PRECHECK'), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
+router.post('/pre-check', withDomain('AUTH'), withGuestContext, withAction('AUTH_PRECHECK'), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
   try {
-    const { walletAddress } = req.body;
-    if (!walletAddress) {
-      return res.status(400).json({ error: 'Wallet address is required for pre-check' });
+    const { walletAddress, email } = req.body;
+    if (!walletAddress && !email) {
+      return res.status(400).json({ error: 'Identity identifier (email or wallet) is required' });
     }
 
-    const normalizedWallet = walletAddress.trim().toLowerCase();
-    const result = await pool.query('SELECT role FROM users WHERE LOWER(wallet_address) = $1', [normalizedWallet]);
+    const identifier = (walletAddress || email).trim().toLowerCase();
+    const result = await pool.query(
+        'SELECT role FROM users WHERE LOWER(wallet_address) = $1 OR LOWER(email) = $1', 
+        [identifier]
+    );
 
     if (result.rows.length === 0) {
       return res.json({ exists: false, role: null });
@@ -153,6 +157,89 @@ router.post('/pre-check', withGuestContext, withDomain('AUTH'), withAction('AUTH
     res.json({ exists: true, role: result.rows[0].role });
   } catch (error) {
     console.error('Pre-check error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /auth/verify-identity - Cryptographic National ID matching
+router.post('/verify-identity', withDomain('AUTH'), allowPublic, withAction('AUTH_PRECHECK'), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
+  try {
+    const { email, nationalId } = req.body;
+    if (!email || !nationalId) {
+      return res.status(400).json({ error: 'Email and National ID are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedId = nationalId.trim().replace(/\s+/g, '').toUpperCase();
+    const inputHash = crypto.createHash('sha256').update(normalizedId).digest('hex');
+
+    const result = await pool.query(
+      'SELECT national_id_hash FROM users WHERE LOWER(email) = $1',
+      [normalizedEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User identity not found' });
+    }
+
+    const dbHash = result.rows[0].national_id_hash;
+    
+    // 🛡️ [SECURITY] Hash Comparison (Constant-Time style)
+    if (dbHash !== inputHash) {
+      return res.status(401).json({ 
+        error: 'Identity verification failed', 
+        detail: 'The National ID entered does not match our records.' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Identity confirmed', 
+      code: 'ID_VERIFIED' 
+    });
+  } catch (error) {
+    console.error('ID verification error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /auth/verify-password - Secure credential validation
+router.post('/verify-password', withDomain('AUTH'), allowPublic, withAction('AUTH_PRECHECK'), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true }), async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    const result = await pool.query(
+      'SELECT id, password_hash, role FROM users WHERE LOWER(email) = $1',
+      [normalizedEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    const user = result.rows[0];
+
+    // 🛡️ [SECURITY] Verification Gate
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    if (!isValid) {
+      return res.status(401).json({ 
+        error: 'Authentication failed', 
+        detail: 'The password entered is incorrect. Please try again.' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      role: user.role,
+      message: 'Password verified' 
+    });
+  } catch (error) {
+    console.error('Password verification error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -693,7 +780,7 @@ router.get('/activation-info', withDomain('NOTARY'), allowPublic, requirePrivile
 
   try {
     const result = await pool.query(
-      `SELECT wallet_address, email, name, is_activated, approved_at 
+      `SELECT wallet_address, email, full_name, is_activated, activation_expires_at
        FROM notary_applications 
        WHERE activation_token = $1`,
       [token]
@@ -711,7 +798,7 @@ router.get('/activation-info', withDomain('NOTARY'), allowPublic, requirePrivile
     res.json({
       wallet: app.wallet_address,
       email: app.email,
-      name: app.name
+      name: app.full_name
     });
   } catch (err) {
     console.error('[AUTH_ERROR] Activation info fetch failed:', err);
@@ -788,6 +875,7 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
         let userId;
 
         const userData = {
+          username: application.email.toLowerCase(),
           name: application.full_name,
           email: application.email.toLowerCase(),
           wallet_address: walletAddress.toLowerCase(),

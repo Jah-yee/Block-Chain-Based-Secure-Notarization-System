@@ -159,7 +159,7 @@ router.get('/logs', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req,
 });
 
 // GET /api/system/bootstrap-genesis - [RETIRED] Legacy bootstrap route
-router.get('/bootstrap-genesis', allowPublic, requirePrivilege({ capability: 'ADMIN_ONBOARD_GENESIS' }), async (req, res) => {
+router.get('/bootstrap-genesis', allowPublic, requirePrivilege({ capability: 'ADMIN_ONBOARD_GENESIS', allowPublic: true }), async (req, res) => {
     const { wallet } = req.query;
     const { logAction } = require('../utils/logger');
     

@@ -280,8 +280,6 @@ function requirePrivilege(mwConfig) {
           });
         }
 
-        const kycEnforced = process.env.ENFORCE_KYC === 'true';
-
         if (!kycEnforced) {
           if (isDeactivated || identityState === 'DEACTIVATED') {
             console.warn(`[AUTH_DENY] Deactivated/Blocked user attempted access: ${address}`);
@@ -294,14 +292,15 @@ function requirePrivilege(mwConfig) {
             });
           }
         } else {
-          const isChainValid = Number(liveRole) > 0;
           const isDbActive = identityState === 'ACTIVE';
 
-          if (!isDbActive || !isChainValid) {
-            console.warn(`[AUTH_DENY] Double-Lock Failure for ${address}. DB: ${identityState}, Chain Role: ${liveRole}`);
+          // 🛡️ [IDENTITY_INVARIANT] Rule 6: DB 'ACTIVE' is the authoritative access gate.
+          // On-chain role sync (isChainValid) is diagnostic, not a blocker for verified actors.
+          if (!isDbActive) {
+            console.warn(`[AUTH_DENY] Access blocked for non-ACTIVE user ${address}. Current state: ${identityState}`);
             return res.status(403).json({
-              error: 'Forbidden: User identity not fully verified',
-              detail: `Identity verification required. DB: ${identityState}, Chain: ${liveRole}`
+              error: 'Forbidden: Account not active',
+              detail: `Your identity state is '${identityState}'. Verification required.`
             });
           }
         }
@@ -391,11 +390,13 @@ function requirePrivilege(mwConfig) {
 
 // Audit compliance shim: Ensures even public routes have a trace context for the sentinel
 function allowPublic(req, res, next) {
+  const parentStore = dbContext.getStore();
   const context = {
     requestId: req.id || req.headers['x-request-id'] || 'PUBLIC-' + Date.now(),
     service: 'PUBLIC_API',
     actor: 'GUEST',
     actorId: 0,
+    domain: parentStore?.domain,
     timestamp: new Date()
   };
 

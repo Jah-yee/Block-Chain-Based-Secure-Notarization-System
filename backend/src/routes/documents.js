@@ -32,12 +32,25 @@ const memoryUpload = multer({
 });
 
 
-function sanitizeDocument(doc) {
+function sanitizeDocument(doc, actor) {
   if (!doc) return null;
   const sanitized = { ...doc };
   delete sanitized.encrypted_key;
   delete sanitized.user_id;
   delete sanitized.notary_id;
+
+  // 🛡️ [PII_PROTECTION] Hide owner details from non-assigned Notaries (Phase 9 Hardening)
+  if (actor && Number(actor.role) === ROLES.NOTARY && doc.notary_id && Number(doc.notary_id) !== Number(actor.id)) {
+    delete sanitized.owner_name;
+    delete sanitized.owner_email;
+    delete sanitized.owner_wallet;
+  } else if (actor && Number(actor.role) === ROLES.NOTARY && !doc.notary_id) {
+    // Also hide if document is completely unassigned
+    delete sanitized.owner_name;
+    delete sanitized.owner_email;
+    delete sanitized.owner_wallet;
+  }
+
   return sanitized;
 }
 
@@ -62,8 +75,11 @@ function mapToDetailedDoc(doc) {
   return {
     id: doc.id,
     user_id: doc.user_id,
+    owner_name: doc.owner_name || null,
+    owner_email: doc.owner_email || null,
     owner_wallet: doc.owner_wallet || null,
     filename: doc.filename,
+    title: doc.title || doc.filename,
     file_hash: doc.file_hash,
     storage_key: doc.storage_key || null,
     storage_state: doc.storage_state || 'STORED',
@@ -446,16 +462,18 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' })
     let params = [];
 
     if (role === ROLES.ADMIN) {
-      query = `SELECT d.*, u.wallet_address as notary_wallet 
+      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.name as owner_name, u2.email as owner_email, u2.wallet_address as owner_wallet 
                FROM documents d 
                LEFT JOIN users u ON d.notary_id = u.id 
+               LEFT JOIN users u2 ON d.user_id = u2.id
                WHERE d.is_deleted=false 
                ORDER BY d.created_at DESC`;
     } else if (role === ROLES.NOTARY) {
-      query = `SELECT d.*, u.wallet_address as notary_wallet 
+      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.name as owner_name, u2.email as owner_email, u2.wallet_address as owner_wallet 
                FROM documents d 
                LEFT JOIN users u ON d.notary_id = u.id 
-               WHERE d.notary_id=$1 
+               LEFT JOIN users u2 ON d.user_id = u2.id
+               WHERE (d.notary_id=$1 OR d.notary_id IS NULL) 
                AND d.is_deleted=false 
                ORDER BY d.created_at DESC`;
       params = [req.actor.id];
@@ -470,7 +488,7 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' })
 
     const r = await pool.query(query, params);
     // Sanitize results
-    const sanitized = r.rows.map(sanitizeDocument);
+    const sanitized = r.rows.map(doc => sanitizeDocument(doc, req.actor));
     res.json(sanitized);
   } catch (err) {
     console.error(err);
@@ -591,7 +609,7 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
     const isHash = /^[a-fA-F0-9]{64}$/.test(paramId);
 
     if (isHash) {
-      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.wallet_address as owner_wallet 
+      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.name as owner_name, u2.email as owner_email, u2.wallet_address as owner_wallet 
                FROM documents d 
                LEFT JOIN users u ON d.notary_id = u.id 
                LEFT JOIN users u2 ON d.user_id = u2.id
@@ -599,7 +617,7 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
       queryParams = [paramId];
     } else {
       if (isNaN(paramId)) return res.status(400).json({ error: 'Invalid document ID or Hash format' });
-      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.wallet_address as owner_wallet 
+      query = `SELECT d.*, u.wallet_address as notary_wallet, u2.name as owner_name, u2.email as owner_email, u2.wallet_address as owner_wallet 
                FROM documents d 
                LEFT JOIN users u ON d.notary_id = u.id 
                LEFT JOIN users u2 ON d.user_id = u2.id
@@ -626,7 +644,7 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
     if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    res.json(sanitizeDocument(doc));
+    res.json(sanitizeDocument(doc, req.actor));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch document' });
@@ -969,7 +987,7 @@ async function handleDocumentPatch(req, res) {
         // 🛡️ [SECURITY] File cleanup is handled exclusively by the reconciliation worker
         // after on-chain confirmation to prevent race conditions and ensure finality.
 
-        return res.json(sanitizeDocument(updateRes.rows[0]));
+        return res.json(sanitizeDocument(updateRes));
       } catch (txErr) {
         logger.error('TX_FAILED', { 
           id, 

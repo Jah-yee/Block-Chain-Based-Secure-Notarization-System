@@ -40,7 +40,7 @@ router.get("/proposals", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), 
 });
 
 // GET /api/governance/alerts/count
-router.get("/alerts/count", allowPublic, requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
+router.get("/alerts/count", allowPublic, requirePrivilege({ capability: 'GOV_PROPOSAL_LIST', allowPublic: true }), async (req, res) => {
     try {
         const result = await pool.query("SELECT COUNT(*) FROM governance_proposals WHERE status = 'active'");
         res.json({ count: parseInt(result.rows[0].count) });
@@ -129,62 +129,79 @@ router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ 
 });
 
 // GET /api/governance/multisig/settings
-router.get("/multisig/settings", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
-    try {
-        const config = await ConfigService.getConfig();
-        const rpcUrl = config.rpcUrl;
-        const contractAddress = config.contracts.multisig;
+router.get(
+    "/multisig/settings",
+    requirePrivilege({ capability: "GOV_READ" }),
+    async (req, res) => {
+        try {
+            const settings = await GovernanceService.getMultisigSettings();
+            res.json(settings);
+        } catch (error) {
+            console.error("Fetch multisig settings error:", error);
+            res.status(500).json({ error: "Failed to fetch multisig settings" });
+        }
+    }
+);
 
-        if (!rpcUrl || !contractAddress) {
-            console.warn("Missing RPC URL or Contract Address");
-            return res.json({
-                address: contractAddress || "0x000...",
+router.get(
+    "/multisig/stats",
+    requirePrivilege({ capability: "GOV_READ" }),
+    async (req, res) => {
+        try {
+            // AUTHORITATIVE BLOCKCHAIN SYNC
+            const config = await ConfigService.getConfig();
+            const contractAddress = config?.contracts?.multisig;
+
+            if (!contractAddress) {
+                return res.json({
+                    address: "0x000...",
+                    threshold: 0,
+                    timelockDelay: 0,
+                    signers: [],
+                    error: "Contract configuration missing"
+                });
+            }
+
+            const provider = await ProviderService.getProvider();
+            // Load ABI from artifacts
+            const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
+            const artifact = require(artifactPath);
+            const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
+
+            const [threshold, delay, signers] = await Promise.all([
+                contract.threshold(),
+                contract.timelockDelay(),
+                contract.getSigners()
+            ]);
+
+            const settings = {
+                address: contractAddress,
+                threshold: Number(threshold),
+                timelockDelay: Number(delay),
+                signers: signers
+            };
+
+            res.json(settings);
+        } catch (err) {
+            console.error("Blockchain Fetch Error:", err);
+            const config = await ConfigService.getConfig();
+            // 🛡️ [SECURITY] ENFORCE STRICT CONTRACT: Never return undefined keys
+            res.json({
+                address: config?.contracts?.multisig || "0x0",
                 threshold: 0,
                 timelockDelay: 0,
                 signers: [],
-                error: "Contract configuration missing"
+                status: "degraded",
+                error: `Authority sync failed: ${err.message}`,
+                network: "BNB Smart Chain Testnet",
+                explorer: `https://testnet.bscscan.com/address/${config?.contracts?.multisig}`
             });
         }
-
-        const provider = await ProviderService.getProvider();
-        // Load ABI from artifacts
-        const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
-        const artifact = require(artifactPath);
-        const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
-
-        const [threshold, delay, signers] = await Promise.all([
-            contract.threshold(),
-            contract.timelockDelay(),
-            contract.getSigners()
-        ]);
-
-        const settings = {
-            address: contractAddress,
-            threshold: Number(threshold),
-            timelockDelay: Number(delay),
-            signers: signers
-        };
-
-        res.json(settings);
-    } catch (err) {
-        console.error("Blockchain Fetch Error:", err);
-        const config = await ConfigService.getConfig();
-        // 🛡️ [SECURITY] ENFORCE STRICT CONTRACT: Never return undefined keys
-        res.json({
-            address: config?.contracts?.multisig || "0x0",
-            threshold: 0,
-            timelockDelay: 0,
-            signers: [],
-            status: "degraded",
-            error: `Authority sync failed: ${err.message}`,
-            network: "BNB Smart Chain Testnet",
-            explorer: `https://testnet.bscscan.com/address/${config?.contracts?.multisig}`
-        });
     }
-});
+);
 
 // GET /api/governance/multisig/transactions
-router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
+router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }), async (req, res) => {
     try {
         // Returns recent multisig transactions associated with proposals
         // Matches the structure expected by the frontend enrichment logic
@@ -213,7 +230,7 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_ONCHAIN
     } catch (err) {
         console.error("[GOVERNANCE_TX_FAIL] Resilient failure fallback:", err.message);
         // 🛡️ [SECURITY] Return safe empty state instead of 500 to keep UI alive
-        res.json({ 
+        res.json({
             transactions: [],
             status: "degraded",
             error: "Telemetry stream interrupted"

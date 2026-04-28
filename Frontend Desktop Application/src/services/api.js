@@ -155,8 +155,15 @@ const api = {
   },
 
   async updateDocument(id, data) {
-    return this.request(`/api/documents/${id}`, {
-      method: 'PUT',
+    return this.request(`/api/documents/${id}/update`, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    });
+  },
+
+  async approveDocument(id, data) {
+    return this.request(`/api/documents/${id}/approve`, {
+      method: 'POST',
       body: JSON.stringify(data)
     });
   },

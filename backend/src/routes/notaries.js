@@ -16,7 +16,7 @@ const { ACTOR_IDS } = require('../constants/protocol');
 // router.use(loadActor) deprecated for zero-trust compliance
 
 // PUBLIC: Check application status
-router.get("/applications/status/:id", allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY' }), async (req, res) => {
+router.get("/applications/status/:id", allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY', allowPublic: true }), async (req, res) => {
   const { id } = req.params;
   
   // 🛡️ [Hardening] Prevent 500 on 'undefined' or non-numeric IDs unless they match reference_id format
@@ -59,7 +59,7 @@ router.get("/applications/status/:id", allowPublic, requirePrivilege({ capabilit
 });
 
 // PUBLIC: Submit initial notary application
-router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_SUBMIT' }), withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
+router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_SUBMIT', allowPublic: true }), withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
 
   try {
@@ -189,7 +189,7 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePr
 });
 
 // PUBLIC: Finalize application with face descriptor & signature
-router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY' }), withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
+router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_VERIFY', allowPublic: true }), withAction('NOTARY_APP_VERIFY'), withMutation(), async (req, res) => {
   const { id } = req.params;
   const { signature, faceDescriptor, walletAddress, nonce } = req.body;
 
@@ -252,6 +252,18 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, requi
 
       if (currentStatus !== 'pending') {
         const err = new Error(`INVALID_TRANSITION: Cannot verify application in '${currentStatus}' state.`);
+        err.statusCode = 409;
+        throw err;
+      }
+
+      // 🛡️ [Hardening] Prevent 500 on duplicate wallet during verification
+      const walletConflict = await auditClient.query(
+        "SELECT id FROM notary_applications WHERE wallet_address = $1 AND id != $2",
+        [normalizedWallet, id]
+      );
+
+      if (walletConflict.rows.length > 0) {
+        const err = new Error('This wallet is already linked to another application.');
         err.statusCode = 409;
         throw err;
       }

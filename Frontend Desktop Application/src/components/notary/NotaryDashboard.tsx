@@ -16,6 +16,7 @@ interface NotaryDashboardProps {
 interface Document {
     id: number;
     filename: string;
+    title?: string;
     status: "pending" | "approved" | "rejected";
     created_at: string;
     file_hash: string;
@@ -63,14 +64,14 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     }, [fetchData]);
 
     const handleAddTokenToWallet = async () => {
-        if (!window.ethereum) {
+        if (!(window as any).ethereum) {
             toast.error("MetaMask not found.");
             return;
         }
         try {
             // NTK Address (Using authoritative config)
             const NTK_ADDRESS = config?.contracts.ntk || "";
-            await window.ethereum.request({
+            await (window as any).ethereum.request({
                 method: 'wallet_watchAsset',
                 params: {
                     type: 'ERC20',
@@ -172,7 +173,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
 
                 {/* Stats Grid - Show only on main dashboard */}
                 {!filterStatus && (
-                    <div className="grid grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                         {stats.map((stat) => {
                             const Icon = stat.icon;
                             // Keeping specific colors for stats as they are semantic status indicators
@@ -185,7 +186,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                             return (
                                 <Card
                                     key={stat.label}
-                                    className="bg-card/50 border-border rounded-xl p-6 hover:shadow-lg hover:shadow-primary/10 transition-all"
+                                    className="bg-card/50 border-border rounded-xl p-6 hover:shadow-lg hover:shadow-primary/10 transition-all flex flex-col justify-between"
                                 >
                                     <div className="flex items-start justify-between mb-4">
                                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${stat.color === 'primary' ? 'bg-primary/10 text-primary border-primary/20' : colorMap[stat.color as keyof typeof colorMap]}`}>
@@ -203,8 +204,10 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                             </Button>
                                         )}
                                     </div>
-                                    <h2 className="text-foreground mb-1">{stat.value}</h2>
-                                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-foreground mb-1">{stat.value}</h2>
+                                        <p className="text-sm text-muted-foreground font-medium">{stat.label}</p>
+                                    </div>
                                 </Card>
                             );
                         })}
@@ -212,17 +215,17 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                 )}
 
                 {/* Requests Table */}
-                <Card className="bg-card/50 border-border rounded-xl p-6">
-                    <h3 className="text-foreground mb-4">
-                        {filterStatus ? "Requests List" : "Recent Requests"}
+                <Card className="bg-card/50 border-border rounded-xl p-6 overflow-hidden">
+                    <h3 className="text-foreground mb-4 font-semibold">
+                        {filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Recent Requests"}
                     </h3>
 
-                    <div className="border border-border rounded-xl overflow-hidden">
+                    <div className="border border-border rounded-xl overflow-x-auto">
                         <Table>
                             <TableHeader>
                                 <TableRow className="border-border hover:bg-transparent">
                                     <TableHead className="text-muted-foreground">Request ID</TableHead>
-                                    <TableHead className="text-muted-foreground">File Type</TableHead>
+                                    <TableHead className="text-muted-foreground">Document Name</TableHead>
                                     <TableHead className="text-muted-foreground">Hash</TableHead>
                                     <TableHead className="text-muted-foreground">Status</TableHead>
                                     <TableHead className="text-muted-foreground">Date</TableHead>
@@ -244,11 +247,13 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                     </TableRow>
                                 ) : displayedRequests.map((request) => (
                                     <TableRow key={request.id} className="border-border hover:bg-muted/50">
-                                        <TableCell className="text-foreground font-mono text-xs">{String(request.id).substring(0, 8)}...</TableCell>
+                                        <TableCell className="text-foreground font-mono text-xs">#{request.id}</TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">
                                                 <FileText size={16} className="text-primary" />
-                                                <span className="text-muted-foreground">Document</span>
+                                                <span className="text-muted-foreground truncate max-w-[200px]" title={request.title || request.filename}>
+                                                    {request.title || request.filename}
+                                                </span>
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-muted-foreground font-mono text-xs">{request.file_hash.substring(0, 16)}...</TableCell>
