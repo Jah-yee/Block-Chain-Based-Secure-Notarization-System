@@ -139,7 +139,7 @@ const ACTION_POLICIES = {
     },
     DOC_INTENT_READ: { description: "Read upload intent", actor: "OWNER", requiresStrong: false, rules: [{ table: 'UPLOAD_INTENTS', op: 'SELECT' }] },
     DOC_LIST: { description: "List documents", actor: "OWNER", requiresStrong: false, rules: [{ table: 'DOCUMENTS', op: 'SELECT' }] },
-    DOC_SIGNATURE_PAYLOAD: { description: "Get signing payload", actor: "NOTARY", requiresStrong: false, rules: [{ table: 'DOCUMENTS', op: 'SELECT' }] },
+    DOC_SIGNATURE_PAYLOAD: { description: "Get signing payload", actor: "NOTARY", requiresStrong: false, rules: [{ table: 'DOCUMENTS', op: 'SELECT' }, { table: 'USERS', op: 'SELECT', optional: true }] },
     DOC_READ: { description: "Read document metadata", actor: "OWNER", requiresStrong: false, rules: [{ table: 'DOCUMENTS', op: 'SELECT' }] },
     DOC_DOWNLOAD: { description: "Download document file", actor: "OWNER", requiresStrong: true, rules: [{ table: 'DOCUMENTS', op: 'SELECT' }] },
 

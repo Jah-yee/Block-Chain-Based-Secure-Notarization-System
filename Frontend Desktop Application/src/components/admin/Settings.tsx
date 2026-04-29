@@ -13,17 +13,17 @@ interface SettingsProps {
 export function Settings({ }: SettingsProps) {
   const { config } = useConfig();
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
       {/* Header */}
-      <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-        <div className="p-6">
+      <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
+        <div>
           <h1 className="text-foreground mb-1 tracking-tight">System Settings</h1>
           <p className="text-sm text-muted-foreground">Configure application preferences and system parameters</p>
         </div>
       </div>
 
       {/* Content */}
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="flex-1 overflow-y-auto p-8 pb-24 custom-scrollbar">
         <Tabs defaultValue="general" className="w-full">
           <TabsList className="bg-muted/50 border border-border/50 p-1.5 rounded-2xl mb-8 flex justify-start w-fit">
             <TabsTrigger value="general" className="rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-widest text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground hover:text-foreground transition-all">

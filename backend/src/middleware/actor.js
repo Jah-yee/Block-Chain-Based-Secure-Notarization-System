@@ -33,7 +33,7 @@ async function loadActor(req, res, next) {
       token = rawToken;
     }
   } else {
-    token = req.cookies?.token;
+    token = req.cookies?.token || req.query?.token;
   }
 
   if (!token) {
@@ -93,7 +93,7 @@ async function restrictDocumentUpdate(req, res, next) {
 
 // Zero-Trust Authority Enforcement Middleware
 function requirePrivilege(mwConfig) {
-  const { minRole, risk, capability } = mwConfig || {};
+  const { minRole, risk, capability, kycEnforced = false } = mwConfig || {};
   const middleware = async function requirePrivilege(req, res, next) {
     // 🛡️ Fetch Authoritative System Config
     const systemConfig = await ConfigService.getConfig();
@@ -130,7 +130,7 @@ function requirePrivilege(mwConfig) {
         token = rawToken;
       }
     } else {
-      token = req.cookies?.token;
+      token = req.cookies?.token || req.query?.token;
     }
 
     if (!token) {
@@ -270,6 +270,13 @@ function requirePrivilege(mwConfig) {
         const identityState = userInternal?.identity_state;
         const isDeactivated = userInternal?.is_deactivated;
         const txStatus = userInternal?.tx_status;
+
+        // 🛡️ [RESILIENCE] Public Bypass: Allow handshakes/status checks even if identity is not ACTIVE.
+        // This prevents boot-loops for users with expired or revoked sessions.
+        if (mwConfig?.allowPublic && !actionConfig.requiresStrong) {
+          req.actor = { id: decoded.id, address, role: normalizeRole(tokenRole), identityState, txStatus, isPublic: true };
+          return next();
+        }
 
         // 🛡️ CRITICAL GUARD: Explicitly Block REJECTED Identities
         if (identityState === 'REJECTED') {

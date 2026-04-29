@@ -131,12 +131,14 @@ function DeploymentChecklist({ config }: { config: SystemConfig }) {
 
 import { useConfig } from "./contexts/ConfigAuthority";
 import { ResilienceBanner } from "./components/shared/ResilienceBanner";
+import { TitleBar } from "./components/shared/TitleBar";
 
 export default function App() {
   const { config, status, mode, error: configError, retry } = useConfig();
   const [appState, setAppState] = useState<AppState>("role-selection");
   const [adminScreen, setAdminScreen] = useState<AdminScreen>("dashboard");
   const [notaryScreen, setNotaryScreen] = useState<NotaryScreen>("dashboard");
+  const [previousNotaryScreen, setPreviousNotaryScreen] = useState<NotaryScreen>("dashboard");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -181,15 +183,31 @@ export default function App() {
     }
   }, [config]);
 
+  // 🛡️ [UX] Ctrl+R / Cmd+R → Silent System Sync
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        console.log("[SYSTEM] Hotkey detected: Initiating silent sync...");
+        retry();
+        recoverSession();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [recoverSession]);
 
 
-  const recoverSession = async () => {
+
+
+  async function recoverSession() {
     console.log("[SESSION] Initializing resilient recovery flow (getSession)...");
     let resolved = false;
 
     try {
       // 🛡️ [RESILIENCE] Decouple UI from Slow Handshake
       // Race the API call against a 4s hard timeout to prevent UI deadlock
+      
       const timeout = new Promise(resolve => 
         setTimeout(() => {
           if (!resolved) {
@@ -387,109 +405,18 @@ export default function App() {
   }
 
   return (
-    <div className="relative">
-      {user && user.zeroTrustStatus === 'UNKNOWN' && (
-          <div style={{
-            background: 'linear-gradient(90deg, #ff4b2b, #ff416c)',
-            color: 'white',
-            padding: '8px 16px',
-            fontSize: '13px',
-            fontWeight: '600',
-            textAlign: 'center',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '12px',
-            boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-            zIndex: 9999,
-          }}>
-            <ShieldAlert size={18} />
-            <span>SECURITY UNCERTAIN: Session integrity verification failed. Manual handshake required.</span>
-            
-            <div style={{ display: 'flex', gap: '8px', marginLeft: '12px' }}>
-                <button 
-                  disabled={isUpgrading}
-                  onClick={async () => {
-                    setIsUpgrading(true);
-                    try {
-                        console.log("[RECOVERY] Manual integrity re-check initiated.");
-                        await (window as any).electronAPI.auth.triggerRecovery();
-                        // 🛡️ [UI_SYNC] Force immediate local state poll
-                        await recoverSession();
-                    } catch (e) {
-                        console.error("[RECOVERY_FAIL]", e);
-                    } finally {
-                        setIsUpgrading(false);
-                    }
-                  }}
-                  style={{
-                    background: isUpgrading ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)',
-                    border: '1px solid rgba(255,255,255,0.4)',
-                    color: 'white',
-                    padding: '2px 12px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: '800',
-                    cursor: isUpgrading ? 'wait' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  {isUpgrading ? <RefreshCw className="animate-spin" size={12} /> : "RETRY NOW"}
-                </button>
-
-                <button 
-                  onClick={() => setLogoutDialogOpen(true)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    color: 'white',
-                    padding: '2px 12px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  LOGOUT
-                </button>
-            </div>
-          </div>
-        )}
-
-      {user && user.zeroTrustStatus === 'DEGRADED' && (
-          <div style={{
-            backgroundColor: 'rgba(245, 158, 11, 0.08)',
-            borderBottom: '1px solid rgba(245, 158, 11, 0.2)',
-            color: '#f59e0b',
-            padding: '4px 16px',
-            fontSize: '11px',
-            fontWeight: '700',
-            textAlign: 'center',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            letterSpacing: '0.02em',
-            zIndex: 9998
-          }}>
-            <WifiOff size={12} />
-            <span className="uppercase">Resilience Active:</span>
-            <span className="opacity-80">Limited blockchain confirmation. System operational in degraded mode.</span>
-            
-            <button 
-              onClick={() => setLogoutDialogOpen(true)}
-              className="ml-4 opacity-50 hover:opacity-100 transition-opacity"
-              style={{ fontSize: '10px', textDecoration: 'underline', border: 'none', background: 'none', cursor: 'pointer', color: 'inherit' }}
-            >
-              LOGOUT
-            </button>
-          </div>
-        )}
-      <ResilienceBanner mode={mode} onRetry={() => {
-        retry();
-        recoverSession();
-      }} />
+    <div className="h-screen w-screen flex flex-col bg-[#07090e] overflow-hidden select-none">
+      <div className="flex-none">
+        <TitleBar 
+          user={user} 
+          onRetry={() => {
+            retry();
+            recoverSession();
+          }}
+        />
+      </div>
+      
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       
       {appState === "initialize-system" && (
         <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
@@ -553,7 +480,7 @@ export default function App() {
       )}
 
       {appState === "admin-app" && (
-        <div className="flex h-screen bg-[#07090e]">
+        <div className="flex-1 flex min-h-0 bg-[#07090e] overflow-hidden relative">
           <Sidebar
             role="admin" user={user} activeScreen={adminScreen}
             onNavigate={(s) => setAdminScreen(s as AdminScreen)}
@@ -562,7 +489,7 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
             {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
             {adminScreen === "manage-notaries" && <ManageNotaries />}
             {adminScreen === "governance" && <Governance role="admin" user={user} />}
@@ -586,7 +513,7 @@ export default function App() {
       )}
 
       {appState === "notary-app" && (
-        <div className="flex h-screen bg-[#07090e]">
+        <div className="h-full flex min-h-0 bg-[#07090e] overflow-hidden relative">
           <Sidebar
             role="notary" user={user} activeScreen={notaryScreen}
             onNavigate={(s) => setNotaryScreen(s as NotaryScreen)}
@@ -595,25 +522,65 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 overflow-auto">
-            {notaryScreen === "dashboard" && <NotaryDashboard onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
-            {notaryScreen === "pending" && <NotaryDashboard filterStatus="pending" onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
-            {notaryScreen === "approved" && <NotaryDashboard filterStatus="approved" onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
-            {notaryScreen === "request-details" && selectedRequestId && <RequestDetails requestId={selectedRequestId} onBack={() => { setNotaryScreen("dashboard"); setSelectedRequestId(null); }} />}
+          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
+            {notaryScreen === "dashboard" && (
+              <NotaryDashboard 
+                onViewRequest={(id) => { 
+                  setPreviousNotaryScreen("dashboard");
+                  setSelectedRequestId(String(id)); 
+                  setNotaryScreen("request-details"); 
+                }} 
+              />
+            )}
+            {notaryScreen === "pending" && (
+              <NotaryDashboard 
+                filterStatus="pending" 
+                onViewRequest={(id) => { 
+                  setPreviousNotaryScreen("pending");
+                  setSelectedRequestId(String(id)); 
+                  setNotaryScreen("request-details"); 
+                }} 
+              />
+            )}
+            {notaryScreen === "approved" && (
+              <NotaryDashboard 
+                filterStatus="approved" 
+                onViewRequest={(id) => { 
+                  setPreviousNotaryScreen("approved");
+                  setSelectedRequestId(String(id)); 
+                  setNotaryScreen("request-details"); 
+                }} 
+              />
+            )}
+            {notaryScreen === "request-details" && selectedRequestId && (
+              <RequestDetails 
+                requestId={selectedRequestId} 
+                onBack={() => { 
+                  setNotaryScreen(previousNotaryScreen); 
+                  setSelectedRequestId(null); 
+                }} 
+              />
+            )}
             {notaryScreen === "governance" && <Governance role="notary" user={user} />}
             {notaryScreen === "profile" && <Profile user={user} />}
           </main>
           <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
             <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
-              <DialogHeader><DialogTitle>Confirm Logout</DialogTitle></DialogHeader>
-              <DialogFooter><Button onClick={handleLogoutConfirm} className="bg-red-500">Logout</Button></DialogFooter>
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-black italic uppercase">TERMINATE SESSION?</DialogTitle>
+                <DialogDescription className="text-slate-400">Security tokens will be purged from the local environment.</DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-2">
+                <Button variant="ghost" onClick={() => setLogoutDialogOpen(false)} className="rounded-xl">Cancel</Button>
+                <Button onClick={handleLogoutConfirm} className="bg-red-500 hover:bg-red-600 rounded-xl font-bold">Log Out</Button>
+              </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
       )}
 
       {appState === "owner-app" && (
-        <div className="flex h-screen bg-[#07090e]">
+        <div className="flex-1 flex min-h-0 bg-[#07090e] overflow-hidden relative">
            <Sidebar
             role="owner" user={user} activeScreen="dashboard"
             onNavigate={() => {}} 
@@ -622,7 +589,7 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 overflow-auto bg-[#07090e] p-8 flex items-center justify-center">
+          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] p-8 overflow-y-auto custom-scrollbar">
              <JourneyErrorBoundary>
                 <JourneyBox />
              </JourneyErrorBoundary>
@@ -630,6 +597,7 @@ export default function App() {
         </div>
       )}
     </div>
-  );
+  </div>
+);
 }
 

@@ -3,34 +3,70 @@
 # Purpose: Resilience - Forcing devDependencies for production building.
 
 $ErrorActionPreference = "Stop" 
-$SourceDir = $PSScriptRoot + "\Frontend Desktop Application"
+$SourceDir = "C:\Users\Lenovo\OneDrive\Desktop\Final_pro\BBSNS\Frontend Desktop Application"
 $TargetDir = "D:\BBSNS_DEPLOY"
 $AppDir = "$TargetDir\Frontend Desktop Application"
 
+if (!(Test-Path $SourceDir)) {
+    Write-Host "  [FAIL] Source directory NOT found on C: drive!" -ForegroundColor Red; exit 1
+}
+
 Write-Host "`n====================================================" -ForegroundColor Magenta
-Write-Host "🚀 BBSNS DESKTOP CONSOLE - ISOLATION BUILD (v1.5)" -ForegroundColor Magenta
+Write-Host "🚀 BBSNS DESKTOP CONSOLE - AUTHORITATIVE BUILD (v1.6)" -ForegroundColor Magenta
 Write-Host "  [*] SOURCE: $SourceDir" -ForegroundColor Gray
 Write-Host "  [*] TARGET: $TargetDir" -ForegroundColor Gray
 Write-Host "====================================================`n" -ForegroundColor Magenta
 
 # [STEP 1] Initialization
 Write-Host "[STEP 1] INITIALIZING CLEAN WORKSPACE..." -ForegroundColor Cyan
-Write-Host "  [*] Terminating locking processes (Safety Protocol)..." -ForegroundColor Gray
-Stop-Process -Name "BBSNS Desktop Console" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
-Write-Host "  [-] Purging stale D:\BBSNS_DEPLOY folder..." -ForegroundColor Gray
+Write-Host "  [*] Identifying locking processes..." -ForegroundColor Gray
+$targets = Get-Process | Where-Object { 
+    $_.Name -like "*BBSNS*" -or 
+    $_.Name -like "electron*" -or 
+    $_.Name -like "node*" -or 
+    $_.Name -like "*Frontend*" -or
+    ($_.Path -ne $null -and $_.Path -like "D:\BBSNS_DEPLOY*")
+}
+if ($targets) {
+    foreach ($t in $targets) {
+        Write-Host "      [KILL] $($t.Name) (PID: $($t.Id))" -ForegroundColor DarkGray
+    }
+    $targets | Stop-Process -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Seconds 5
+
+Write-Host "  [-] Purging stale $TargetDir folder..." -ForegroundColor Gray
 if (Test-Path $TargetDir) {
-    $oldPref = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-    Remove-Item -Recurse -Force $TargetDir -ErrorAction SilentlyContinue
-    $ErrorActionPreference = $oldPref
+    # 🛡️ [RESILIENCE] Multi-attempt purge to overcome OS file locks
+    $attempts = 0
+    $purged = $false
+    while ($attempts -lt 3 -and !$purged) {
+        try {
+            Remove-Item -Recurse -Force $TargetDir -ErrorAction Stop
+            $purged = $true
+        } catch {
+            $attempts++
+            Write-Host "  [WAIT] File lock detected. Retrying purge ($attempts/3)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        }
+    }
+    
+    if (!(Test-Path $TargetDir)) {
+        $purged = $true
+    }
+
+    if (!$purged) {
+        Write-Host "  [FAIL] Could not purge $TargetDir. Manual intervention required." -ForegroundColor Red; exit 1
+    }
 }
 
-# 🛡️ [RESILIENCE] Purge any stale Electron artifacts
+# 🛡️ [RESILIENCE] Purge any stale Electron/Vite artifacts
 $ElectronDist = "$SourceDir\dist-electron"
-if (Test-Path $ElectronDist) {
-    Write-Host "  [-] Purging stale $ElectronDist..." -ForegroundColor Gray
-    Remove-Item -Recurse -Force $ElectronDist -ErrorAction SilentlyContinue
-}
+$ViteBuild = "$SourceDir\build"
+$ViteCache = "$SourceDir\node_modules\.vite"
+if (Test-Path $ElectronDist) { Remove-Item -Recurse -Force $ElectronDist -ErrorAction SilentlyContinue }
+if (Test-Path $ViteBuild) { Remove-Item -Recurse -Force $ViteBuild -ErrorAction SilentlyContinue }
+if (Test-Path $ViteCache) { Remove-Item -Recurse -Force $ViteCache -ErrorAction SilentlyContinue }
 
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 Write-Host "  [OK] Workspace: $AppDir" -ForegroundColor Green
@@ -39,9 +75,16 @@ Write-Host "  [OK] Workspace: $AppDir" -ForegroundColor Green
 Write-Host "`n[STEP 2] MIGRATING SOURCE..." -ForegroundColor Cyan
 $Whitelist = @("src", "public", "assets", "Remote Auth", "package.json", "main.js", "preload.js", "index.html", "vite.config.ts", "tailwind.config.js", "tsconfig.json", "tsconfig.node.json", "tsconfig.app.json", ".env.production")
 foreach ($item in $Whitelist) {
-    if (Test-Path "$SourceDir\$item") { Copy-Item -Path "$SourceDir\$item" -Destination $AppDir -Recurse -Force }
+    if (Test-Path "$SourceDir\$item") { 
+        Copy-Item -Path "$SourceDir\$item" -Destination $AppDir -Recurse -Force -ErrorAction Stop
+    }
 }
-Write-Host "  [OK] Migrated Source." -ForegroundColor Green
+
+# 🛡️ [VERIFY] Ensure the code actually arrived
+if (!(Test-Path "$AppDir\src\App.tsx")) {
+    Write-Host "  [FAIL] Source migration failed. Files did not arrive on D: drive." -ForegroundColor Red; exit 1
+}
+Write-Host "  [OK] Migrated Source verified on D:." -ForegroundColor Green
 
 # [STEP 3] Authoritative Restoration (FORCING DEV TOOLS)
 Write-Host "`n[STEP 3] PERFORMING AUTHORITATIVE RESTORATION (DEV TOOLS)..." -ForegroundColor Cyan
@@ -118,4 +161,18 @@ if (Test-Path $ArtifactPath) {
     Write-Host "  [FAIL] Artifact missing." -ForegroundColor Red; exit 1
 }
 
-Write-Host "`n✅ PROTOCOL COMPLETE." -ForegroundColor Magenta
+# [STEP 8] Instant Validation (AUTO-LAUNCH)
+Write-Host "`n[STEP 8] LAUNCHING UNPACKED CONSOLE..." -ForegroundColor Cyan
+$UnpackedApp = "$AppDir\dist-electron\win-unpacked\BBSNS Desktop Console.exe"
+if (Test-Path $UnpackedApp) {
+    Write-Host "  [*] Booting $UnpackedApp..." -ForegroundColor Gray
+    Start-Process -FilePath $UnpackedApp
+    Write-Host "  [OK] Session active." -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Unpacked executable not found at $UnpackedApp" -ForegroundColor Red
+}
+
+Write-Host "`n====================================================" -ForegroundColor Magenta
+Write-Host "✅ BUILD & DEPLOY COMPLETE" -ForegroundColor Magenta
+Write-Host "  [*] Installer: $ArtifactPath" -ForegroundColor Gray
+Write-Host "====================================================`n" -ForegroundColor Magenta

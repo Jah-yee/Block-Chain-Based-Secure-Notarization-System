@@ -91,46 +91,46 @@ export function SystemLogs() {
   };
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border bg-background sticky top-0 z-50 shadow-md">
-        <div className="p-6 space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+        <div className="space-y-8">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
-              <h1 className="text-2xl font-bold text-foreground mb-1">System Audit Logs</h1>
-              <p className="text-sm text-muted-foreground">Comprehensive record of all network activities</p>
+              <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">SYSTEM AUDIT</h1>
+              <p className="text-sm text-slate-400 font-medium italic">Comprehensive record of all network activities</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading} className="border-border text-muted-foreground hover:text-foreground rounded-xl h-9">
+            <div className="flex gap-3">
+              <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading} className="border-white/10 text-slate-400 hover:text-white rounded-xl h-11 px-4 bg-white/5">
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               </Button>
-              <Button onClick={handleExport} size="sm" className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl h-9">
+              <Button onClick={handleExport} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-xl h-11 px-6 shadow-lg shadow-emerald-500/10">
                 <Download className="mr-2" size={16} />
-                Export CSV
+                EXPORT AUDIT
               </Button>
             </div>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col md:flex-row gap-6">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
               <Input
                 placeholder="Search actor, details, or tx hash..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 bg-card border-border text-foreground rounded-xl h-10 w-full"
+                className="pl-12 bg-[#0d1425] border-white/10 text-white rounded-xl h-12 w-full focus:border-emerald-500/50"
               />
             </div>
-            <div className="flex bg-muted/30 p-1 rounded-xl border border-border overflow-x-auto">
+            <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
               {["all", "MINT", "BURN", "MULTISIG"].map((type) => (
                 <Button
                   key={type}
                   size="sm"
                   variant={filterType === type ? "default" : "ghost"}
                   onClick={() => setFilterType(type)}
-                  className={`rounded-lg capitalize whitespace-nowrap px-4 py-1 h-8 ${filterType === type ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted/50"}`}
+                  className={`rounded-lg capitalize whitespace-nowrap px-6 py-2 h-10 text-[11px] font-black tracking-widest ${filterType === type ? "bg-white text-black shadow-lg" : "text-slate-400 hover:bg-white/10"}`}
                 >
-                  {type === 'all' ? 'All Logs' : type}
+                  {type === 'all' ? 'ALL LOGS' : type}
                 </Button>
               ))}
             </div>
@@ -139,7 +139,8 @@ export function SystemLogs() {
       </div>
 
       {/* Logs Table */}
-      <div className="p-6">
+      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+        <div className="p-8 pb-32">
         {isLoading && logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 bg-card border border-border rounded-3xl">
             <Loader2 className="h-10 w-10 animate-spin text-primary/40 mb-4" />
@@ -153,7 +154,7 @@ export function SystemLogs() {
         ) : (
           <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
             <Table>
-              <TableHeader className="static">
+              <TableHeader className="sticky top-0 z-10 bg-[#0a0d14] shadow-sm">
                 <TableRow className="border-border hover:bg-transparent bg-muted/10">
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[160px] pl-6">Timestamp</TableHead>
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[180px]">Actor</TableHead>
@@ -209,6 +210,7 @@ export function SystemLogs() {
           </div>
         )}
       </div>
+    </div>
 
       {/* Details Modal */}
       <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>

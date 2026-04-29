@@ -142,10 +142,7 @@ async function assignNotary(documentId) {
     const updateRes = await pool.query(
       `UPDATE documents 
        SET notary_id = $1, 
-           submission_state = 'assigned', 
-           assignment_state = 'assigned',
-           assignment_retry_count = 0,
-           last_assignment_error = NULL,
+           submission_state = 'pending', 
            updated_at = NOW()
        WHERE id = $2 AND notary_id IS NULL
        RETURNING id`,

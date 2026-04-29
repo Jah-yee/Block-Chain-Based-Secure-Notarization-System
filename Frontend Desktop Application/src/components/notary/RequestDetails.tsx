@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ZoomIn, ZoomOut, FileText, Image as ImageIcon, User, Wallet, Hash, CheckCircle, XCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { ZoomIn, ZoomOut, FileText, Image as ImageIcon, User, Wallet, Hash, CheckCircle, XCircle, ArrowLeft, Loader2, ExternalLink } from "lucide-react";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
@@ -13,7 +13,7 @@ interface RequestDetailsProps {
 }
 
 export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
-    const [zoom, setZoom] = useState(100);
+    const [zoom, setZoom] = useState(50);
     const [transcription, setTranscription] = useState("");
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -41,7 +41,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
             setRequest(doc);
 
             // Fetch the actual file securely
-            const blob = await api.getDocumentFile(requestId);
+            const blob = await api.getDocumentFile(requestId, doc.mimetype);
             const url = URL.createObjectURL(blob);
             setFileUrl(url);
 
@@ -62,8 +62,8 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
 
     const confirmAction = async () => {
         if (!confirmDialog.action) return;
-
-        // Validate required fields
+        const status = confirmDialog.action === "approve" ? "approved" : "rejected";
+        
         if (confirmDialog.action === "approve" && !documentSummary.trim()) {
             toast.error("Please provide a document summary");
             return;
@@ -74,21 +74,29 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
         }
 
         setSubmitting(true);
+
+        // 🛡️ [DESKTOP_REMOTE_SIGNING] Handle Electron environment without window.ethereum
+        if (typeof window !== 'undefined' && (window as any).electronAPI) {
+            console.log("[DEBUG] Desktop environment detected. Initiating Remote Signing Flow...");
+            await initiateRemoteSigning(status);
+            return;
+        }
+
         try {
-            // 🔐 EIP-712 SIGNATURE REQUIRED
-            if (!window.ethereum) {
+            // 🔐 EIP-712 SIGNATURE REQUIRED (Browser Flow)
+            if (!(window as any).ethereum) {
                 throw new Error("MetaMask is required to sign this action.");
             }
 
             const { ethers } = await import("ethers");
-            const provider = new ethers.BrowserProvider(window.ethereum);
+            const provider = new ethers.BrowserProvider((window as any).ethereum);
             const signer = await provider.getSigner();
 
             // Ensure correct network (BNB Testnet)
             const network = await provider.getNetwork();
             if (network.chainId !== 97n) {
                 try {
-                    await window.ethereum.request({
+                    await (window as any).ethereum.request({
                         method: 'wallet_switchEthereumChain',
                         params: [{ chainId: '0x61' }], // 97
                     });
@@ -143,6 +151,77 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
         }
     };
 
+    const initiateRemoteSigning = async (status: string) => {
+        let pollInterval: any = null;
+        try {
+            // 1. Fetch Payload
+            const payloadData = await api.getSignaturePayload(
+                requestId, 
+                status, 
+                documentSummary, 
+                rejectionReason
+            );
+
+            // 2. Initiate Remote Session
+            const deviceId = await (window as any).electronAPI.api.getDeviceId();
+            const session = await api.createRemoteNotarizeSession({
+                device_id: deviceId,
+                document_id: requestId,
+                payload: payloadData
+            });
+
+            // 3. Open Remote Auth Portal (Internal Window)
+            const remoteUrl = `https://auth.bbsns.online/?mode=notarize&sessionId=${session.sessionId}`;
+            await (window as any).electronAPI.auth.openRemote(remoteUrl);
+
+            toast.info("Remote Signing Initiated. Please approve the request in your browser.");
+
+            // 4. Poll for status
+            pollInterval = setInterval(async () => {
+                try {
+                    const statusRes = await api.getRemoteSessionStatus(session.sessionId, deviceId, session.sessionSecret);
+                    
+                    if (statusRes.status === 'authorized' && statusRes.signature) {
+                        clearInterval(pollInterval);
+                        
+                        // 5. Complete approval with captured signature
+                        const finalPayload: any = {
+                            status,
+                            signature: statusRes.signature,
+                            timestamp: payloadData.message.timestamp.toString()
+                        };
+
+                        if (status === "approved") {
+                            finalPayload.document_summary = documentSummary;
+                            finalPayload.notary_notes = documentSummary;
+                        } else {
+                            finalPayload.rejection_reason = rejectionReason;
+                        }
+
+                        await api.approveDocument(requestId, finalPayload);
+                        toast.success(`Request ${status} successfully (via Remote Auth).`);
+                        setConfirmDialog({ open: false, action: null });
+                        setDocumentSummary("");
+                        setRejectionReason("");
+                        onBack();
+                    } else if (statusRes.status === 'failed' || statusRes.status === 'expired') {
+                        clearInterval(pollInterval);
+                        toast.error(`Remote signing ${statusRes.status}.`);
+                        setSubmitting(false);
+                    }
+                } catch (err) {
+                    console.error("Polling error:", err);
+                }
+            }, 3000);
+
+        } catch (err: any) {
+            console.error("[REMOTE_SIGN_ERROR]", err);
+            toast.error(err.message || "Failed to initiate remote signing.");
+            setSubmitting(false);
+            if (pollInterval) clearInterval(pollInterval);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex-1 bg-background flex items-center justify-center">
@@ -158,10 +237,10 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     const fileType = isImage ? "Image" : "PDF";
 
     return (
-        <div className="flex-1 bg-background flex flex-col">
+        <div className="h-full flex flex-col min-h-0 bg-[#07090e]">
             {/* Header */}
-            <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-                <div className="flex items-center justify-between p-6">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
+                <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
                             <Button
@@ -178,7 +257,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             </h1>
                         </div>
                         <p className="text-sm text-muted-foreground">Document ID: #{request.id} • Review and process notarization request</p>
-                        <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-500/20 dark:text-yellow-500 dark:border-yellow-500/30">
+                        <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-500/20 dark:text-yellow-400 dark:border-yellow-500/30">
                             {request.status}
                         </Badge>
                     </div>
@@ -213,7 +292,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => setZoom(Math.min(200, zoom + 10))}
+                                    onClick={() => setZoom(Math.min(100, zoom + 10))}
                                     className="text-muted-foreground hover:text-foreground"
                                 >
                                     <ZoomIn size={16} />
@@ -222,38 +301,61 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-auto bg-muted/30 p-8 flex items-center justify-center">
+                    <div className="flex-1 overflow-auto bg-muted/30 p-8 custom-scrollbar relative" onContextMenu={(e) => e.preventDefault()}>
                         {fileType === "Image" ? (
-                            <div className="relative" onContextMenu={(e) => e.preventDefault()}>
-                                <div
-                                    className="bg-background rounded-lg shadow-2xl overflow-hidden transition-transform duration-200"
-                                    style={{ transform: `scale(${zoom / 100})`, transformOrigin: "center" }}
-                                >
-                                    {/* Real Image or Placeholder */}
-                                    {fileUrl ? (
-                                        <img
-                                            src={fileUrl}
-                                            alt="Document"
-                                            className="max-w-[800px] object-contain pointer-events-none select-none"
-                                            onError={(e) => {
-                                                (e.target as HTMLImageElement).src = "https://placehold.co/600x800/1a1a1a/FFF?text=Image+Load+Error";
-                                            }}
-                                        />
-                                    ) : (
-                                        <div className="w-[600px] h-[800px] bg-muted flex items-center justify-center text-muted-foreground">
-                                            Loading Image...
-                                        </div>
-                                    )}
+                            <div className="min-h-full flex items-center justify-center">
+                                <div className="relative">
+                                    <div
+                                        className="bg-background rounded-lg shadow-2xl overflow-hidden transition-all duration-200 mx-auto"
+                                        style={{ width: `${(zoom / 100) * 1200}px` }}
+                                    >
+                                        {/* Real Image or Placeholder */}
+                                        {fileUrl ? (
+                                            <img
+                                                src={fileUrl}
+                                                alt="Document"
+                                                className="w-full h-auto object-contain pointer-events-none select-none"
+                                                onError={(e) => {
+                                                    (e.target as HTMLImageElement).src = "https://placehold.co/600x800/1a1a1a/FFF?text=Image+Load+Error";
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="w-[600px] h-[800px] bg-muted flex items-center justify-center text-muted-foreground">
+                                                Loading Image...
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ) : (
                             <div className="w-full h-full bg-card rounded-lg shadow-2xl overflow-hidden">
                                 {fileUrl ? (
-                                    <iframe
-                                        src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
-                                        className="w-full h-full min-h-[800px] border-none"
-                                        title="Document PDF Viewer"
-                                    />
+                                    <div className="w-full h-full flex flex-col">
+                                        <iframe
+                                            src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                                            className="flex-1 w-full border-none"
+                                            title="Document PDF Viewer"
+                                        />
+                                        <div className="flex-none p-4 bg-muted/50 border-t border-border flex justify-center">
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm"
+                                                onClick={async () => {
+                                                    const baseUrl = (window as any).electronAPI?.api?.baseUrl || "https://api.bbsns.online";
+                                                    // Fetch authoritative session to get raw JWT token
+                                                    const session = await (window as any).electronAPI?.auth?.getSession();
+                                                    const token = session?.token;
+                                                    
+                                                    const url = `${baseUrl}/api/documents/${requestId}/file?disposition=inline${token ? `&token=${token}` : ''}`;
+                                                    await (window as any).electronAPI?.api?.openExternal(url);
+                                                    toast.info("Opening document in system browser.");
+                                                }}
+                                            >
+                                                <ExternalLink size={14} className="mr-2" />
+                                                View in Browser
+                                            </Button>
+                                        </div>
+                                    </div>
                                 ) : (
                                     <div className="flex items-center justify-center h-[600px] text-muted-foreground">
                                         <Loader2 className="h-8 w-8 animate-spin mr-2" />
@@ -266,8 +368,8 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 </div>
 
                 {/* Right Panel - Information & Actions */}
-                <div className="w-96 bg-card flex flex-col overflow-auto border-l border-border">
-                    <div className="p-6 space-y-6">
+                <div className="w-96 bg-card flex flex-col max-h-full overflow-y-auto border-l border-border custom-scrollbar">
+                    <div className="p-6 space-y-6 pb-24">
                         {/* Client Information */}
                         <div>
                             <h3 className="text-foreground mb-4 flex items-center gap-2">

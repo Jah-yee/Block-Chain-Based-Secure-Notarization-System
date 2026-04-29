@@ -1,4 +1,8 @@
-const express = require('express');
+const express = require("express");
+const { sendApprovalTx } = require('../utils/blockchain');
+const DocumentStatusService = require('../services/document-status.service');
+const reputationService = require('../services/reputation.service');
+
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const pool = require('../db/index');
@@ -1073,6 +1077,35 @@ router.post('/remote/session', withGuestContext, requirePrivilege({ capability: 
   }
 });
 
+/**
+ * 🛡️ [Hardening 12.1] Remote Notarization Session Initiation
+ * Purpose: Allows desktop app to initiate a signing session for a specific document.
+ */
+// POST /auth/remote/session/notarize - Notarization session creation
+router.post('/remote/session/notarize', withGuestContext, requirePrivilege({ capability: 'AUTH_REMOTE_SESSION', allowPublic: true }), async (req, res) => {
+  try {
+    const { device_id, document_id, payload } = req.body;
+    if (!device_id || !document_id || !payload) {
+      return res.status(400).json({ error: 'device_id, document_id, and payload are required' });
+    }
+
+    // The challenge is the JSON payload itself
+    const challenge = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    const session_secret = crypto.randomUUID();
+    const expires_at = new Date(Date.now() + 15 * 60 * 1000); // 15 mins for doc review
+
+    const result = await pool.query(
+      'INSERT INTO remote_auth_sessions (challenge, device_id, session_secret, expires_at, document_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [challenge, device_id, session_secret, expires_at, document_id]
+    );
+
+    res.json({ sessionId: result.rows[0].id, sessionSecret: session_secret });
+  } catch (error) {
+    console.error('[AUTH] Remote notarization session failed:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /auth/remote/status/:sessionId - Retrieval for desktop app
 router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ capability: 'REMOTE_STATUS_CONSUMPTION', allowPublic: true }), async (req, res) => {
   const { sessionId } = req.params;
@@ -1114,7 +1147,13 @@ router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ cap
 
       // --- [SCOPE A: PUBLIC READ] ---
       if (session.status === 'pending' || session.status === 'authorized') {
-          const response = { status: session.status, challenge: session.challenge };
+          const response = { 
+            status: session.status, 
+            challenge: session.challenge,
+            signature: session.signature, // Return signature if authorized
+            walletAddress: session.wallet_address,
+            documentId: session.document_id
+          };
           
           // 🛡️ [Hardening 11.1] Inject Dynamic EIP-712 Domain Authority
           if (process.env.ENABLE_ATOMIC_AUTH === 'true') {
@@ -1122,7 +1161,7 @@ router.get('/remote/status/:sessionId', withGuestContext, requirePrivilege({ cap
                   const config = await ConfigService.getConfig();
                   response.handshakeDomain = {
                       name: 'BBSNS_Protocol',
-                      version: '2',
+                      version: '1',
                       chainId: config.chainId,
                       verifyingContract: config.contracts.documentRegistry
                   };
@@ -1356,30 +1395,54 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
 
             // 2. [CRYPTO] Recover EIP-712 Wallet Identity
             let recoveredAddress;
-            try {
-                const config = await ConfigService.getConfig();
-                const domain = {
-                    name: 'BBSNS_Protocol',
-                    version: '2',
-                    chainId: config.chainId,
-                    verifyingContract: config.contracts.documentRegistry
-                };
-                const types = {
-                    Handshake: [
-                        { name: 'action', type: 'string' },
-                        { name: 'sessionId', type: 'string' },
-                        { name: 'challenge', type: 'string' },
-                        { name: 'timestamp', type: 'uint256' }
-                    ]
-                };
-                const message = {
-                    action: 'Remote Login Authorization',
-                    sessionId: sessionId,
-                    challenge: session.challenge,
-                    timestamp: Number(timestamp)
-                };
+            const config = await ConfigService.getConfig();
+            const domain = {
+                name: 'BBSNS_Protocol',
+                version: '1',
+                chainId: config.chainId,
+                verifyingContract: config.contracts.documentRegistry
+            };
 
-                recoveredAddress = ethers.verifyTypedData(domain, types, message, signature);
+            try {
+                if (session.document_id) {
+                    // 🛡️ [Step C] Notarize-Mode Recovery
+                    const payload = JSON.parse(session.challenge);
+                    const types = {
+                        Notarize: [
+                            { name: 'docHash', type: 'bytes32' },
+                            { name: 'ownerAddress', type: 'address' },
+                            { name: 'status', type: 'uint8' },
+                            { name: 'summaryHash', type: 'bytes32' },
+                            { name: 'rejectionReasonHash', type: 'bytes32' },
+                            { name: 'timestamp', type: 'uint256' },
+                            { name: 'nonce', type: 'uint256' }
+                        ]
+                    };
+                    const message = {
+                        ...payload,
+                        status: Number(payload.status),
+                        timestamp: Number(payload.timestamp),
+                        nonce: payload.nonce.toString()
+                    };
+                    recoveredAddress = ethers.verifyTypedData(domain, types, message, signature);
+                } else {
+                    // Standard Handshake Recovery
+                    const types = {
+                        Handshake: [
+                            { name: 'action', type: 'string' },
+                            { name: 'sessionId', type: 'string' },
+                            { name: 'challenge', type: 'string' },
+                            { name: 'timestamp', type: 'uint256' }
+                        ]
+                    };
+                    const message = {
+                        action: 'Remote Login Authorization',
+                        sessionId: sessionId,
+                        challenge: session.challenge,
+                        timestamp: Number(timestamp)
+                    };
+                    recoveredAddress = ethers.verifyTypedData(domain, types, message, signature);
+                }
             } catch (e) {
                 await auditClient.query('ROLLBACK');
                 return { error: 'Cryptographic identity verification failed', status: 401 };
@@ -1408,16 +1471,60 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
             const oneTimeCode = crypto.randomBytes(32).toString('hex');
             const codeExpiry = new Date(Date.now() + 60 * 1000);
 
+            // 🛡️ [Step C] Relay Transaction if Notarization
+            let txHash = null;
+            let targetStatus = 'completed';
+
+            if (session.document_id) {
+                console.log(`[AUTH_RELAY] Relaying notarization for doc: ${session.document_id}`);
+                const payload = JSON.parse(session.challenge);
+                targetStatus = 'authorized'; // Maintain 'authorized' so Desktop App polling picks it up
+                
+                try {
+                    const txResult = await sendApprovalTx(
+                        payload.docHash,
+                        payload.ownerAddress,
+                        payload.status === 1 ? 'approved' : 'rejected',
+                        signature,
+                        payload.timestamp,
+                        payload.summaryHash,
+                        payload.rejectionReasonHash,
+                        recoveredAddress
+                    );
+                    txHash = txResult.txHash;
+
+                    // Update Document Status in DB
+                    const dbStatus = payload.status === 1 ? 'submitted_to_blockchain' : 'rejected';
+                    await DocumentStatusService.updateStatus(
+                        auditClient,
+                        session.document_id,
+                        'pending',
+                        0, // Opportunistic revision
+                        dbStatus,
+                        { tx_hash: txHash, tx_status: "'pending'" }
+                    );
+
+                    // Fire Reputation
+                    await reputationService.handleEvent(userId, payload.status === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(() => {});
+
+                } catch (relayErr) {
+                    console.error("[AUTH_RELAY_FAIL]", relayErr);
+                    await auditClient.query('ROLLBACK');
+                    return { error: `Blockchain Relay Failed: ${relayErr.message}`, status: 502 };
+                }
+            }
+
             await auditClient.query(
                 `UPDATE remote_auth_sessions 
-                 SET status = 'completed', 
-                     user_id = $1, 
-                     wallet_address = $2, 
-                     one_time_code = $3, 
-                     code_expires_at = $4,
+                 SET status = $1, 
+                     user_id = $2, 
+                     wallet_address = $3, 
+                     one_time_code = $4, 
+                     code_expires_at = $5,
+                     signature = $6,
                      authorized_at = NOW() 
-                 WHERE id = $5`,
-                [userId, walletAddress.toLowerCase(), oneTimeCode, codeExpiry, sessionId]
+                 WHERE id = $7`,
+                [targetStatus, userId, walletAddress.toLowerCase(), oneTimeCode, codeExpiry, txHash || signature, sessionId]
             );
 
             await auditClient.query('COMMIT');
@@ -1471,8 +1578,8 @@ router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), 
     const codeExpiry = new Date(Date.now() + 60 * 1000); // 60s TTL
 
     await pool.query(
-      "UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, one_time_code = $2, code_expires_at = $3, authorized_at = NOW() WHERE id = $4", 
-      [normalizedWalletAddress, oneTimeCode, codeExpiry, sessionId]
+      "UPDATE remote_auth_sessions SET status = 'authorized', wallet_address = $1, signature = $2, one_time_code = $3, code_expires_at = $4, authorized_at = NOW() WHERE id = $5", 
+      [normalizedWalletAddress, signature, oneTimeCode, codeExpiry, sessionId]
     );
 
     res.json({ message: 'Authorized successfully. Returning to app...' });

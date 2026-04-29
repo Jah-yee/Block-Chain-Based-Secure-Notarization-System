@@ -1,6 +1,8 @@
 {
       "name": "bbsns-desktop-application",
       "version": "27.8.20",
+      "description": "Blockchain Based Secure Notarization System - Desktop Authority Console",
+      "author": "BBSNS Engineering Team",
       "private": true,
       "dependencies": {
             "@radix-ui/react-accordion": "^1.2.3",

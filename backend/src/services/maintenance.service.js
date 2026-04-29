@@ -49,16 +49,13 @@ class MaintenanceService {
             // 3. AND haven't exceeded technical budget (5 retries)
             // 4. AND haven't been tried in the last 30 seconds
             const query = `
-                SELECT id, assignment_retry_count, assignment_state
+                SELECT id, retry_count as assignment_retry_count
                 FROM documents 
                 WHERE is_deleted = false
                   AND submission_state = 'pending'
-                  AND (
-                      assignment_state IN ('pending', 'waiting_for_notary', 'processing')
-                      OR (assignment_state = 'failed' AND last_assignment_attempt_at < NOW() - INTERVAL '10 minutes')
-                  )
-                  AND assignment_retry_count < 5
-                  AND (last_assignment_attempt_at IS NULL OR last_assignment_attempt_at < NOW() - INTERVAL '30 seconds')
+                  AND notary_id IS NULL
+                  AND retry_count < 5
+                  AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '30 seconds')
                 LIMIT 5
             `;
             const r = await pool.query(query);
@@ -72,9 +69,9 @@ class MaintenanceService {
                 WorkerRegistry.heartbeat('reconciliation', 'OK');
                 for (const doc of r.rows) {
                     try {
-                        // Update to 'processing' to prevent race conditions during async execution
+                        // Update updated_at to prevent race conditions during async execution
                         await pool.query(
-                            "UPDATE documents SET assignment_state = 'processing', last_assignment_attempt_at = NOW() WHERE id = $1",
+                            "UPDATE documents SET updated_at = NOW() WHERE id = $1",
                             [doc.id]
                         );
 
@@ -88,8 +85,8 @@ class MaintenanceService {
                             if (result.error_type === 'NO_ELIGIBLE_NOTARIES') {
                                 // Business State: Do NOT increment retry count
                                 await pool.query(
-                                    "UPDATE documents SET assignment_state = 'waiting_for_notary', last_assignment_error = $1 WHERE id = $2",
-                                    [result.message, doc.id]
+                                    "UPDATE documents SET updated_at = NOW() WHERE id = $1",
+                                    [doc.id]
                                 );
                                 console.warn(`[MAINTENANCE] WAITING: Doc ${doc.id} - ${result.message}`);
                             } else {
@@ -99,11 +96,10 @@ class MaintenanceService {
                                 
                                 await pool.query(
                                     `UPDATE documents 
-                                     SET assignment_retry_count = $1, 
-                                         assignment_state = $2, 
-                                         last_assignment_error = $3 
-                                     WHERE id = $4`,
-                                    [newRetryCount, newState, result.message, doc.id]
+                                     SET retry_count = $1, 
+                                         updated_at = NOW() 
+                                     WHERE id = $2`,
+                                    [newRetryCount, doc.id]
                                 );
                                 console.error(`[MAINTENANCE] FAIL: Doc ${doc.id} - ${result.message} (Retry ${newRetryCount}/5)`);
                             }

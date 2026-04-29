@@ -25,17 +25,17 @@ export function Profile({ user }: ProfileProps) {
   };
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
       {/* Header */}
-      <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-        <div className="p-6">
+      <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
+        <div>
           <h1 className="text-foreground mb-1">My Profile</h1>
           <p className="text-sm text-muted-foreground">View and manage your {profileData.role} profile information</p>
         </div>
       </div>
 
       {/* Content */}
-      <div className="p-6 max-w-4xl mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto p-8 pb-24 custom-scrollbar">
         {/* Profile Header */}
         <Card className="bg-card/50 border-border rounded-xl p-8">
           <div className="flex items-start gap-6">

@@ -66,17 +66,17 @@ export function UserDashboard() {
     }
 
     return (
-        <div className="flex-1 bg-background flex flex-col">
+        <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
             {/* Header */}
-            <div className="border-b border-border bg-card/50">
-                <div className="p-6">
+            <div className="flex-none border-b border-border bg-card/50 p-8 pt-12 pb-6">
+                <div>
                     <h1 className="text-2xl font-bold text-foreground mb-2">My Documents</h1>
                     <p className="text-muted-foreground">View and manage your uploaded documents</p>
                 </div>
             </div>
 
             {/* Documents Table */}
-            <div className="flex-1 overflow-auto p-6">
+            <div className="flex-1 overflow-y-auto p-8 pb-24 custom-scrollbar">
                 {documents.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                         <FileText size={48} className="mb-4 opacity-50" />

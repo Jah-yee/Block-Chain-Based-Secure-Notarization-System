@@ -135,13 +135,34 @@ const api = {
     return this.request(`/api/documents/${id}`);
   },
 
-  async getDocumentFile(id) {
+  async getDocumentFile(id, mimetype = 'application/pdf') {
     await ensureConfig();
     const endpoint = `/api/documents/${id}/file`;
-
+    
     // 🛡️ [SECURITY] Route through bridge if available (Mandatory Authority)
     if (typeof window !== 'undefined' && window.electronAPI?.api?.call) {
-        return await window.electronAPI.api.call(endpoint, 'GET');
+        const response = await window.electronAPI.api.call(endpoint, 'GET');
+        
+        // Extract the actual data payload from the bridge wrapper { success, data }
+        const data = response.data;
+
+        // [DIAGNOSTIC] Inspect bridge return type
+        if (data && typeof data === 'object' && !(data instanceof Uint8Array) && !(data instanceof ArrayBuffer)) {
+            console.log(`[API] Bridge returned Object instead of Binary. Keys: ${Object.keys(data).join(', ')}`);
+            
+            // Handle Node.js Buffer serialization format { type: 'Buffer', data: [...] }
+            if (data.type === 'Buffer' && Array.isArray(data.data)) {
+                console.log(`[API] Detected Node.js Buffer serialization. Re-assembling...`);
+                const blob = new Blob([new Uint8Array(data.data)], { type: mimetype });
+                console.log(`[API] File Blob re-assembled: ${blob.size} bytes`);
+                return blob;
+            }
+        }
+
+        // Bridge returns raw data, convert to Blob for URL.createObjectURL compatibility
+        const blob = new Blob([data], { type: mimetype });
+        console.log(`[API] File Blob generated: ${blob.size} bytes | Type: ${blob.type}`);
+        return blob;
     }
 
     const token = localStorage.getItem('bbsns_token');
@@ -270,6 +291,22 @@ const api = {
     return this.request('/api/system/logs');
   },
   
+  async createRemoteNotarizeSession(data) {
+    return this.request('/api/auth/remote/session/notarize', {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+  },
+
+  async getRemoteSessionStatus(sessionId, deviceId, sessionSecret) {
+    return this.request(`/api/auth/remote/status/${sessionId}`, {
+        headers: {
+            'x-device-id': deviceId,
+            'x-session-secret': sessionSecret
+        }
+    });
+  },
+
   async getSignaturePayload(id, status, summary = "", reason = "") {
     let url = `/api/documents/${id}/signature-payload?status=${status}`;
     if (summary) url += `&summary=${encodeURIComponent(summary)}`;

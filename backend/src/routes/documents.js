@@ -22,6 +22,7 @@ const reputationService = require('../services/reputation.service');
 const storageService = require('../services/storage.service');
 const ConfigService = require('../services/config.service');
 const DocumentStatusService = require('../services/document-status.service');
+const maintenanceService = require('../services/maintenance.service');
 
 // Configure Multer for secure memory-safe uploads
 const memoryUpload = multer({
@@ -40,15 +41,12 @@ function sanitizeDocument(doc, actor) {
   delete sanitized.notary_id;
 
   // 🛡️ [PII_PROTECTION] Hide owner details from non-assigned Notaries (Phase 9 Hardening)
-  if (actor && Number(actor.role) === ROLES.NOTARY && doc.notary_id && Number(doc.notary_id) !== Number(actor.id)) {
-    delete sanitized.owner_name;
-    delete sanitized.owner_email;
-    delete sanitized.owner_wallet;
-  } else if (actor && Number(actor.role) === ROLES.NOTARY && !doc.notary_id) {
-    // Also hide if document is completely unassigned
-    delete sanitized.owner_name;
-    delete sanitized.owner_email;
-    delete sanitized.owner_wallet;
+  if (actor && Number(actor.role) === ROLES.NOTARY) {
+    if (doc.notary_id && Number(doc.notary_id) !== Number(actor.id)) {
+      delete sanitized.owner_name;
+      delete sanitized.owner_email;
+      delete sanitized.owner_wallet;
+    }
   }
 
   return sanitized;
@@ -370,9 +368,9 @@ router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ 
     // 2. DOC_CREATED
     const docRes = await client.query(
       `INSERT INTO documents
-         (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, created_at, updated_at, is_deleted)
-       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,NOW(),NOW(),false) RETURNING *`,
-      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, intent.storage_key.startsWith('intents/') ? 'STORED' : 'STORED']
+         (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, mimetype, created_at, updated_at, is_deleted)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8,NOW(),NOW(),false) RETURNING *`,
+      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, intent.storage_key.startsWith('intents/') ? 'STORED' : 'STORED', intent.mimetype]
     );
     const newDoc = docRes.rows[0];
     await client.query("UPDATE upload_intents SET status='DOC_CREATED' WHERE id=$1", [intent_id]);
@@ -443,8 +441,6 @@ router.get('/intent/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DO
     });
   } catch (err) { res.status(500).json({ error: 'Failed to fetch intent' }); }
 });
-
-const maintenanceService = require('../services/maintenance.service');
 
 router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' }), withAction('DOC_LIST'), async (req, res) => {
   try {
@@ -520,7 +516,8 @@ router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ capa
     const notaryId = Number(req.actor.id);
     const notaryWallet = req.actor.address;
 
-    if (Number(doc.notary_id) !== notaryId && Number(req.actor.role) !== ROLES.ADMIN) {
+    // 🛡️ [DEADLOCK_RECOVERY] Allow if assigned to THIS notary OR if document is unassigned (and requester is notary/admin)
+    if (doc.notary_id && Number(doc.notary_id) !== notaryId && Number(req.actor.role) !== ROLES.ADMIN) {
       return res.status(403).json({ error: 'Not authorized for this document' });
     }
 
@@ -637,11 +634,12 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
     // Authorization Matrix:
     // 1. Admins see everything
     // 2. Owners see their own documents
-    // 3. Notaries see ONLY documents assigned to them (Phase 9: no global queue)
+    // 3. Notaries see documents assigned to them OR unassigned documents (Fallback Queue)
     const isOwner = userId === docUserId;
     const isAssignedNotary = docNotaryId !== null && userId === docNotaryId;
+    const isUnassignedNotary = role === ROLES.NOTARY && docNotaryId === null;
 
-    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary) {
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     res.json(sanitizeDocument(doc, req.actor));
@@ -661,10 +659,14 @@ router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ capability: 'D
     if (docQuery.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
     const doc = docQuery.rows[0];
 
-    // Authorization (Same logic as /file)
+    // Authorization (Same logic as /:id)
     const role = Number(req.actor.role);
     const userId = Number(req.actor.id);
-    if (role !== ROLES.ADMIN && Number(doc.user_id) !== userId && Number(doc.notary_id) !== userId) {
+    const isOwner = Number(doc.user_id) === userId;
+    const isAssignedNotary = Number(doc.notary_id) === userId;
+    const isUnassignedNotary = role === ROLES.NOTARY && !doc.notary_id;
+
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -695,7 +697,11 @@ router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_
 
     const role = Number(req.actor.role);
     const userId = Number(req.actor.id);
-    if (role !== ROLES.ADMIN && Number(doc.user_id) !== userId && Number(doc.notary_id) !== userId) {
+    const isOwner = Number(doc.user_id) === userId;
+    const isAssignedNotary = Number(doc.notary_id) === userId;
+    const isUnassignedNotary = role === ROLES.NOTARY && !doc.notary_id;
+
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -704,7 +710,7 @@ router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_
     // Hardened Phase 2: Secure Redirect Boundary
     const signedUrl = await storageService.getSignedDownloadUrl(doc.storage_key, {
       expiresIn: 120,
-      disposition: 'attachment',
+      disposition: req.query.disposition || 'attachment',
       filename: doc.filename, // Technical immutable name (extension preserved)
       contentType: doc.mimetype // Precise MIME identification
     });
@@ -775,15 +781,8 @@ async function handleDocumentPatch(req, res) {
         } catch (s3Err) {
           return res.status(502).json({ error: 'Cloud file integrity check failed. Source missing.' });
         }
-      } else if (doc.filepath) {
-        let filePath = doc.filepath;
-        if (!path.isAbsolute(filePath)) filePath = path.join(__dirname, '../../', filePath);
-        if (!fs.existsSync(filePath)) {
-          return res.status(404).json({ error: 'Local source file missing. Cannot notarize.' });
-        }
-        fileBuffer = fs.readFileSync(filePath);
       } else {
-        return res.status(404).json({ error: 'Document source missing from all storage.' });
+        return res.status(404).json({ error: 'Document source not found in cloud storage' });
       }
 
       const currentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
@@ -882,7 +881,7 @@ async function handleDocumentPatch(req, res) {
       
       const config = await ConfigService.getConfig();
       const domain = {
-        name: "BBSNS_DocumentRegistry",
+        name: "BBSNS_Protocol",
         version: "1",
         chainId: config.chainId,
         verifyingContract: config.contracts.documentRegistry

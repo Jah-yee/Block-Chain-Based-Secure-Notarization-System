@@ -134,11 +134,47 @@ router.get(
     requirePrivilege({ capability: "GOV_READ" }),
     async (req, res) => {
         try {
-            const settings = await GovernanceService.getMultisigSettings();
-            res.json(settings);
+            // AUTHORITATIVE BLOCKCHAIN SYNC (Replacing non-existent GovernanceService)
+            const config = await ConfigService.getConfig();
+            const contractAddress = config?.contracts?.multisig;
+
+            if (!contractAddress) {
+                return res.json({
+                    address: "0x0",
+                    threshold: 0,
+                    signers: [],
+                    status: "degraded",
+                    error: "Multisig address not configured"
+                });
+            }
+
+            const provider = await ProviderService.getProvider();
+            const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
+            const artifact = require(artifactPath);
+            const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
+
+            const [threshold, signers] = await Promise.all([
+                contract.threshold(),
+                contract.getSigners()
+            ]);
+
+            res.json({
+                address: contractAddress,
+                threshold: Number(threshold),
+                signers: signers,
+                status: "active"
+            });
         } catch (error) {
             console.error("Fetch multisig settings error:", error);
-            res.status(500).json({ error: "Failed to fetch multisig settings" });
+            // 🛡️ [RESILIENCE] Fallback to safe state
+            const config = await ConfigService.getConfig();
+            res.json({ 
+                address: config?.contracts?.multisig || "0x0",
+                threshold: 0,
+                signers: [],
+                status: "degraded",
+                error: "Failed to fetch multisig settings from blockchain" 
+            });
         }
     }
 );
@@ -163,8 +199,8 @@ router.get(
             }
 
             const provider = await ProviderService.getProvider();
-            // Load ABI from artifacts
-            const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
+            // Load ABI from artifacts (Hardened Path)
+            const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
             const artifact = require(artifactPath);
             const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
 
@@ -253,7 +289,7 @@ router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ capability: 'G
 
         // 2. Load MultiSig Contract to get Version
         const provider = await ProviderService.getProvider();
-        const artifactPath = path.join(__dirname, "../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
+        const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
         const artifact = require(artifactPath);
         const contract = new ethers.Contract(multisigAddress, artifact.abi, provider);
         const version = await contract.signerVersion();
@@ -311,7 +347,7 @@ router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requireP
         const { signer } = await require("../blockchain/connection").connectBNB();
         const config = await ConfigService.getConfig();
         const multisigAddress = config.contracts.multisig;
-        const artifact = require("../../../contracts/artifacts/contracts/BBSNSMultiSig.sol/BBSNSMultiSig.json");
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
         const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
 
         const to = config.contracts.documentRegistry;

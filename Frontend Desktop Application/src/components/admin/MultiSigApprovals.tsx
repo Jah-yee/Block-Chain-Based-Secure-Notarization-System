@@ -340,28 +340,22 @@ export function MultiSigApprovals() {
   };
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
       {/* Header */}
-      <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-1">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <Shield className="h-6 w-6 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-xl font-black tracking-tight text-foreground">Multi-Signature Approvals</h1>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Protocol Control Center</p>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-full px-4 border-primary/20 hover:bg-primary/5">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh State"}
-            </Button>
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">CONSENSUS VAULT</h1>
+            <p className="text-sm text-slate-400 font-medium italic uppercase tracking-widest">Protocol Control Center • Multi-Sig Authority</p>
           </div>
+          <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-xl px-6 h-11 border-white/10 hover:bg-white/5 text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-all">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "REFRESH STATE"}
+          </Button>
         </div>
       </div>
 
-      <div className="p-6">
+      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+        <div className="p-8 pb-32">
         {loading && transactions.length === 0 ? (
           <div className="flex justify-center p-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -490,6 +484,7 @@ export function MultiSigApprovals() {
           </div>
         )}
       </div>
+    </div>
 
       <Dialog open={detailsDialog.open} onOpenChange={(open) => setDetailsDialog({ ...detailsDialog, open })}>
         <DialogContent className="max-w-7xl w-[98vw] bg-card border-border shadow-2xl overflow-hidden p-0 rounded-3xl flex flex-col max-h-[65vh] select-none outline-none">
@@ -512,7 +507,7 @@ export function MultiSigApprovals() {
 
           <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
             {/* Remote Signing Overlay */}
-            {processing === detailsDialog.tx?.index && !window.ethereum && remoteSessionLink && (
+            {processing === detailsDialog.tx?.index && !(window as any).ethereum && remoteSessionLink && (
               <div className="absolute inset-0 bg-background/95 backdrop-blur z-50 flex flex-col items-center justify-center text-center p-8 space-y-6">
                 <div className="p-4 bg-primary/10 rounded-full animate-pulse">
                   <Shield className="h-12 w-12 text-primary" />

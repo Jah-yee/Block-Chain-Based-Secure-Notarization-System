@@ -184,68 +184,76 @@ export function ManageNotaries() {
   };
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
-      <div className="p-6 border-b">
-        <h1>Manage Notary Applications</h1>
-        <p className="text-sm text-muted-foreground">
-          Review and approve verification requests
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">NOTARY MANAGEMENT</h1>
+        <p className="text-sm text-slate-400 font-medium italic">
+          Review and approve verification requests within the administrative vault
         </p>
       </div>
 
+      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+        <div className="p-8 pb-32">
+
       {syncError && (
-        <div className="mx-6 mt-6 p-4 bg-amber-500/10 border border-amber-500/50 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold">
+        <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold animate-pulse">
           <ShieldAlert size={18} />
           {syncError}
         </div>
       )}
 
-      <div className="p-6">
+      <div className="space-y-8">
         {/* Filters */}
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
             <Input
               placeholder="Search by name or License ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+              className="pl-12 bg-[#0d1425] border-white/10 text-white rounded-xl h-12 w-full focus:border-emerald-500/50"
             />
           </div>
 
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-48">
-              <Filter size={16} className="mr-2" />
+            <SelectTrigger className="w-56 bg-[#0d1425] border-white/10 text-white rounded-xl h-12">
+              <Filter size={16} className="mr-2 text-slate-400" />
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="PENDING">Pending</SelectItem>
-              <SelectItem value="KYC_VERIFIED">Verified</SelectItem>
-              <SelectItem value="APPROVED">Approved</SelectItem>
-              <SelectItem value="ACTIVATED">Active Notaries</SelectItem>
-              <SelectItem value="activated">Activated</SelectItem>
+            <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+              <SelectItem value="all">ALL STATUS</SelectItem>
+              <SelectItem value="PENDING">PENDING</SelectItem>
+              <SelectItem value="KYC_VERIFIED">VERIFIED</SelectItem>
+              <SelectItem value="APPROVED">APPROVED</SelectItem>
+              <SelectItem value="ACTIVATED">ACTIVE NOTARIES</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         {/* Table */}
-        <div className="bg-card border rounded-xl overflow-hidden">
+        <div className="bg-[#0d1425] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>License No.</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+            <TableHeader className="bg-white/5">
+              <TableRow className="border-white/5 hover:bg-transparent">
+                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest pl-8">Name</TableHead>
+                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">License No.</TableHead>
+                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Email</TableHead>
+                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</TableHead>
+                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-8">Actions</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               {filteredApplications.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8">
-                    No applications found.
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={5} className="py-32">
+                    <div className="flex flex-col items-center justify-center space-y-4 opacity-40">
+                       <ShieldAlert size={64} strokeWidth={1} className="text-slate-500" />
+                       <div className="text-center">
+                         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">No applications found</p>
+                         <p className="text-[9px] text-slate-600 mt-1">The administrative vault is currently clear.</p>
+                       </div>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
@@ -318,6 +326,7 @@ export function ManageNotaries() {
           </Table>
         </div>
       </div>
+    </div>
 
       {/* Confirmation Dialog */}
       <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
@@ -461,5 +470,6 @@ export function ManageNotaries() {
         </DialogContent>
       </Dialog>
     </div>
+  </div>
   );
 }

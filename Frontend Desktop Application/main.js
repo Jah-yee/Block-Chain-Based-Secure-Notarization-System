@@ -3,6 +3,7 @@ const path = require('path');
 const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
+const url = require('url');
 
 // [SECURITY] Device Identity Cache (Fast Retrieval)
 let deviceIdCache = null;
@@ -29,7 +30,9 @@ function log(level, context, message) {
 }
 
 // 🛡️ [SECURITY] authoritative API Configuration
-let API_BASE_URL = 'https://api.bbsns.online'; // Production Source of Truth
+let API_BASE_URL = "https://api.bbsns.online";
+let remoteAuthWindow = null;
+ // Production Source of Truth
 
 log("INFO", "SYSTEM_BOOT", `App initialized (Packaged: ${app.isPackaged})`);
 
@@ -272,22 +275,36 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/documents\/[\w-]+\/update$/, methods: ["PATCH"] },
     { path: /^\/api\/documents\/[\w-]+\/approve$/, methods: ["POST"] },
     { path: /^\/api\/documents\/[\w-]+\/file$/, methods: ["GET"] },
+    { path: /^\/api\/documents\/[\w-]+\/preview$/, methods: ["GET"] },
     { path: /^\/api\/documents\/[\w-]+\/signature-payload$/, methods: ["GET"] },
 
+    // 🔐 AUTH & REMOTE
+    { path: /^\/api\/auth\/remote\/session\/notarize$/, methods: ["POST"] },
+    { path: /^\/api\/auth\/remote\/status\/[\w-]+$/, methods: ["GET"] },
+
     // ⚖️ GOVERNANCE (Dashboard Visibility)
-    { path: /^\/api\/governance\/proposals$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/proposals$/, methods: ["GET", "POST"] },
+    { path: /^\/api\/governance\/proposals\/[\w-]+\/prepare-on-chain$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/proposals\/[\w-]+\/submit-on-chain$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/proposals\/[\w-]+\/vote$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/proposals\/0\/confirm-on-chain$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/multisig\/session$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/vote\/status\/[\w-]+$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/settings$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/stats$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/transactions$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/multisig\/transactions\/[\w-]+\/execute$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/multisig\/transactions\/[\w-]+\/revoke$/, methods: ["POST"] },
     { path: /^\/api\/governance\/alerts\/count$/, methods: ["GET"] },
 
     // 👤 OWNER FLOW
     { path: /^\/api\/documents\/initiate$/, methods: ["POST"] },
     { path: /^\/api\/documents\/confirm$/, methods: ["POST"] },
 
-    // 🔬 SYSTEM TELEMETRY
+    // 🔬 SYSTEM TELEMETRY & CONFIG
     { path: /^\/api\/system\/logs$/, methods: ["GET"] },
     { path: /^\/api\/system\/sync\/events$/, methods: ["GET"] },
+    { path: /^\/api\/system\/config$/, methods: ["GET"] },
 
     // 🪙 TOKEN FLOW
     { path: /^\/api\/tokens\/onchain\/[\w-]+\/[\w-]+$/, methods: ["GET"] }
@@ -366,6 +383,60 @@ function handleUnauthorized() {
     setTimeout(() => { isLoggingOut = false; }, 5000);
 }
 
+function openRemoteAuthWindow(url) {
+    if (remoteAuthWindow) {
+        remoteAuthWindow.focus();
+        remoteAuthWindow.loadURL(url);
+        return;
+    }
+
+    remoteAuthWindow = new BrowserWindow({
+        width: 450,
+        height: 700,
+        parent: mainWindow,
+        modal: true,
+        show: false,
+        title: "BBSNS Remote Authority",
+        backgroundColor: '#07090e',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            sandbox: true
+        }
+    });
+
+    remoteAuthWindow.removeMenu();
+    remoteAuthWindow.loadURL(url);
+    
+    // 🛡️ [SECURITY] Inject Session ID and Mode into window title or via query params
+    // Remote Auth App.tsx reads from window.location.search.
+    
+    remoteAuthWindow.once('ready-to-show', () => {
+        remoteAuthWindow.show();
+    });
+
+    remoteAuthWindow.on('closed', () => {
+        remoteAuthWindow = null;
+    });
+}
+
+/**
+ * 🛡️ [SECURITY] Remote Auth URL Factory
+ * Determines if we should use a local build or a remote authority.
+ */
+function getAuthHandshakeUrl(mode, sessionId) {
+    const localAuthPath = path.join(__dirname, 'Remote Auth', 'dist', 'index.html');
+    if (fs.existsSync(localAuthPath)) {
+        log("INFO", "AUTH_ISOLATION", `Using LOCAL Remote Auth UI for mode: ${mode}`);
+        // 🛡️ [SECURITY] Convert path to file:// URL to support query parameters
+        const fileUrl = url.pathToFileURL(localAuthPath).href;
+        return `${fileUrl}?mode=${mode}&sessionId=${sessionId}`;
+    } else {
+        log("WARN", "AUTH_ISOLATION", `Local Auth UI missing. Falling back to remote authority for mode: ${mode}`);
+        return `https://auth.bbsns.online/?mode=${mode}&sessionId=${sessionId}`;
+    }
+}
+
 /**
  * 🛡️ [SECURITY] Configuration Caching (SafeStorage)
  * Persists the trusted system configuration in the UserData directory.
@@ -419,10 +490,12 @@ async function startAuthFlow() {
 
         const AUTH_BASE = "https://auth.bbsns.online";
         const AUTH_ROUTE = "/";
-        const authUrl = `${AUTH_BASE}${AUTH_ROUTE}?mode=login&sessionId=${sessionId}`;
+        
+        // 🛡️ [ISOLATION] Determine if we should use local Auth UI
+        const authUrl = getAuthHandshakeUrl('login', sessionId);
 
         log("INFO", "AUTH_HANDSHAKE", "Handshake active. URL: " + authUrl);
-        shell.openExternal(authUrl);
+        openRemoteAuthWindow(authUrl);
          if (pollingInterval) clearInterval(pollingInterval);
         
         const startTime = Date.now();
@@ -532,15 +605,27 @@ let mainWindow;
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true },
-    titleBarOverlay: {
-      color: '#0a1d2d',
-      symbolColor: '#ffffff',
-      height: 32
+    webPreferences: { 
+      preload: path.join(__dirname, 'preload.js'), 
+      nodeIntegration: false, 
+      contextIsolation: true,
+      plugins: true,
+      pdfViewer: true
     },
     titleBarStyle: 'hidden',
     backgroundColor: '#07090e'
   });
+
+  ipcMain.on('window:minimize', () => mainWindow.minimize());
+  ipcMain.on('window:maximize', () => {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+  ipcMain.on('window:close', () => mainWindow.close());
+
 
   const productionPath = path.join(__dirname, 'build', 'index.html');
   const devUrl = 'http://localhost:3001';
@@ -566,6 +651,30 @@ app.whenReady().then(() => {
   ipcMain.handle('auth:check-session', async () => !!(await getSecureToken()));
   ipcMain.handle('auth:trigger-recovery', async () => attemptSecurityUpgrade());
   ipcMain.handle('auth:logout', async () => handleUnauthorized());
+  ipcMain.handle('auth:open-remote', (event, url) => {
+      try {
+          const parsed = new URL(url);
+          const mode = parsed.searchParams.get('mode') || 'login';
+          const sessionId = parsed.searchParams.get('sessionId');
+          
+          if (!sessionId) {
+              log("ERROR", "AUTH_REMOTE", "Rejecting open-remote: Missing sessionId");
+              return false;
+          }
+
+          const handshakeUrl = getAuthHandshakeUrl(mode, sessionId);
+          openRemoteAuthWindow(handshakeUrl);
+          return true;
+      } catch (e) {
+          log("ERROR", "AUTH_REMOTE", "Failed to parse remote auth URL: " + e.message);
+          // Fallback for safety if it's already a valid path
+          if (url && (url.startsWith('https://auth.bbsns.online') || fs.existsSync(url.split('?')[0]))) {
+              openRemoteAuthWindow(url);
+              return true;
+          }
+          return false;
+      }
+  });
   ipcMain.on('open-external', (event, url) => shell.openExternal(url));
   ipcMain.handle('config:save', async (event, data) => saveConfigCache(data));
   ipcMain.handle('config:load', async () => loadConfigCache());
@@ -626,7 +735,7 @@ app.whenReady().then(() => {
         }
 
         log("INFO", "AUTH", `Session retrieval success for user: ${user.id} | Status: ${zeroTrustStatus}`);
-        return { authenticated: true, user, zeroTrustStatus };
+        return { authenticated: true, user, zeroTrustStatus, token };
     } catch (err) {
         const status = err.response ? err.response.status : "NETWORK_ERROR";
         log("ERROR", "AUTH", `Session recovery failed [${status}]: ${err.message}`);
@@ -643,11 +752,12 @@ app.whenReady().then(() => {
     if (!validateRequest(endpoint, cleanMethod)) {
         const parsed = new URL(endpoint, "http://localhost");
         const tokenExists = !!(await getSecureToken());
-        const isPublicRequest = [
+        const publicPaths = [
             '/api/auth/system-status', '/api/auth/nonce', '/api/auth/remote/session', 
             '/api/auth/remote/exchange', '/api/auth/remote/authorize', 
             '/api/auth/remote/status', '/api/auth/remote/verify', '/api/auth/remote/callback'
-        ].includes(parsed.pathname);
+        ];
+        const isPublicRequest = publicPaths.some(p => parsed.pathname.startsWith(p));
 
         if (!isPublicRequest) {
             log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access: ${cleanMethod} ${endpoint}`);
@@ -682,14 +792,18 @@ app.whenReady().then(() => {
 
             const axiosConfig = { method: cleanMethod, url: fullUrl, headers, timeout: 5000 };
             if (cleanMethod !== 'GET' && data) axiosConfig.data = data;
+            
+            // 🛡️ [SECURITY] Binary Handling for Documents
+            if (endpoint.endsWith('/file') || endpoint.endsWith('/preview')) {
+                axiosConfig.responseType = 'arraybuffer';
+            }
 
             try {
                 log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint} (v=${retryCount})`);
                 const response = await axios(axiosConfig);
                 
-                // Proactive Healing: If backend returns a token in a valid response, save it.
-                if (response.data && response.data.token) {
-                    saveSecureToken(response.data.token);
+                if (response.data && (endpoint.endsWith('/file') || endpoint.endsWith('/preview'))) {
+                    log("INFO", "API_BRIDGE", `← [BINARY] ${endpoint} | Size: ${response.data.byteLength || response.data.length} bytes`);
                 }
                 
                 return { success: true, data: response.data };

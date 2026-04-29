@@ -453,14 +453,18 @@ export function Governance({ role, user }: GovernanceProps) {
 
     if (selectedProposal) {
         return (
-            <div className="flex-1 bg-background overflow-auto p-6">
-                <Button
-                    variant="ghost"
-                    className="mb-6 hover:bg-muted/50 text-muted-foreground"
-                    onClick={() => setSelectedProposalId(null)}
-                >
-                    <ArrowLeft className="h-4 w-4 mr-2" /> Back to List
-                </Button>
+            <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
+                <div className="flex-none p-8 pt-12 pb-2">
+                    <Button
+                        variant="ghost"
+                        className="mb-6 hover:bg-muted/50 text-muted-foreground"
+                        onClick={() => setSelectedProposalId(null)}
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-2" /> Back to List
+                    </Button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-8 pt-2 pb-24 custom-scrollbar">
 
                 <div className="max-w-3xl mx-auto space-y-6">
                     <Card className="border-primary/20 shadow-2xl shadow-black/40 overflow-hidden rounded-3xl group transition-all">
@@ -618,236 +622,71 @@ export function Governance({ role, user }: GovernanceProps) {
                         </CardFooter>
                     </Card>
                 </div>
+                </div>
             </div>
         )
     }
 
     return (
-        <div className="flex-1 bg-background overflow-auto">
+        <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
             {/* Header */}
-            <div className="border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-20 shadow-sm">
-                <div className="p-6">
-                    <h1 className="text-foreground mb-1 tracking-tight">System Governance</h1>
-                    <p className="text-sm text-muted-foreground">Propose and vote on network-wide administrative actions</p>
+            <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div>
+                        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">SYSTEM GOVERNANCE</h1>
+                        <p className="text-sm text-slate-400 font-medium italic">Propose and vote on network-wide administrative actions</p>
+                    </div>
                 </div>
             </div>
 
-            <div className={`p-6 grid gap-6 ${role === 'admin' ? 'md:grid-cols-2' : 'grid-cols-1 max-w-3xl mx-auto'}`}>
-                {/* System Status Card - New Transparency Layer */}
-                <Card className="md:col-span-2 bg-primary/5 border-primary/20 overflow-hidden">
-                    <CardHeader className="pb-4">
-                        <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                                <CardTitle className="text-sm font-black text-primary uppercase tracking-tighter">On-Chain Multi-Sig Parameters</CardTitle>
-                                <CardDescription className="text-xs text-primary/60">Current immutable authority configuration</CardDescription>
-                            </div>
-                            <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30 uppercase tracking-widest text-[9px] font-black h-fit py-1">
-                                <ShieldCheck className="h-3 w-3 mr-1" /> Governance Truth
-                            </Badge>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {systemSettings ? (
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                {/* LEFT: Proposals List */}
-                                <div className="lg:col-span-2 space-y-6">
+            <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+                <div className="p-8 pb-32">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                        {/* LEFT COLUMN: Status and Proposals */}
+                        <div className="lg:col-span-2 space-y-8">
+                            {systemSettings ? (
+                                <>
                                     <GovernanceHealthWidget settings={systemSettings} />
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                        <div className="space-y-1">
-                                            <p className="text-[9px] font-bold text-primary/40 uppercase">Safe Threshold</p>
-                                            <p className="text-xl font-black text-primary">{systemSettings.threshold ?? "..."} <span className="text-xs text-primary/40">OF {Array.isArray(systemSettings.signers) ? systemSettings.signers.length : "..."}</span></p>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <p className="text-[9px] font-bold text-primary/40 uppercase">Timelock Delay</p>
-                                            <p className="text-xl font-black text-primary">{systemSettings.timelockDelay !== undefined ? (systemSettings.timelockDelay / 3600).toFixed(1) : "..."} <span className="text-xs text-primary/40">HOURS</span></p>
-                                        </div>
-                                        <div className="md:col-span-2 space-y-1">
-                                            <p className="text-[9px] font-bold text-primary/40 uppercase">Signer Signatures</p>
-                                            <div className="flex flex-wrap gap-1">
-                                                {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => (
-                                                    <Badge key={i} variant="secondary" className="bg-primary/10 text-[9px] font-mono border-none text-primary/70 selectable">
-                                                        {(s || "").slice(0, 6)}...{(s || "").slice(-4)}
-                                                    </Badge>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex items-center space-x-2 py-2">
-                                <Loader2 className="h-4 w-4 animate-spin text-primary/40" />
-                                <span className="text-xs text-primary/40 font-bold uppercase italic">Syncing with blockchain...</span>
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
-
-                {/* Create Proposal Section - ADMIN ONLY */}
-                {role === 'admin' && (
-                    <Card className="h-fit bg-card border-border">
-                        <CardHeader>
-                            <div className="flex items-center space-x-2">
-                                <Gavel className="h-5 w-5 text-primary" />
-                                <CardTitle className="text-foreground font-semibold">Initiate Proposal</CardTitle>
-                            </div>
-                            <CardDescription className="text-muted-foreground line-clamp-2">Administrative system action with quorum requirement</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-5">
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preset Action</label>
-                                <Select value={selectedPreset} onValueChange={handlePresetChange}>
-                                    <SelectTrigger className="bg-muted/50 border-border text-foreground rounded-xl">
-                                        <SelectValue placeholder="Select a preset..." />
-                                    </SelectTrigger>
-                                    <SelectContent className="bg-card border-border text-foreground">
-                                        {PROPOSAL_PRESETS.map((p) => (
-                                            <SelectItem key={p.id} value={p.id}>
-                                                <div className="flex items-center">
-                                                    <p.icon className="h-4 w-4 mr-2 text-primary" />
-                                                    {p.label}
-                                                </div>
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Proposal Title</label>
-                                <Input
-                                    value={formData.title}
-                                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                                    placeholder="e.g., Promote User to Admin"
-                                    disabled={selectedPreset !== 'custom'}
-                                    className="bg-muted/50 border-border text-foreground rounded-xl focus:ring-primary/20"
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                    {formData.type === 'change_threshold' ? "New Threshold Value" : "Target ID / Wallet"}
-                                </label>
-                                <Input
-                                    value={formData.target_id}
-                                    onChange={(e) => setFormData({ ...formData, target_id: e.target.value })}
-                                    placeholder={formData.type === 'change_threshold' ? "e.g., 2" : "User ID or Wallet Address"}
-                                    type={formData.type === 'change_threshold' ? "number" : "text"}
-                                    className="bg-muted/50 border-border text-foreground rounded-xl font-mono text-sm"
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Participation Scope</label>
-                                <div className="flex gap-2">
-                                    {['admin', 'notary', 'all'].map((s) => (
-                                        <button
-                                            key={s}
-                                            onClick={() => setFormData({ ...formData, participation_scope: s })}
-                                            className={`flex-1 py-1.5 rounded-lg border text-[10px] font-bold uppercase transition-all ${formData.participation_scope === s
-                                                ? "bg-primary/10 border-primary/50 text-primary shadow-lg shadow-primary/5"
-                                                : "bg-muted/30 border-border text-muted-foreground hover:border-foreground/20"
-                                                }`}
-                                        >
-                                            {s}
-                                        </button>
-                                    ))}
-                                </div>
-                                <p className="text-[10px] text-muted-foreground italic">
-                                    {formData.participation_scope === 'admin' && "Only Admins see and vote."}
-                                    {formData.participation_scope === 'notary' && "Only Notaries see and vote."}
-                                    {formData.participation_scope === 'all' && "Both roles can participate."}
-                                </p>
-                            </div>
-
-                            {formData.participation_scope !== 'admin' && (
-                                <div className="space-y-2">
-                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex justify-between">
-                                        Target Specific Notaries
-                                        <span className="text-[9px] lowercase italic">(leave empty for all)</span>
-                                    </label>
-                                    <div className="flex flex-wrap gap-2 p-3 bg-muted/30 border border-border rounded-xl min-h-[44px]">
-                                        {allNotaries.map((notary) => (
-                                            <Badge
-                                                key={notary.id}
-                                                variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
-                                                className={`cursor-pointer transition-all ${targetNotaries.includes(notary.id) ? "bg-primary text-primary-foreground" : "hover:border-primary/50 text-muted-foreground"}`}
-                                                onClick={() => {
-                                                    setTargetNotaries(prev =>
-                                                        prev.includes(notary.id)
-                                                            ? prev.filter(id => id !== notary.id)
-                                                            : [...prev, notary.id]
-                                                    )
-                                                }}
-                                            >
-                                                {notary.name || notary.email}
+                                    <div className="bg-[#0d1425] border border-white/5 rounded-2xl p-6 shadow-sm">
+                                        <div className="flex items-center justify-between mb-6">
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-primary/40 flex items-center">
+                                                <Users2 className="h-3 w-3 mr-2" /> Signer Authority List
+                                            </p>
+                                            <Badge variant="outline" className="bg-primary/20 text-primary border-primary/30 uppercase tracking-[0.2em] text-[8px] font-black px-2 py-0.5">
+                                                Immutable Governance Truth
                                             </Badge>
-                                        ))}
-                                        {allNotaries.length === 0 && <span className="text-[10px] text-muted-foreground italic">No notaries found.</span>}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => (
+                                                <Badge key={i} variant="secondary" className="bg-primary/10 text-[10px] font-mono border-white/5 text-primary/70 selectable px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-all">
+                                                    {(s || "").slice(0, 14)}...{(s || "").slice(-12)}
+                                                </Badge>
+                                            ))}
+                                        </div>
                                     </div>
+                                </>
+                            ) : (
+                                <div className="bg-[#0d1425] border border-white/5 rounded-2xl p-8 flex flex-col items-center justify-center text-center animate-pulse">
+                                    <Loader2 className="h-8 w-8 animate-spin text-primary/40 mb-3" />
+                                    <p className="text-[10px] font-black text-primary/40 uppercase tracking-widest italic">Syncing Administrative Parameters...</p>
                                 </div>
                             )}
 
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Voting Duration</label>
-                                <Select value={formData.duration_hours} onValueChange={(v) => setFormData({ ...formData, duration_hours: v })}>
-                                    <SelectTrigger className="bg-muted/50 border-border text-foreground rounded-xl text-xs">
-                                        <SelectValue placeholder="Select duration..." />
-                                    </SelectTrigger>
-                                    <SelectContent className="bg-card border-border text-foreground">
-                                        <SelectItem value="1">1 Hour (Flash Vote)</SelectItem>
-                                        <SelectItem value="6">6 Hours</SelectItem>
-                                        <SelectItem value="24">24 Hours (Fast-Track)</SelectItem>
-                                        <SelectItem value="72">3 Days</SelectItem>
-                                        <SelectItem value="168">7 Days (Standard)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detailed Justification</label>
-                                <Textarea
-                                    className="min-h-[120px] bg-muted/50 border-border text-foreground rounded-xl resize-none"
-                                    value={formData.description}
-                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                    placeholder="Explain why this action is necessary..."
-                                />
-                            </div>
-
-                            {/* Danger Zone Warning */}
-                            {(formData.type === 'remove_admin' || formData.type === 'add_admin' || formData.type === 'system_upgrade') && (
-                                <div className={`border p-4 rounded-xl space-y-2 ${formData.type === 'add_admin' ? 'bg-amber-500/10 border-amber-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                                    <div className={`flex items-center font-bold text-xs uppercase tracking-tight ${formData.type === 'add_admin' ? 'text-amber-400' : 'text-rose-400'}`}>
-                                        <ShieldAlert className="h-4 w-4 mr-2" />
-                                        Critical Control Change
-                                    </div>
-                                    <p className={`text-[10px] leading-relaxed italic ${formData.type === 'add_admin' ? 'text-amber-400/80' : 'text-rose-400/80'}`}>
-                                        {formData.type === 'add_admin' && "You are adding a new authority signature. This grants full binary access to system governance."}
-                                        {formData.type === 'remove_admin' && "You are removing a signer. This may permanently increase centralization or brick the system if threshold is not lowered first."}
-                                        {formData.type === 'system_upgrade' && "System upgrades affect core contract logic. Use extreme caution."}
-                                    </p>
+                            {/* Active Proposals Section */}
+                            <div className="space-y-6 pt-4">
+                                <div className="flex items-center justify-between px-2">
+                                    <h3 className="text-foreground font-black uppercase tracking-tighter text-xl flex items-center italic">
+                                        <Gavel className="h-5 w-5 mr-3 text-primary" />
+                                        Active Governance Quorum
+                                    </h3>
+                                    {!isLoading && proposals.length > 0 && (
+                                        <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px] font-black px-3">
+                                            {proposals.length} PENDING
+                                        </Badge>
+                                    )}
                                 </div>
-                            )}
-                        </CardContent>
-                        <CardFooter>
-                            <Button
-                                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold h-12 shadow-lg shadow-primary/10 rounded-xl transition-all"
-                                onClick={handleCreateProposal}
-                                disabled={isCreating}
-                            >
-                                {isCreating ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Plus className="h-5 w-5 mr-2" />}
-                                Submit for Quorum
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                )}
-
-                {/* Active Proposals Section */}
-                <div className="space-y-6">
-                    <h3 className="text-foreground font-semibold flex items-center px-2">
-                        <Clock className="h-5 w-5 mr-3 text-primary" />
-                        Active Governance Quorum
-                    </h3>
+                                
+                                {/* Proposals will be rendered here by the map below */}
 
                     {isLoading ? (
                         <div className="flex flex-col items-center justify-center p-12 bg-card border border-border border-dashed rounded-2xl">
@@ -937,8 +776,170 @@ export function Governance({ role, user }: GovernanceProps) {
                             ))}
                         </div>
                     )}
+                            </div>
+                        </div>
+
+                        {/* RIGHT COLUMN: Action Panel */}
+                        {role === 'admin' && (
+                            <div className="lg:col-span-1 sticky top-8">
+                                <Card className="bg-[#0d1425] border border-white/10 shadow-2xl rounded-2xl overflow-hidden">
+                                    <CardHeader className="bg-white/5 border-b border-white/5 pb-6">
+                                        <div className="flex items-center space-x-3">
+                                            <div className="p-2 bg-primary/10 rounded-lg">
+                                                <Gavel className="h-5 w-5 text-primary" />
+                                            </div>
+                                            <div>
+                                                <CardTitle className="text-white font-black uppercase tracking-tighter text-lg leading-none">Initiate Action</CardTitle>
+                                                <CardDescription className="text-primary/40 text-[10px] uppercase font-bold tracking-widest mt-1">Admin Governance Node</CardDescription>
+                                            </div>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="space-y-6 pt-6">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Preset Protocol</label>
+                                            <Select value={selectedPreset} onValueChange={handlePresetChange}>
+                                                <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11">
+                                                    <SelectValue placeholder="Select a preset..." />
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+                                                    {PROPOSAL_PRESETS.map((p) => (
+                                                        <SelectItem key={p.id} value={p.id}>
+                                                            <div className="flex items-center">
+                                                                <p.icon className="h-4 w-4 mr-2 text-primary" />
+                                                                {p.label}
+                                                            </div>
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Action Label</label>
+                                            <Input
+                                                value={formData.title}
+                                                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                                placeholder="e.g., Promote User to Admin"
+                                                disabled={selectedPreset !== 'custom'}
+                                                className="bg-black/20 border-white/10 text-white rounded-xl h-11 focus:ring-primary/20"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                                {formData.type === 'change_threshold' ? "Target Threshold" : "Target Wallet / ID"}
+                                            </label>
+                                            <Input
+                                                value={formData.target_id}
+                                                onChange={(e) => setFormData({ ...formData, target_id: e.target.value })}
+                                                placeholder={formData.type === 'change_threshold' ? "e.g., 2" : "0x... or UUID"}
+                                                type={formData.type === 'change_threshold' ? "number" : "text"}
+                                                className="bg-black/20 border-white/10 text-white rounded-xl h-11 font-mono text-sm"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus Scope</label>
+                                            <div className="flex gap-2">
+                                                {['admin', 'notary', 'all'].map((s) => (
+                                                    <button
+                                                        key={s}
+                                                        onClick={() => setFormData({ ...formData, participation_scope: s })}
+                                                        className={`flex-1 py-2 rounded-lg border text-[9px] font-black uppercase transition-all ${formData.participation_scope === s
+                                                            ? "bg-primary text-black border-primary shadow-lg shadow-primary/20"
+                                                            : "bg-black/20 border-white/10 text-slate-500 hover:border-white/20"
+                                                            }`}
+                                                    >
+                                                        {s}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {formData.participation_scope !== 'admin' && (
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between">
+                                                    Targeted Notaries
+                                                </label>
+                                                <div className="flex flex-wrap gap-2 p-3 bg-black/20 border border-white/10 rounded-xl min-h-[44px]">
+                                                    {allNotaries.map((notary) => (
+                                                        <Badge
+                                                            key={notary.id}
+                                                            variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
+                                                            className={`cursor-pointer transition-all text-[9px] font-black ${targetNotaries.includes(notary.id) ? "bg-primary text-black border-none" : "border-white/10 text-slate-500 hover:border-primary/50"}`}
+                                                            onClick={() => {
+                                                                setTargetNotaries(prev =>
+                                                                    prev.includes(notary.id)
+                                                                        ? prev.filter(id => id !== notary.id)
+                                                                        : [...prev, notary.id]
+                                                                )
+                                                            }}
+                                                        >
+                                                            {notary.name || notary.email}
+                                                        </Badge>
+                                                    ))}
+                                                    {allNotaries.length === 0 && <span className="text-[9px] text-slate-600 italic">No notaries indexed.</span>}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quorum Window</label>
+                                            <Select value={formData.duration_hours} onValueChange={(v) => setFormData({ ...formData, duration_hours: v })}>
+                                                <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11 text-xs">
+                                                    <SelectValue placeholder="Select duration..." />
+                                                </SelectTrigger>
+                                                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+                                                    <SelectItem value="1">1 Hour (Flash)</SelectItem>
+                                                    <SelectItem value="6">6 Hours</SelectItem>
+                                                    <SelectItem value="24">24 Hours</SelectItem>
+                                                    <SelectItem value="72">3 Days</SelectItem>
+                                                    <SelectItem value="168">7 Days (Standard)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Protocol Rationale</label>
+                                            <Textarea
+                                                className="min-h-[100px] bg-black/20 border-white/10 text-white rounded-xl resize-none text-sm placeholder:text-slate-700"
+                                                value={formData.description}
+                                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                                placeholder="Legal or technical justification..."
+                                            />
+                                        </div>
+
+                                        {/* Security Advisory */}
+                                        {(formData.type === 'remove_admin' || formData.type === 'add_admin' || formData.type === 'system_upgrade') && (
+                                            <div className={`p-4 rounded-xl border ${formData.type === 'add_admin' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                                                <div className={`flex items-center font-black text-[10px] uppercase tracking-widest mb-2 ${formData.type === 'add_admin' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    <ShieldAlert className="h-4 w-4 mr-2" />
+                                                    SECURITY ADVISORY
+                                                </div>
+                                                <p className={`text-[10px] leading-relaxed italic font-medium ${formData.type === 'add_admin' ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
+                                                    {formData.type === 'add_admin' && "Adding an authority signature grants full root access."}
+                                                    {formData.type === 'remove_admin' && "Signer removal is permanent. Verify threshold safety."}
+                                                    {formData.type === 'system_upgrade' && "Logic upgrades affect all network transactions."}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                    <CardFooter className="pb-8">
+                                        <Button
+                                            className="w-full bg-primary hover:bg-emerald-400 text-black font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
+                                            onClick={handleCreateProposal}
+                                            disabled={isCreating}
+                                        >
+                                            {isCreating ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Plus className="h-5 w-5 mr-3 font-black" />}
+                                            SUBMIT PROPOSAL
+                                        </Button>
+                                    </CardFooter>
+                                </Card>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
-    )
+  );
 }

@@ -62,7 +62,7 @@ async function reconcile() {
                             userId: doc.id, syncType: 'notarization', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
                             statusBefore: doc.tx_status, statusAfter: 'confirmed', metadata: { reason: 'onchain_match' }
                         });
-                        await cleanupStorage(doc);
+                        // await cleanupStorage(doc);
                         continue;
                     }
 
@@ -81,7 +81,7 @@ async function reconcile() {
                                 eventType: isSuccess ? SyncLogger.EVENTS.TX_CONFIRMED : SyncLogger.EVENTS.TX_FAILED,
                                 statusBefore: doc.tx_status, statusAfter, txHash: doc.tx_hash
                             });
-                            if (isSuccess) await cleanupStorage(doc);
+                            // if (isSuccess) await cleanupStorage(doc);
                             continue;
                         }
                     }

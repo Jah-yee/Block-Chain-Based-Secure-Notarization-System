@@ -16,6 +16,7 @@ function App() {
   const [config, setConfig] = useState<any>(null);
   const [handshakeDomain, setHandshakeDomain] = useState<any>(null);
   const [handshakeTypes, setHandshakeTypes] = useState<any>(null);
+  const [notarizeMetadata, setNotarizeMetadata] = useState<any>(null);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -56,7 +57,7 @@ function App() {
     const mode = params.get("mode");
     const sid = params.get("sessionId");
 
-    const allowedModes = ["login", "genesis"];
+    const allowedModes = ["login", "genesis", "notarize"];
 
     const init = async () => {
       // 1. HARD INPUT VALIDATION
@@ -98,8 +99,9 @@ function App() {
 
       switch (mode) {
         case "login":
+        case "notarize":
           if (!systemInitialized) {
-            setError("Protocol violation: Login requested, but system is not yet initialized. Use Genesis first.");
+            setError(`Protocol violation: ${mode} requested, but system is not yet initialized. Use Genesis first.`);
             setStatus("error");
           } else {
             setSessionId(sid);
@@ -138,6 +140,20 @@ function App() {
         setStatus("authorized");
       } else {
         setChallenge(data.challenge);
+        
+        // 🛡️ [Hardening] Detect Notarization Context
+        if (data.challenge && data.challenge.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(data.challenge);
+            if (parsed.docHash) {
+              setNotarizeMetadata(parsed);
+              console.log("[AUTH] Notarization metadata detected:", parsed);
+            }
+          } catch (e) {
+            console.warn("[AUTH] Challenge look like JSON but failed to parse:", e);
+          }
+        }
+
         if (data.handshakeDomain) setHandshakeDomain(data.handshakeDomain);
         if (data.handshakeTypes) setHandshakeTypes(data.handshakeTypes);
         setStatus("ready");
@@ -280,7 +296,6 @@ function App() {
         ];
         const contract = new ethers.Contract(contractAddr, abi, signer);
 
-        // First, we still need the signature even for direct transacting
         const signature = await signer.signTypedData(
           parsedPayload.domain,
           parsedPayload.types,
@@ -300,7 +315,6 @@ function App() {
         );
         await tx.wait();
         
-        // Notify backend that it's done so it can update status
         const res = await fetch(`${BACKEND_URL}/api/auth/remote/authorize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -329,9 +343,61 @@ function App() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Authorization failed on server");
         }
+      } else if (notarizeMetadata) {
+        // 🛡️ [Step B] Notarize-Mode EIP-712 Signing
+        console.log(`[AUTH] Initiating Notarization Signing for doc: ${notarizeMetadata.docHash}`);
+        
+        const domain = {
+          name: "BBSNS_Protocol",
+          version: "1",
+          chainId: config.chainId,
+          verifyingContract: config.contracts.documentRegistry
+        };
+
+        const types = {
+          Notarize: [
+            { name: 'docHash', type: 'bytes32' },
+            { name: 'ownerAddress', type: 'address' },
+            { name: 'status', type: 'uint8' },
+            { name: 'summaryHash', type: 'bytes32' },
+            { name: 'rejectionReasonHash', type: 'bytes32' },
+            { name: 'timestamp', type: 'uint256' },
+            { name: 'nonce', type: 'uint256' }
+          ]
+        };
+
+        const message = {
+          ...notarizeMetadata,
+          status: Number(notarizeMetadata.status),
+          timestamp: Number(notarizeMetadata.timestamp),
+          nonce: BigInt(notarizeMetadata.nonce).toString()
+        };
+
+        console.log("[AUTH] Signing Notarize Payload:", { domain, types, message });
+        
+        const signature = await signer.signTypedData(domain, types, message);
+        console.log("[AUTH] Notarization signature obtained. Relaying to authority...");
+
+        const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            signature,
+            walletAddress: address,
+            timestamp: notarizeMetadata.timestamp
+          })
+        });
+
+        if (!bindRes.ok) {
+          const data = await bindRes.json().catch(() => ({}));
+          throw new Error(data.error || "Notarization Relay Failed");
+        }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 3000);
       } else if (handshakeDomain && handshakeTypes) {
         // 🛡️ [Hardening 11.3] Atomic Single-Signature Handshake
-        // Consolidates identity verification and session binding into one EIP-712 prompt.
         console.log(`[AUTH] Initiating Atomic Handshake for sessionId: ${sessionId}`);
         
         const timestamp = Math.floor(Date.now() / 1000);
@@ -342,19 +408,15 @@ function App() {
           timestamp: timestamp
         };
 
-        console.log("[AUTH] EIP-712 Payload:", { domain: handshakeDomain, types: handshakeTypes, message });
-
         let signature;
         try {
-            signature = await signer.signTypedData(handshakeDomain, handshakeTypes, message);
-            console.log("[AUTH] Atomic signature obtained. Sending to binding authority...");
-        } catch (signErr) {
-            console.error("[AUTH_FAIL] Atomic signing failed:", signErr);
-            setError(`Single-signature failed: ${signErr.message}. Falling back to Legacy mode...`);
-            // Trigger Legacy Fallback by clearing the local domain/types
-            setHandshakeDomain(null);
-            setHandshakeTypes(null);
-            return;
+          signature = await signer.signTypedData(handshakeDomain, handshakeTypes, message);
+        } catch (signErr: any) {
+          console.error("[AUTH_FAIL] Atomic signing failed:", signErr);
+          setError(`Single-signature failed: ${signErr.message}. Falling back to Legacy mode...`);
+          setHandshakeDomain(null);
+          setHandshakeTypes(null);
+          return;
         }
 
         const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
@@ -376,24 +438,15 @@ function App() {
         setStatus("authorized");
         setTimeout(() => window.close(), 3000);
       } else {
-        // 🛡️ [Hardening 10.3] Standard Identity Binding Flow
-        // We perform a full protocol login to get a valid JWT, then bind it to the SessionId.
+        // Standard Identity Binding Flow
         console.log(`[AUTH] Falling back to Legacy Dual-Signature flow for sessionId: ${sessionId}`);
         
-        const provider = new ethers.BrowserProvider((window as any).ethereum);
-        const signer = await provider.getSigner();
-        const address = await signer.getAddress();
-
-        // 1. Fetch a fresh protocol nonce for LOGIN
         const nonce = await fetchNonce(address, "LOGIN");
-
-        // 2. Sign the standard protocol message (Canonical Protocol Format)
         const message = `BBSNS::LOGIN::v1::${nonce}::${address.toLowerCase()}`;
         const signature = await signer.signMessage(message);
 
         const API_BASE = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
 
-        // 3. Perform Full Protocol Login to get Identity JWT
         const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -410,11 +463,6 @@ function App() {
         }
 
         const { token } = await loginRes.json();
-
-        // 4. [MANDATORY] Handshake Authorization (Proof of Connection)
-        // Before binding the Identity JWT, we must prove authority over this specific session
-        // by signing the session-specific challenge.
-        console.log(`[AUTH] Generating proof of handshake for challenge: ${challenge?.substring(0, 10)}...`);
         const handshakeSignature = await signer.signMessage(challenge!);
 
         const authRes = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
@@ -432,9 +480,6 @@ function App() {
           throw new Error(data.error || "Handshake Authorization Failed");
         }
 
-        console.log("[AUTH] Handshake authorized. Proceeding to identity binding...");
-
-        // 5. Bind the Identity Token to the Remote Session
         const bindRes = await fetch(`${API_BASE}/api/auth/remote/complete`, {
           method: "POST",
           headers: { 
@@ -530,6 +575,38 @@ function App() {
           <div className="alert alert-info" style={{ fontSize: "0.85rem" }}>
             Confirming session: <code>{sessionId}</code>
           </div>
+
+          {notarizeMetadata && (
+            <div className="bg-muted/50 rounded-xl p-4 mb-4" style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px' }}>
+                <Shield size={18} color="var(--primary)" />
+                <span style={{ fontWeight: '600', color: 'var(--primary)' }}>Document Notarization</span>
+              </div>
+              <div style={{ display: 'grid', gap: '8px', fontSize: '0.8rem' }}>
+                <div>
+                  <span style={{ color: 'var(--muted)', display: 'block' }}>File Hash</span>
+                  <code style={{ fontSize: '0.7rem', wordBreak: 'break-all' }}>{notarizeMetadata.docHash}</code>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--muted)', display: 'block' }}>Owner</span>
+                  <code style={{ fontSize: '0.7rem' }}>{notarizeMetadata.ownerAddress}</code>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Action</span>
+                  <span style={{ 
+                    padding: '2px 8px', 
+                    borderRadius: '4px', 
+                    fontSize: '0.7rem',
+                    background: notarizeMetadata.status === 1 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                    color: notarizeMetadata.status === 1 ? '#10b981' : '#ef4444',
+                    border: notarizeMetadata.status === 1 ? '1px solid #10b98133' : '1px solid #ef444433'
+                  }}>
+                    {notarizeMetadata.status === 1 ? 'APPROVE' : 'REJECT'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
           {!isConnected ? (
             <button className="button" onClick={connectWallet}>
               <Wallet size={18} style={{ marginRight: "10px" }} />
