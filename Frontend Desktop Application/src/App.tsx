@@ -379,10 +379,10 @@ export default function App() {
 
   if (configError) {
     return (
-      <div className="min-h-screen bg-[#07090e] flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-[#0a0d14] border border-red-500/20 rounded-2xl p-8 text-center space-y-4 shadow-2xl">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-red-500/20 rounded-2xl p-8 text-center space-y-4 shadow-2xl">
           <ShieldAlert className="w-16 h-16 text-red-500 mx-auto" />
-          <h1 className="text-2xl font-bold text-white italic">Protocol Error</h1>
+          <h1 className="text-2xl font-bold text-foreground italic">Protocol Error</h1>
           <p className="text-slate-400 text-sm leading-relaxed">{configError.message}</p>
           <Button onClick={retry} className="w-full bg-red-500 hover:bg-red-600 font-bold py-6 rounded-xl transition-all">
             <RefreshCw className="mr-2 h-4 w-4" /> Reset Authority
@@ -394,7 +394,7 @@ export default function App() {
 
   if (isRecovering || !config) {
     return (
-      <div className="min-h-screen bg-[#07090e] flex items-center justify-center">
+      <div className="min-h-screen bg-background flex items-center justify-center">
         <ResilienceBanner mode={mode} onRetry={retry} />
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
@@ -405,7 +405,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#07090e] overflow-hidden select-none">
+    <div className="h-screen w-screen flex flex-col bg-background overflow-hidden select-none">
       <div className="flex-none">
         <TitleBar 
           user={user} 
@@ -427,14 +427,14 @@ export default function App() {
                 <div className="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-emerald-500/10 shadow-xl">
                   <Shield className="w-8 h-8 text-emerald-400" />
                 </div>
-                <h1 className="text-5xl font-black text-white tracking-tighter italic">SECURITY<br /><span className="text-emerald-500">INITIATION</span></h1>
+                <h1 className="text-5xl font-black text-foreground tracking-tighter italic">SECURITY<br /><span className="text-emerald-500">INITIATION</span></h1>
                 <p className="text-slate-400 leading-relaxed max-w-sm">The BBSNS protocol requires cryptographic activation. A Genesis Admin must initiate the root of trust.</p>
               </div>
               <DeploymentChecklist config={config} />
             </div>
             <div className="bg-slate-900/40 backdrop-blur-3xl border border-white/5 p-8 rounded-[32px] shadow-2xl space-y-6">
               <div className="space-y-2">
-                <h3 className="text-xl font-bold text-white">Genesis Controller</h3>
+                <h3 className="text-xl font-bold text-foreground">Genesis Controller</h3>
                 <p className="text-slate-500 text-sm italic">Authorize activation via secure portal</p>
               </div>
               <Button 
@@ -480,7 +480,7 @@ export default function App() {
       )}
 
       {appState === "admin-app" && (
-        <div className="flex-1 flex min-h-0 bg-[#07090e] overflow-hidden relative">
+        <div className="flex-1 flex min-h-0 bg-background overflow-hidden relative">
           <Sidebar
             role="admin" user={user} activeScreen={adminScreen}
             onNavigate={(s) => setAdminScreen(s as AdminScreen)}
@@ -489,7 +489,7 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
+          <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden">
             {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
             {adminScreen === "manage-notaries" && <ManageNotaries />}
             {adminScreen === "governance" && <Governance role="admin" user={user} />}
@@ -498,7 +498,7 @@ export default function App() {
             {adminScreen === "settings" && <Settings />}
           </main>
           <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-            <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
+            <DialogContent className="bg-card border-border text-foreground rounded-3xl">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-black italic">TERMINATE SESSION?</DialogTitle>
                 <DialogDescription className="text-slate-400">Security tokens will be purged from the local environment.</DialogDescription>
@@ -513,7 +513,7 @@ export default function App() {
       )}
 
       {appState === "notary-app" && (
-        <div className="h-full flex min-h-0 bg-[#07090e] overflow-hidden relative">
+        <div className="h-full flex min-h-0 bg-background overflow-hidden relative">
           <Sidebar
             role="notary" user={user} activeScreen={notaryScreen}
             onNavigate={(s) => setNotaryScreen(s as NotaryScreen)}
@@ -522,7 +522,7 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
+          <main className="flex-1 flex flex-col min-h-0 bg-background overflow-hidden">
             {notaryScreen === "dashboard" && (
               <NotaryDashboard 
                 onViewRequest={(id) => { 
@@ -565,7 +565,7 @@ export default function App() {
             {notaryScreen === "profile" && <Profile user={user} />}
           </main>
           <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-            <DialogContent className="bg-slate-900 border-white/5 text-white rounded-3xl">
+            <DialogContent className="bg-card border-border text-foreground rounded-3xl">
               <DialogHeader>
                 <DialogTitle className="text-2xl font-black italic uppercase">TERMINATE SESSION?</DialogTitle>
                 <DialogDescription className="text-slate-400">Security tokens will be purged from the local environment.</DialogDescription>
@@ -580,7 +580,7 @@ export default function App() {
       )}
 
       {appState === "owner-app" && (
-        <div className="flex-1 flex min-h-0 bg-[#07090e] overflow-hidden relative">
+        <div className="flex-1 flex min-h-0 bg-background overflow-hidden relative">
            <Sidebar
             role="owner" user={user} activeScreen="dashboard"
             onNavigate={() => {}} 
@@ -589,7 +589,7 @@ export default function App() {
             onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           />
-          <main className="flex-1 flex flex-col min-h-0 bg-[#07090e] p-8 overflow-y-auto custom-scrollbar">
+          <main className="flex-1 flex flex-col min-h-0 bg-background p-8 overflow-y-auto custom-scrollbar">
              <JourneyErrorBoundary>
                 <JourneyBox />
              </JourneyErrorBoundary>

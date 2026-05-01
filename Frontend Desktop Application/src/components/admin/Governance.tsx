@@ -453,7 +453,7 @@ export function Governance({ role, user }: GovernanceProps) {
 
     if (selectedProposal) {
         return (
-            <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
+            <div className="flex-1 flex flex-col min-h-0 bg-background">
                 <div className="flex-none p-8 pt-12 pb-2">
                     <Button
                         variant="ghost"
@@ -628,12 +628,12 @@ export function Governance({ role, user }: GovernanceProps) {
     }
 
     return (
-        <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
             {/* Header */}
-            <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+            <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div>
-                        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">SYSTEM GOVERNANCE</h1>
+                        <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">SYSTEM GOVERNANCE</h1>
                         <p className="text-sm text-slate-400 font-medium italic">Propose and vote on network-wide administrative actions</p>
                     </div>
                 </div>
@@ -647,7 +647,7 @@ export function Governance({ role, user }: GovernanceProps) {
                             {systemSettings ? (
                                 <>
                                     <GovernanceHealthWidget settings={systemSettings} />
-                                    <div className="bg-[#0d1425] border border-white/5 rounded-2xl p-6 shadow-sm">
+                                    <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm">
                                         <div className="flex items-center justify-between mb-6">
                                             <p className="text-[10px] font-black uppercase tracking-widest text-primary/40 flex items-center">
                                                 <Users2 className="h-3 w-3 mr-2" /> Signer Authority List
@@ -666,7 +666,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                     </div>
                                 </>
                             ) : (
-                                <div className="bg-[#0d1425] border border-white/5 rounded-2xl p-8 flex flex-col items-center justify-center text-center animate-pulse">
+                                <div className="bg-card border border-border/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center animate-pulse">
                                     <Loader2 className="h-8 w-8 animate-spin text-primary/40 mb-3" />
                                     <p className="text-[10px] font-black text-primary/40 uppercase tracking-widest italic">Syncing Administrative Parameters...</p>
                                 </div>
@@ -782,26 +782,28 @@ export function Governance({ role, user }: GovernanceProps) {
                         {/* RIGHT COLUMN: Action Panel */}
                         {role === 'admin' && (
                             <div className="lg:col-span-1 sticky top-8">
-                                <Card className="bg-[#0d1425] border border-white/10 shadow-2xl rounded-2xl overflow-hidden">
-                                    <CardHeader className="bg-white/5 border-b border-white/5 pb-6">
+                                <Card className="bg-card border border-border/50 shadow-2xl rounded-2xl overflow-hidden">
+                                    <CardHeader className="bg-muted/30 border-b border-border/50 pb-6">
                                         <div className="flex items-center space-x-3">
                                             <div className="p-2 bg-primary/10 rounded-lg">
                                                 <Gavel className="h-5 w-5 text-primary" />
                                             </div>
                                             <div>
-                                                <CardTitle className="text-white font-black uppercase tracking-tighter text-lg leading-none">Initiate Action</CardTitle>
+                                                <CardTitle className="text-foreground font-black uppercase tracking-tighter text-lg leading-none">Initiate Action</CardTitle>
                                                 <CardDescription className="text-primary/40 text-[10px] uppercase font-bold tracking-widest mt-1">Admin Governance Node</CardDescription>
                                             </div>
                                         </div>
                                     </CardHeader>
-                                    <CardContent className="space-y-6 pt-6">
-                                        <div className="space-y-2">
+                                    <CardContent className="flex flex-col gap-6 pt-6">
+
+                                        <div className="flex flex-col gap-2">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Preset Protocol</label>
                                             <Select value={selectedPreset} onValueChange={handlePresetChange}>
-                                                <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11">
+                                                <SelectTrigger className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11">
                                                     <SelectValue placeholder="Select a preset..." />
                                                 </SelectTrigger>
-                                                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+                                                <SelectContent className="bg-popover text-popover-foreground !opacity-100 border-border shadow-2xl">
                                                     {PROPOSAL_PRESETS.map((p) => (
                                                         <SelectItem key={p.id} value={p.id}>
                                                             <div className="flex items-center">
@@ -814,18 +816,20 @@ export function Governance({ role, user }: GovernanceProps) {
                                             </Select>
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className="flex flex-col gap-2">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Action Label</label>
                                             <Input
                                                 value={formData.title}
                                                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                                                 placeholder="e.g., Promote User to Admin"
                                                 disabled={selectedPreset !== 'custom'}
-                                                className="bg-black/20 border-white/10 text-white rounded-xl h-11 focus:ring-primary/20"
+                                                className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 focus:ring-primary/20"
                                             />
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className="flex flex-col gap-2">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                                 {formData.type === 'change_threshold' ? "Target Threshold" : "Target Wallet / ID"}
                                             </label>
@@ -834,11 +838,12 @@ export function Governance({ role, user }: GovernanceProps) {
                                                 onChange={(e) => setFormData({ ...formData, target_id: e.target.value })}
                                                 placeholder={formData.type === 'change_threshold' ? "e.g., 2" : "0x... or UUID"}
                                                 type={formData.type === 'change_threshold' ? "number" : "text"}
-                                                className="bg-black/20 border-white/10 text-white rounded-xl h-11 font-mono text-sm"
+                                                className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 font-mono text-sm"
                                             />
                                         </div>
 
-                                        <div className="space-y-3">
+                                        <div className="flex flex-col gap-3">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus Scope</label>
                                             <div className="flex gap-2">
                                                 {['admin', 'notary', 'all'].map((s) => (
@@ -846,8 +851,8 @@ export function Governance({ role, user }: GovernanceProps) {
                                                         key={s}
                                                         onClick={() => setFormData({ ...formData, participation_scope: s })}
                                                         className={`flex-1 py-2 rounded-lg border text-[9px] font-black uppercase transition-all ${formData.participation_scope === s
-                                                            ? "bg-primary text-black border-primary shadow-lg shadow-primary/20"
-                                                            : "bg-black/20 border-white/10 text-slate-500 hover:border-white/20"
+                                                            ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20"
+                                                            : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
                                                             }`}
                                                     >
                                                         {s}
@@ -857,7 +862,8 @@ export function Governance({ role, user }: GovernanceProps) {
                                         </div>
 
                                         {formData.participation_scope !== 'admin' && (
-                                            <div className="space-y-2">
+                                            <div className="flex flex-col gap-2">
+
                                                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between">
                                                     Targeted Notaries
                                                 </label>
@@ -866,7 +872,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                                         <Badge
                                                             key={notary.id}
                                                             variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
-                                                            className={`cursor-pointer transition-all text-[9px] font-black ${targetNotaries.includes(notary.id) ? "bg-primary text-black border-none" : "border-white/10 text-slate-500 hover:border-primary/50"}`}
+                                                            className={`cursor-pointer transition-all text-[9px] font-black ${targetNotaries.includes(notary.id) ? "bg-primary text-primary-foreground border-none" : "bg-muted border-border text-muted-foreground hover:border-primary/50"}`}
                                                             onClick={() => {
                                                                 setTargetNotaries(prev =>
                                                                     prev.includes(notary.id)
@@ -883,7 +889,8 @@ export function Governance({ role, user }: GovernanceProps) {
                                             </div>
                                         )}
 
-                                        <div className="space-y-2">
+                                        <div className="flex flex-col gap-2">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quorum Window</label>
                                             <Select value={formData.duration_hours} onValueChange={(v) => setFormData({ ...formData, duration_hours: v })}>
                                                 <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11 text-xs">
@@ -899,7 +906,8 @@ export function Governance({ role, user }: GovernanceProps) {
                                             </Select>
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className="flex flex-col gap-2">
+
                                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Protocol Rationale</label>
                                             <Textarea
                                                 className="min-h-[100px] bg-black/20 border-white/10 text-white rounded-xl resize-none text-sm placeholder:text-slate-700"
@@ -926,7 +934,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                     </CardContent>
                                     <CardFooter className="pb-8">
                                         <Button
-                                            className="w-full bg-primary hover:bg-emerald-400 text-black font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
+                                            className="w-full bg-primary hover:bg-emerald-400 !text-zinc-950 font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
                                             onClick={handleCreateProposal}
                                             disabled={isCreating}
                                         >

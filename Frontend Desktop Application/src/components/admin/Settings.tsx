@@ -13,7 +13,7 @@ interface SettingsProps {
 export function Settings({ }: SettingsProps) {
   const { config } = useConfig();
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[#07090e]">
+    <div className="flex-1 flex flex-col min-h-0 bg-background">
       {/* Header */}
       <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
         <div>
@@ -190,7 +190,7 @@ export function Settings({ }: SettingsProps) {
                       <SelectTrigger className="w-40 bg-muted/50 border-border text-foreground rounded-xl h-10 text-[10px] font-black uppercase tracking-widest">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="bg-card border-border text-foreground rounded-xl">
+                      <SelectContent className="bg-popover border-border text-popover-foreground rounded-xl">
                         <SelectItem value="7">Purge Weekly</SelectItem>
                         <SelectItem value="30">Purge Monthly</SelectItem>
                         <SelectItem value="90">Purge Quarterly</SelectItem>

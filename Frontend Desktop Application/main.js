@@ -384,40 +384,8 @@ function handleUnauthorized() {
 }
 
 function openRemoteAuthWindow(url) {
-    if (remoteAuthWindow) {
-        remoteAuthWindow.focus();
-        remoteAuthWindow.loadURL(url);
-        return;
-    }
-
-    remoteAuthWindow = new BrowserWindow({
-        width: 450,
-        height: 700,
-        parent: mainWindow,
-        modal: true,
-        show: false,
-        title: "BBSNS Remote Authority",
-        backgroundColor: '#07090e',
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            sandbox: true
-        }
-    });
-
-    remoteAuthWindow.removeMenu();
-    remoteAuthWindow.loadURL(url);
-    
-    // 🛡️ [SECURITY] Inject Session ID and Mode into window title or via query params
-    // Remote Auth App.tsx reads from window.location.search.
-    
-    remoteAuthWindow.once('ready-to-show', () => {
-        remoteAuthWindow.show();
-    });
-
-    remoteAuthWindow.on('closed', () => {
-        remoteAuthWindow = null;
-    });
+    log("INFO", "AUTH_REMOTE", `Opening remote authority in external browser: ${url}`);
+    shell.openExternal(url);
 }
 
 /**

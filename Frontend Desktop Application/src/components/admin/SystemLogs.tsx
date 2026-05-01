@@ -91,20 +91,20 @@ export function SystemLogs() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
       {/* Header */}
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
-              <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">SYSTEM AUDIT</h1>
+              <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">SYSTEM AUDIT</h1>
               <p className="text-sm text-slate-400 font-medium italic">Comprehensive record of all network activities</p>
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading} className="border-white/10 text-slate-400 hover:text-white rounded-xl h-11 px-4 bg-white/5">
+              <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading} className="border-border/50 text-muted-foreground hover:text-foreground rounded-xl h-11 px-4 bg-muted/30">
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               </Button>
-              <Button onClick={handleExport} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-black rounded-xl h-11 px-6 shadow-lg shadow-emerald-500/10">
+              <Button onClick={handleExport} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-primary-foreground font-black rounded-xl h-11 px-6 shadow-lg shadow-emerald-500/10">
                 <Download className="mr-2" size={16} />
                 EXPORT AUDIT
               </Button>
@@ -118,17 +118,17 @@ export function SystemLogs() {
                 placeholder="Search actor, details, or tx hash..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-12 bg-[#0d1425] border-white/10 text-white rounded-xl h-12 w-full focus:border-emerald-500/50"
+                className="pl-12 bg-input border-border text-foreground rounded-xl h-12 w-full focus:border-primary/50 shadow-inner"
               />
             </div>
-            <div className="flex bg-white/5 p-1 rounded-xl border border-white/10">
+            <div className="flex bg-muted/30 p-1 rounded-xl border border-border/50">
               {["all", "MINT", "BURN", "MULTISIG"].map((type) => (
                 <Button
                   key={type}
                   size="sm"
                   variant={filterType === type ? "default" : "ghost"}
                   onClick={() => setFilterType(type)}
-                  className={`rounded-lg capitalize whitespace-nowrap px-6 py-2 h-10 text-[11px] font-black tracking-widest ${filterType === type ? "bg-white text-black shadow-lg" : "text-slate-400 hover:bg-white/10"}`}
+                  className={`rounded-lg capitalize whitespace-nowrap px-6 py-2 h-10 text-[11px] font-black tracking-widest ${filterType === type ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"}`}
                 >
                   {type === 'all' ? 'ALL LOGS' : type}
                 </Button>
@@ -154,7 +154,7 @@ export function SystemLogs() {
         ) : (
           <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#0a0d14] shadow-sm">
+              <TableHeader className="sticky top-0 z-10 bg-background shadow-sm">
                 <TableRow className="border-border hover:bg-transparent bg-muted/10">
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[160px] pl-6">Timestamp</TableHead>
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[180px]">Actor</TableHead>

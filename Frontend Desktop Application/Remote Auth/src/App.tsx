@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
-import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint } from "lucide-react";
+import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint, Coins, Plus } from "lucide-react";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
 
-type AppStatus = "loading" | "ready" | "signing" | "authorized" | "expired" | "error" | "genesis-check" | "genesis-activate" | "onboarding";
+type AppStatus = "loading" | "ready" | "signing" | "authorized" | "expired" | "error" | "genesis-check" | "genesis-activate" | "onboarding" | "token" | "promote";
 
 function App() {
   const [status, setStatus] = useState<AppStatus>("loading");
@@ -17,6 +17,8 @@ function App() {
   const [handshakeDomain, setHandshakeDomain] = useState<any>(null);
   const [handshakeTypes, setHandshakeTypes] = useState<any>(null);
   const [notarizeMetadata, setNotarizeMetadata] = useState<any>(null);
+  const [targetAddress, setTargetAddress] = useState<string | null>(null);
+  const [isPromoting, setIsPromoting] = useState(false);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -56,8 +58,9 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get("mode");
     const sid = params.get("sessionId");
+    const target = params.get("targetAddress");
 
-    const allowedModes = ["login", "genesis", "notarize"];
+    const allowedModes = ["login", "genesis", "notarize", "token", "promote"];
 
     const init = async () => {
       // 1. HARD INPUT VALIDATION
@@ -67,7 +70,8 @@ function App() {
         return;
       }
 
-      if (!sid) {
+      // sid is required for all modes EXCEPT genesis, token, and promote
+      if (!sid && !["genesis", "token", "promote"].includes(mode)) {
         setError("Missing session identifier (sessionId).");
         setStatus("error");
         return;
@@ -98,6 +102,20 @@ function App() {
       console.log(`[PROTOCOL] Mode: ${mode} | Initialized: ${systemInitialized} | Session: ${sid}`);
 
       switch (mode) {
+        case "token":
+          setStatus("token");
+          break;
+
+        case "promote":
+          if (!target) {
+            setError("Missing targetAddress parameter for promotion.");
+            setStatus("error");
+          } else {
+            setTargetAddress(target);
+            setStatus("promote");
+          }
+          break;
+
         case "login":
         case "notarize":
           if (!systemInitialized) {
@@ -105,7 +123,7 @@ function App() {
             setStatus("error");
           } else {
             setSessionId(sid);
-            fetchSession(sid);
+            fetchSession(sid!);
           }
           break;
 
@@ -506,15 +524,69 @@ function App() {
     }
   };
 
+  const handleAddToken = async () => {
+    if (!(window as any).ethereum) {
+      setError("Web3 Wallet not found.");
+      return;
+    }
+    try {
+      await (window as any).ethereum.request({
+        method: 'wallet_watchAsset',
+        params: {
+          type: 'ERC20',
+          options: {
+            address: config.contracts.ntk,
+            symbol: 'NTK',
+            decimals: 18,
+          },
+        },
+      });
+      setStatus("authorized");
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const handlePromote = async () => {
+    if (!targetAddress || !isConnected) return;
+    setIsPromoting(true);
+    setError(null);
+
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+      
+      const registryAbi = [
+        "function promoteToNotary(address target) external"
+      ];
+      
+      const contract = new ethers.Contract(config.contracts.notaryRegistry, registryAbi, signer);
+      
+      console.log(`[PROMOTION] Sending promoteToNotary for: ${targetAddress}`);
+      const tx = await contract.promoteToNotary(targetAddress);
+      console.log(`[PROMOTION] Transaction sent: ${tx.hash}`);
+      
+      await tx.wait();
+      console.log(`[PROMOTION] Transaction confirmed!`);
+      
+      setStatus("authorized");
+    } catch (err: any) {
+      console.error("[PROMOTION_ERROR]", err);
+      setError(err.reason || err.message || "On-chain promotion failed.");
+    } finally {
+      setIsPromoting(false);
+    }
+  };
+
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.5rem" }}>
         <Shield size={64} className="icon-pulse" color={status === "error" ? "var(--error)" : "var(--primary)"} />
       </div>
 
-      <h1>BBSNS {status.startsWith("genesis") || status === "onboarding" ? "Initialization" : "Remote Auth"}</h1>
+      <h1>BBSNS {status.startsWith("genesis") || status === "onboarding" ? "Initialization" : status === "token" ? "Token Management" : status === "promote" ? "Governance Action" : "Remote Auth"}</h1>
       <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
-        {status === "onboarding" ? "Setting up Genesis Admin Identity" : "Secure Handshake for Protocol Operations"}
+        {status === "onboarding" ? "Setting up Genesis Admin Identity" : status === "token" ? "Manage BBSNS Tokens in your Wallet" : status === "promote" ? "Elevate account to Notary Status" : "Secure Handshake for Protocol Operations"}
       </p>
 
       {status === "loading" && <div className="status-spinner" />}
@@ -570,6 +642,65 @@ function App() {
         </form>
       )}
 
+      {status === "token" && (
+        <div className="view-container">
+           <div className="alert alert-info">
+            <strong>NTK Utility Token</strong><br/>
+            Add the NTK token to your MetaMask to track your reputation and rewards.
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', textAlign: 'left' }}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <Coins size={20} color="var(--primary)" />
+                <span style={{ fontWeight: '600' }}>NTK Token Address</span>
+             </div>
+             <code style={{ fontSize: '0.75rem', wordBreak: 'break-all', display: 'block', padding: '0.5rem', background: 'rgba(0,0,0,0.2)', borderRadius: '0.5rem' }}>
+                {config?.contracts.ntk}
+             </code>
+          </div>
+          <button className="button" onClick={handleAddToken}>
+            <Plus size={18} style={{ marginRight: "10px" }} />
+            Add NTK to MetaMask
+          </button>
+        </div>
+      )}
+
+      {status === "promote" && (
+        <div className="view-container">
+          <div className="alert alert-info">
+            <strong>Notary Promotion Authority</strong><br/>
+            You are about to elevate the following wallet to the <strong>Notary</strong> role on the BNB Testnet.
+          </div>
+          
+          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', textAlign: 'left' }}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                <Wallet size={20} color="var(--primary)" />
+                <span style={{ fontWeight: '600' }}>Target Notary Wallet</span>
+             </div>
+             <code style={{ fontSize: '0.85rem', wordBreak: 'break-all', display: 'block', padding: '0.5rem', background: 'rgba(0,0,0,0.2)', borderRadius: '0.5rem', color: 'var(--primary)' }}>
+                {targetAddress}
+             </code>
+          </div>
+
+          {!isConnected ? (
+            <button className="button" onClick={connectWallet}>
+              <Wallet size={18} style={{ marginRight: "10px" }} />
+              Connect Admin Wallet
+            </button>
+          ) : (
+            <>
+              <div className="address-chip" style={{ marginBottom: "1rem" }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--muted)', marginRight: '8px' }}>ADMIN:</span>
+                {walletAddress}
+              </div>
+              <button className="button" onClick={handlePromote} disabled={isPromoting}>
+                {isPromoting ? <Loader2 className="animate-spin" /> : <Shield size={18} style={{ marginRight: "10px" }} />}
+                Confirm On-Chain Promotion
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {status === "ready" && (
         <div className="view-container">
           <div className="alert alert-info" style={{ fontSize: "0.85rem" }}>
@@ -584,15 +715,15 @@ function App() {
               </div>
               <div style={{ display: 'grid', gap: '8px', fontSize: '0.8rem' }}>
                 <div>
-                  <span style={{ color: 'var(--muted)', display: 'block' }}>File Hash</span>
+                  <span style={{ color: "var(--muted)", display: "block" }}>File Hash</span>
                   <code style={{ fontSize: '0.7rem', wordBreak: 'break-all' }}>{notarizeMetadata.docHash}</code>
                 </div>
                 <div>
-                  <span style={{ color: 'var(--muted)', display: 'block' }}>Owner</span>
+                  <span style={{ color: "var(--muted)", display: "block" }}>Owner</span>
                   <code style={{ fontSize: '0.7rem' }}>{notarizeMetadata.ownerAddress}</code>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                  <span style={{ color: 'var(--muted)' }}>Action</span>
+                  <span style={{ color: "var(--muted)" }}>Action</span>
                   <span style={{ 
                     padding: '2px 8px', 
                     borderRadius: '4px', 

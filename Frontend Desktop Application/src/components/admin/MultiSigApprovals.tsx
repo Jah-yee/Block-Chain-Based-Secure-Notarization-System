@@ -340,15 +340,15 @@ export function MultiSigApprovals() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
       {/* Header */}
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-border bg-background">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">CONSENSUS VAULT</h1>
+            <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">CONSENSUS VAULT</h1>
             <p className="text-sm text-slate-400 font-medium italic uppercase tracking-widest">Protocol Control Center • Multi-Sig Authority</p>
           </div>
-          <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-xl px-6 h-11 border-white/10 hover:bg-white/5 text-[10px] font-black tracking-widest text-slate-400 hover:text-white transition-all">
+          <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-xl px-6 h-11 border-border hover:bg-muted text-[10px] font-black tracking-widest text-muted-foreground hover:text-foreground transition-all">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "REFRESH STATE"}
           </Button>
         </div>
@@ -686,7 +686,7 @@ export function MultiSigApprovals() {
                     <Button
                       onClick={confirmAction}
                       disabled={processing === detailsDialog.tx?.index}
-                      className="bg-foreground text-background hover:bg-foreground/90 font-black rounded-xl px-6 h-12 shadow-lg shadow-black/20 group"
+                      className="bg-primary text-primary-foreground hover:bg-primary/90 font-black rounded-xl px-6 h-12 shadow-lg shadow-black/20 group"
                     >
                       {processing === detailsDialog.tx?.index ? (
                         <div className="flex items-center gap-2">

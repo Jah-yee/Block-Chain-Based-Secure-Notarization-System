@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, UserCheck, UserX, Eye, CheckCircle, ShieldAlert, RotateCw } from "lucide-react";
+import { Search, Filter, UserCheck, UserX, Eye, CheckCircle, ShieldAlert, RotateCw, ShieldCheck } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
@@ -33,6 +33,11 @@ export function ManageNotaries() {
     application: null as any | null,
   });
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [promotionDialog, setPromotionDialog] = useState({
+    open: false,
+    application: null as any | null,
+  });
+
 
   // ===============================
   // LOAD DATA
@@ -123,11 +128,18 @@ export function ManageNotaries() {
 
     try {
       const targetId = confirmDialog.application.id || confirmDialog.application.application_id;
-      console.log(`[NOTARY_ACTION_TRACE] Initiating ${confirmDialog.action} for target: ${targetId}`, confirmDialog.application);
+      const targetApp = confirmDialog.application;
+      console.log(`[NOTARY_ACTION_TRACE] Initiating ${confirmDialog.action} for target: ${targetId}`, targetApp);
 
       if (confirmDialog.action === "approve") {
         await api.approveNotaryApplication(targetId);
-        toast.success("Application approved successfully");
+        toast.success("Application approved in database");
+        
+        // 🛡️ [GOVERNANCE_SYNC] Trigger On-Chain Promotion Dialog
+        setPromotionDialog({
+          open: true,
+          application: targetApp
+        });
       } else {
         await api.rejectNotaryApplication(targetId);
         toast.success("Application rejected");
@@ -144,6 +156,25 @@ export function ManageNotaries() {
       setConfirmDialog({ open: false, action: "", application: null });
     }
   };
+
+  const handlePromoteOnChain = async (app: any) => {
+    try {
+      const config = await api.getSystemConfig();
+      const remoteUrl = `${config.remoteAuthUrl}?mode=promote&targetAddress=${app.wallet_address}`;
+      
+      // @ts-ignore
+      if (window.electronAPI) {
+        // @ts-ignore
+        window.electronAPI.openExternal(remoteUrl);
+      } else {
+        window.open(remoteUrl, "_blank");
+      }
+      toast.info("Promotion portal opened in external browser.");
+    } catch (err: any) {
+      toast.error("Failed to fetch system configuration.");
+    }
+  };
+
 
   const openView = (app: any) => {
     setViewDialog({ open: true, application: app });
@@ -184,9 +215,9 @@ export function ManageNotaries() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-[#07090e] overflow-hidden">
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-white/5 bg-[#07090e]">
-        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">NOTARY MANAGEMENT</h1>
+    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
+      <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
+        <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">NOTARY MANAGEMENT</h1>
         <p className="text-sm text-slate-400 font-medium italic">
           Review and approve verification requests within the administrative vault
         </p>
@@ -202,7 +233,7 @@ export function ManageNotaries() {
         </div>
       )}
 
-      <div className="space-y-8">
+      <div className="flex flex-col gap-8">
         {/* Filters */}
         <div className="flex gap-4">
           <div className="flex-1 relative">
@@ -211,12 +242,12 @@ export function ManageNotaries() {
               placeholder="Search by name or License ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-12 bg-[#0d1425] border-white/10 text-white rounded-xl h-12 w-full focus:border-emerald-500/50"
+              className="pl-12 bg-muted/50 border-border/50 text-foreground rounded-xl h-12 w-full focus:border-primary/50"
             />
           </div>
 
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-56 bg-[#0d1425] border-white/10 text-white rounded-xl h-12">
+            <SelectTrigger className="w-56 bg-muted/50 border-border/50 text-foreground rounded-xl h-12">
               <Filter size={16} className="mr-2 text-slate-400" />
               <SelectValue />
             </SelectTrigger>
@@ -306,15 +337,28 @@ export function ManageNotaries() {
                           )}
 
                           {status === "approved" && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleResend(app)}
-                              className="text-amber-500 hover:bg-amber-500/10"
-                            >
-                              <RotateCw size={14} className="mr-1" />
-                              Resend
-                            </Button>
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePromoteOnChain(app)}
+                                className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10"
+                              >
+                                <ShieldCheck size={14} className="mr-1" />
+                                Promote On-Chain
+                              </Button>
+
+
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleResend(app)}
+                                className="text-amber-500 hover:bg-amber-500/10"
+                              >
+                                <RotateCw size={14} className="mr-1" />
+                                Resend
+                              </Button>
+                            </>
                           )}
                         </div>
                       </TableCell>
@@ -469,7 +513,53 @@ export function ManageNotaries() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Governance Promotion Dialog (Post-Approval) */}
+      <Dialog open={promotionDialog.open} onOpenChange={(open) => setPromotionDialog({ ...promotionDialog, open })}>
+        <DialogContent className="bg-[#0d1425] border-emerald-500/30 text-white max-w-md">
+          <DialogHeader>
+            <div className="flex justify-center mb-4">
+              <div className="p-3 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+                <ShieldCheck size={40} className="text-emerald-500" />
+              </div>
+            </div>
+            <DialogTitle className="text-center text-xl font-black italic tracking-tighter uppercase">Governance Sync Required</DialogTitle>
+            <DialogDescription className="text-center text-slate-400">
+              The application for <span className="text-emerald-400 font-bold">{promotionDialog.application?.name || promotionDialog.application?.full_name}</span> has been approved in the database.
+              <br/><br/>
+              To officially authorize this Notary on the <span className="text-white font-bold">BNB Testnet</span>, you must perform an on-chain promotion.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+             <div className="p-4 bg-white/5 rounded-xl border border-white/10 space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Wallet to Promote</p>
+                <code className="text-xs text-emerald-500 block truncate font-mono">
+                  {promotionDialog.application?.wallet_address}
+                </code>
+             </div>
+          </div>
+          <DialogFooter className="flex-col sm:flex-col gap-2">
+            <Button
+              onClick={() => {
+                handlePromoteOnChain(promotionDialog.application);
+                setPromotionDialog({ open: false, application: null });
+              }}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 text-primary-foreground font-black uppercase italic tracking-tighter"
+            >
+              <ShieldCheck size={16} className="mr-2" />
+              Finalize on Blockchain
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setPromotionDialog({ open: false, application: null })}
+              className="w-full text-slate-500 hover:text-white"
+            >
+              I'll Sync Later
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   </div>
   );
 }
+

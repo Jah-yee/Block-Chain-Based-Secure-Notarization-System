@@ -170,9 +170,9 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 payload: payloadData
             });
 
-            // 3. Open Remote Auth Portal (Internal Window)
+            // 3. Open Remote Auth Portal (External Browser for MetaMask support)
             const remoteUrl = `https://auth.bbsns.online/?mode=notarize&sessionId=${session.sessionId}`;
-            await (window as any).electronAPI.auth.openRemote(remoteUrl);
+            await (window as any).electronAPI.api.openExternal(remoteUrl);
 
             toast.info("Remote Signing Initiated. Please approve the request in your browser.");
 

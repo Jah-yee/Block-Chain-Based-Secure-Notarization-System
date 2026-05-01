@@ -47,7 +47,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
   const menuItems: MenuItem[] = role === "admin" ? adminMenuItems : (role === "notary" ? notaryMenuItems : ownerMenuItems);
 
   return (
-    <div className={`${isCollapsed ? "w-20" : "w-56"} bg-[#0a0c14] border-r border-white/5 flex flex-col h-full transition-all duration-500 ease-in-out relative z-40 overflow-visible shadow-[10px_0_30px_rgba(0,0,0,0.5)] flex-none`}>
+    <div className={`${isCollapsed ? "w-20" : "w-56"} bg-card border-r border-border/50 flex flex-col h-full transition-all duration-500 ease-in-out relative z-40 overflow-visible shadow-[10px_0_30px_rgba(0,0,0,0.1)] dark:shadow-[10px_0_30px_rgba(0,0,0,0.5)] flex-none`}>
       {/* 🛡️ [AESTHETIC] Animated Background Glow */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/20 blur-[100px] rounded-full animate-pulse" />
@@ -55,17 +55,17 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       </div>
 
       {/* Brand Header & Toggle Consolidation */}
-      <div className={`flex items-center transition-all ${isCollapsed ? "py-6 flex-col gap-8 justify-center" : "p-5 border-b border-white/5 justify-between"}`}>
+      <div className={`flex items-center transition-all ${isCollapsed ? "py-6 flex-col gap-8 justify-center" : "p-5 border-b border-border/50 justify-between"}`}>
         <div className={`flex items-center ${isCollapsed ? "flex-col" : "gap-3"}`}>
           <div className="relative group">
               <div className="absolute inset-0 bg-emerald-500/40 blur-lg rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               <div className="relative bg-gradient-to-br from-emerald-400 to-emerald-600 p-2 rounded-xl border border-white/10 shadow-lg transform group-hover:rotate-6 transition-transform">
-                  <Shield size={isCollapsed ? 24 : 20} className="text-white" />
+                  <Shield size={isCollapsed ? 24 : 20} className="text-primary-foreground" />
               </div>
           </div>
           {!isCollapsed && (
             <div className="animate-in fade-in slide-in-from-left-2 duration-500">
-              <h2 className="text-xl font-black italic tracking-tighter text-white">BBSNS</h2>
+              <h2 className="text-xl font-black italic tracking-tighter text-foreground">BBSNS</h2>
               <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <p className="text-[9px] text-emerald-500/80 uppercase font-black tracking-widest">
@@ -79,7 +79,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
         {/* Improved Toggle Button */}
         <button
           onClick={onToggleCollapse}
-          className={`bg-white/5 hover:bg-emerald-500/10 text-white/40 hover:text-emerald-400 rounded-lg p-2 transition-all border border-white/10 hover:border-emerald-500/30 ${isCollapsed ? "w-10 h-10 flex items-center justify-center" : ""}`}
+          className={`bg-muted/50 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-lg p-2 transition-all border border-border/50 hover:border-primary/30 ${isCollapsed ? "w-10 h-10 flex items-center justify-center" : ""}`}
           title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
           {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
@@ -93,12 +93,12 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
           <div className="p-4 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-2xl flex items-center gap-3 group hover:border-white/10 transition-colors">
             <div className="relative shrink-0">
                <div className="absolute inset-0 bg-emerald-500/20 blur-md rounded-full" />
-               <div className="relative w-10 h-10 rounded-full bg-[#1a1c26] border border-white/10 flex items-center justify-center text-emerald-400 font-black shadow-inner">
+               <div className="relative w-10 h-10 rounded-full bg-muted border border-border/50 flex items-center justify-center text-primary font-black shadow-inner">
                   {(user?.name || "U").slice(0, 1).toUpperCase()}
                </div>
             </div>
             <div className="overflow-hidden">
-              <p className="text-sm font-bold text-white truncate group-hover:text-emerald-400 transition-colors">{user?.name || "System Actor"}</p>
+              <p className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">{user?.name || "System Actor"}</p>
               <div className="flex items-center gap-1.5 text-[9px] font-mono text-white/40">
                   <Database size={8} />
                   <span className="truncate">{(user?.wallet_address || "0x00...000").slice(0, 6)}...{(user?.wallet_address || "0000").slice(-4)}</span>
@@ -127,7 +127,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
               title={isCollapsed ? item.label : ""}
               className={`group w-full flex items-center transition-all duration-300 relative rounded-xl overflow-hidden ${isCollapsed ? "justify-center p-3" : "gap-3 px-4 py-3"} ${isActive
                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                : "text-white/50 hover:bg-white/[0.03] hover:text-white"
+                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
             >
               {isActive && (
@@ -137,21 +137,21 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
               <div className="relative">
                 <Icon size={18} className={`${isActive ? "text-emerald-400" : "group-hover:text-white"} transition-colors`} />
                 {isCollapsed && item.badge && item.badge > 0 ? (
-                  <span className="absolute -top-2 -right-2 bg-emerald-500 text-white text-[7px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full border border-[#0a0c14] shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                  <span className="absolute -top-2 -right-2 bg-primary text-primary-foreground text-[7px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full border border-card shadow-[0_0_10px_rgba(16,185,129,0.5)]">
                     {item.badge}
                   </span>
                 ) : null}
               </div>
               
               {!isCollapsed && (
-                <span className={`relative z-10 flex-1 text-left text-sm font-medium ${isActive ? "text-emerald-400" : "text-white/70 group-hover:text-white"}`}>
+                <span className={`relative z-10 flex-1 text-left text-sm font-medium ${isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}`}>
                     {item.label}
                 </span>
               )}
 
               {!isCollapsed && item.badge && item.badge > 0 ? (
                 <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[18px] text-center shadow-[0_0_10px_rgba(16,185,129,0.3)] animate-pulse">
-                  {item.badge}
+                   {item.badge}
                 </span>
               ) : null}
             </button>
@@ -160,11 +160,11 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       </nav>
 
       {/* Footer Controls */}
-      <div className="p-4 border-t border-white/5 space-y-2 bg-gradient-to-t from-white/[0.02] to-transparent">
+      <div className="p-4 border-t border-border/50 space-y-2 bg-gradient-to-t from-muted/5 to-transparent">
         <Button
           onClick={onToggleDarkMode}
           variant="ghost"
-          className={`w-full group text-white/50 hover:text-emerald-400 hover:bg-emerald-500/5 border border-transparent hover:border-emerald-500/20 rounded-xl transition-all duration-300 ${isCollapsed ? "justify-center px-0" : "justify-start px-4"}`}
+          className={`w-full group text-muted-foreground hover:text-primary hover:bg-primary/5 border border-transparent hover:border-primary/20 rounded-xl transition-all duration-300 ${isCollapsed ? "justify-center px-0" : "justify-start px-4"}`}
         >
           {isDarkMode ? <Sun size={18} className={isCollapsed ? "" : "mr-3"} /> : <Moon size={18} className={isCollapsed ? "" : "mr-3"} />}
           {!isCollapsed && <span className="text-xs font-bold tracking-tight">APPEARANCE</span>}
@@ -172,7 +172,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
         <Button
           onClick={onLogout}
           variant="ghost"
-          className={`w-full group text-white/50 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 rounded-xl transition-all duration-300 ${isCollapsed ? "justify-center px-0" : "justify-start px-4"}`}
+          className={`w-full group text-muted-foreground hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 rounded-xl transition-all duration-300 ${isCollapsed ? "justify-center px-0" : "justify-start px-4"}`}
         >
           <LogOut size={18} className={isCollapsed ? "" : "mr-3"} />
           {!isCollapsed && <span className="text-xs font-bold tracking-tight">LOGOUT</span>}

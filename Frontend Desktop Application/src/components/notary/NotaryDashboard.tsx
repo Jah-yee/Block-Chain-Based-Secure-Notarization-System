@@ -64,27 +64,14 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     }, [fetchData]);
 
     const handleAddTokenToWallet = async () => {
-        if (!(window as any).ethereum) {
-            toast.error("MetaMask not found.");
-            return;
-        }
-        try {
-            // NTK Address (Using authoritative config)
-            const NTK_ADDRESS = config?.contracts.ntk || "";
-            await (window as any).ethereum.request({
-                method: 'wallet_watchAsset',
-                params: {
-                    type: 'ERC20',
-                    options: {
-                        address: NTK_ADDRESS,
-                        symbol: 'NTK',
-                        decimals: 18,
-                    },
-                },
-            });
-            toast.success("NTK Token added to wallet.");
-        } catch (error) {
-            console.error(error);
+        // 🛡️ [BRIDGE] Desktop environment cannot interact with extensions directly.
+        // Redirecting to Remote Auth portal for secure token management.
+        const url = `${config?.remoteAuthUrl}/?mode=token`;
+        if ((window as any).electronAPI) {
+            (window as any).electronAPI.api.openExternal(url);
+            toast.info("Opening browser to add NTK Token...");
+        } else {
+            window.open(url, '_blank');
         }
     };
 
