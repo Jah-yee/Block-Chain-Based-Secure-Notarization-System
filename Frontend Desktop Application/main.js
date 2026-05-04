@@ -287,9 +287,13 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/governance\/proposals\/[\w-]+\/prepare-on-chain$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/submit-on-chain$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/vote$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/proposals\/[\w-]+$/, methods: ["GET", "DELETE"] },
     { path: /^\/api\/governance\/proposals\/0\/confirm-on-chain$/, methods: ["POST"] },
     { path: /^\/api\/governance\/remote\/multisig\/session$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/vote\/session$/, methods: ["POST"] },
     { path: /^\/api\/governance\/remote\/vote\/status\/[\w-]+$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/remote\/submit\/session$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/submit\/status\/[\w-]+$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/settings$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/stats$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/transactions$/, methods: ["GET"] },
@@ -393,16 +397,8 @@ function openRemoteAuthWindow(url) {
  * Determines if we should use a local build or a remote authority.
  */
 function getAuthHandshakeUrl(mode, sessionId) {
-    const localAuthPath = path.join(__dirname, 'Remote Auth', 'dist', 'index.html');
-    if (fs.existsSync(localAuthPath)) {
-        log("INFO", "AUTH_ISOLATION", `Using LOCAL Remote Auth UI for mode: ${mode}`);
-        // 🛡️ [SECURITY] Convert path to file:// URL to support query parameters
-        const fileUrl = url.pathToFileURL(localAuthPath).href;
-        return `${fileUrl}?mode=${mode}&sessionId=${sessionId}`;
-    } else {
-        log("WARN", "AUTH_ISOLATION", `Local Auth UI missing. Falling back to remote authority for mode: ${mode}`);
-        return `https://auth.bbsns.online/?mode=${mode}&sessionId=${sessionId}`;
-    }
+    log("INFO", "AUTH_ISOLATION", `Routing to Remote Authority for mode: ${mode}`);
+    return `https://auth.bbsns.online/?mode=${mode}&sessionId=${sessionId}`;
 }
 
 /**

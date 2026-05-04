@@ -164,6 +164,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
 
             // 2. Initiate Remote Session
             const deviceId = await (window as any).electronAPI.api.getDeviceId();
+            const configRes = await api.getSystemConfig();
             const session = await api.createRemoteNotarizeSession({
                 device_id: deviceId,
                 document_id: requestId,
@@ -171,7 +172,8 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
             });
 
             // 3. Open Remote Auth Portal (External Browser for MetaMask support)
-            const remoteUrl = `https://auth.bbsns.online/?mode=notarize&sessionId=${session.sessionId}`;
+            const baseAuthUrl = configRes.remoteAuthUrl.replace(/\/$/, "");
+            const remoteUrl = `${baseAuthUrl}/?mode=notarize&sessionId=${session.sessionId}`;
             await (window as any).electronAPI.api.openExternal(remoteUrl);
 
             toast.info("Remote Signing Initiated. Please approve the request in your browser.");

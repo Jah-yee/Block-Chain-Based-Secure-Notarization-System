@@ -63,17 +63,6 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
         fetchData();
     }, [fetchData]);
 
-    const handleAddTokenToWallet = async () => {
-        // 🛡️ [BRIDGE] Desktop environment cannot interact with extensions directly.
-        // Redirecting to Remote Auth portal for secure token management.
-        const url = `${config?.remoteAuthUrl}/?mode=token`;
-        if ((window as any).electronAPI) {
-            (window as any).electronAPI.api.openExternal(url);
-            toast.info("Opening browser to add NTK Token...");
-        } else {
-            window.open(url, '_blank');
-        }
-    };
 
     const stats = [
         {
@@ -98,12 +87,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
             label: "NTK Balance",
             value: ntkBalance,
             icon: Coins,
-            color: "primary",
-            action: {
-                label: "Add to Wallet",
-                icon: Plus,
-                onClick: handleAddTokenToWallet
-            }
+            color: "primary"
         }
     ];
 

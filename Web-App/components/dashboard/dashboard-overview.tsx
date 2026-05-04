@@ -5,6 +5,7 @@ import { FileText, CheckCircle, Clock, AlertCircle } from "lucide-react"
 import { motion, useInView } from "framer-motion"
 import { useRef, useEffect, useState } from "react"
 import { apiClient } from "@/lib/api-client"
+import { normalizeStatus } from "@/lib/status-utils"
 
 export function DashboardOverview() {
   const containerRef = useRef(null)

@@ -20,7 +20,10 @@ import {
     Users2,
     Shield,
     Activity,
-    Settings
+    Settings,
+    Zap,
+    FileText,
+    Trash2
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "../ui/card"
 import { Button } from "../ui/button";
@@ -40,7 +43,7 @@ interface Proposal {
     target_id: string
     proposer_id: number
     proposer_name: string
-    status: 'active' | 'passed' | 'rejected' | 'executed'
+    status: 'active' | 'passed' | 'rejected' | 'executed' | 'cancelled'
     approvals: number
     rejections: number
     my_vote: 'approve' | 'reject' | null
@@ -109,6 +112,14 @@ const PROPOSAL_PRESETS = [
         type: "remove_notary",
         title: "Revoke Notary Certification",
         description: "Formally remove a notary from the registry. This will revoke their on-chain signing rights and system role."
+    },
+    {
+        id: "add_notary",
+        label: "Promote Notary",
+        icon: UserPlus,
+        type: "add_notary",
+        title: "Approve New Notary Authority",
+        description: "Promote the target user to Notary status, granting them document verification and signing privileges."
     },
     {
         id: "custom",
@@ -210,10 +221,20 @@ export function Governance({ role, user }: GovernanceProps) {
     const [isLoading, setIsLoading] = useState(true)
     const [isCreating, setIsCreating] = useState(false)
     const [isVoting, setIsVoting] = useState<number | null>(null)
+    const [isExecuting, setIsExecuting] = useState<number | null>(null)
+    const [isCancelling, setIsCancelling] = useState<number | null>(null)
     const [selectedProposalId, setSelectedProposalId] = useState<number | null>(null)
     const [currentTime, setCurrentTime] = useState(Math.floor(Date.now() / 1000))
     const [allNotaries, setAllNotaries] = useState<any[]>([])
     const [targetNotaries, setTargetNotaries] = useState<number[]>([])
+    const [copiedId, setCopiedId] = useState<string | null>(null)
+    const { config } = useConfig();
+
+    const handleCopy = (text: string, id: string) => {
+        navigator.clipboard.writeText(text);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+    }
 
     const selectedProposal = proposals.find(p => p.id === selectedProposalId)
 
@@ -332,41 +353,86 @@ export function Governance({ role, user }: GovernanceProps) {
             })
             toast.success("Proposal drafted! Initializing on-chain submission...")
 
-            // 2. Prepare On-Chain Data
+            const cleanId = proposal.id; // DB ID
+
+            // 2. Prepare On-Chain Data & Handle Signing
             // @ts-ignore
-            if (!window.ethereum) {
-                toast.warning("No wallet found. Proposal created but NOT submitted on-chain.");
+            if (window.ethereum) {
+                const prepData = await api.prepareProposalOnChain(cleanId);
+
+                // 3. User Sign (EIP-712 Submit)
+                // @ts-ignore
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                // @ts-ignore
+                const signature = await window.ethereum.request({
+                    method: "eth_signTypedData_v4",
+                    params: [accounts[0], JSON.stringify({
+                        domain: prepData.domain,
+                        types: prepData.types,
+                        primaryType: "Submit",
+                        message: prepData.message
+                    })],
+                });
+
+                // 4. Relay Signature
+                await api.submitProposalOnChain(cleanId, signature);
+                toast.success("Proposal submitted to Multi-Sig On-Chain!");
+                setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
+                fetchProposals()
+            } else {
+                // 🛡️ [REMOTE_FALLBACK] Handle creation via remote handshake
+                console.log("[GOV] No local wallet. Starting Remote Submit Handshake...");
+                toast.info("Wallet audit required. Opening secure bridge...");
+
+                const session = await api.request('/api/governance/remote/submit/session', {
+                    method: 'POST',
+                    body: JSON.stringify({ proposalId: cleanId })
+                });
+
+                // Get Config and Open Browser
+                const configRes = await api.getSystemConfig();
+                const baseAuthUrl = configRes.remoteAuthUrl.replace(/\/$/, "");
+                const webAppUrl = `${baseAuthUrl}/?mode=gov-submit&sessionId=${session.sessionId}`;
+
+                // @ts-ignore
+                if (window.electronAPI) {
+                    // @ts-ignore
+                    window.electronAPI.openExternal(webAppUrl);
+                } else {
+                    window.open(webAppUrl, '_blank');
+                }
+
+                // Poll for completion
+                let pollCount = 0;
+                const pollInterval = setInterval(async () => {
+                    pollCount++;
+                    try {
+                        const status = await api.request(`/api/governance/remote/submit/status/${session.sessionId}`);
+                        if (status.status === 'authorized') {
+                            clearInterval(pollInterval);
+                            toast.success("Governance submission authorized!");
+                            setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
+                            fetchProposals();
+                            setIsCreating(false);
+                        } else if (status.status === 'failed' || pollCount > 60) {
+                            clearInterval(pollInterval);
+                            toast.error("Submission handshake failed or timed out.");
+                            setIsCreating(false);
+                        }
+                    } catch (e) {
+                        console.error("Submit Poll Error:", e);
+                    }
+                }, 2000);
+                
+                // Return early so finally doesn't set isCreating(false) immediately
                 return;
             }
-
-            const cleanId = proposal.id; // DB ID
-            const prepData = await api.prepareProposalOnChain(cleanId);
-
-            // 3. User Sign (EIP-712 Submit)
-            // @ts-ignore
-            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-            // @ts-ignore
-            const signature = await window.ethereum.request({
-                method: "eth_signTypedData_v4",
-                params: [accounts[0], JSON.stringify({
-                    domain: prepData.domain,
-                    types: prepData.types,
-                    primaryType: "Submit",
-                    message: prepData.message
-                })],
-            });
-
-            // 4. Relay Signature
-            await api.submitProposalOnChain(cleanId, signature);
-            toast.success("Proposal submitted to Multi-Sig On-Chain!");
-
-            setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
-            fetchProposals()
         } catch (err: any) {
             console.error(err);
             toast.error(err.message || "Failed to submit proposal chain-side")
         } finally {
-            setIsCreating(false)
+            // @ts-ignore
+            if (window.ethereum) setIsCreating(false)
         }
     }
 
@@ -407,14 +473,13 @@ export function Governance({ role, user }: GovernanceProps) {
                 body: JSON.stringify({ proposalId, decision })
             });
 
-            const { config } = useConfig();
-            const webAppUrl = `${config?.webAppUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
+            const baseAuthUrl = (config?.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
+            const webAppUrl = `${baseAuthUrl}/?mode=gov-vote&sessionId=${session.sessionId}`;
 
             // Open System Browser
             // @ts-ignore
             if (window.electronAPI) {
-                // @ts-ignore
-                window.electronAPI.openExternal(webAppUrl);
+                           window.electronAPI.openExternal(webAppUrl);
             } else {
                 window.open(webAppUrl, '_blank');
             }
@@ -451,7 +516,47 @@ export function Governance({ role, user }: GovernanceProps) {
         }
     }
 
+    const handleCancelProposal = async (id: number) => {
+        if (!window.confirm("PROTOCOL ADVISORY: You are about to cancel this proposal. This action will permanently revoke its active status. Proceed?")) return;
+
+        setIsCancelling(id);
+        try {
+            await api.request(`/api/governance/proposals/${id}`, { method: 'DELETE' });
+            toast.success("Governance Proposal Cancelled Successfully");
+            fetchProposals();
+            setSelectedProposalId(null);
+        } catch (err: any) {
+            console.error("Cancel Proposal Error:", err);
+            toast.error(err.message || "Authority Denied: Cancellation Failed");
+        } finally {
+            setIsCancelling(null);
+        }
+    }
+
+    const handleExecuteProposal = async (proposalId: number) => {
+        setIsExecuting(proposalId)
+        try {
+            toast.info("Initializing blockchain-first execution pipeline...")
+            const res = await api.executeProposal(proposalId)
+            
+            if (res.warning) {
+                toast.warning(res.warning)
+            } else {
+                toast.success("Proposal executed successfully! On-chain and Off-chain states synced.")
+            }
+            
+            fetchProposals()
+            fetchSystemSettings()
+        } catch (err: any) {
+            console.error("[GOV_EXECUTE_FAIL]", err)
+            toast.error(err.message || "Execution failed. Check relayer logs.")
+        } finally {
+            setIsExecuting(null)
+        }
+    }
+
     if (selectedProposal) {
+
         return (
             <div className="flex-1 flex flex-col min-h-0 bg-background">
                 <div className="flex-none p-8 pt-12 pb-2">
@@ -500,9 +605,26 @@ export function Governance({ role, user }: GovernanceProps) {
                                     </div>
                                 )}
 
-                            <div className="bg-muted/30 p-4 rounded-2xl border border-border mt-6 font-mono text-xs">
-                                <p className="text-muted-foreground uppercase font-black tracking-tighter mb-1">Target Identity</p>
-                                <p className="text-foreground break-all selectable">{selectedProposal.target_id}</p>
+                            <div className="bg-muted/30 p-4 rounded-2xl border border-border mt-6 font-mono text-xs relative group/target">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-muted-foreground uppercase font-black tracking-tighter mb-1 text-[9px]">Target Identity</p>
+                                        <p className="text-foreground break-all selectable pr-10">{selectedProposal.target_id}</p>
+                                    </div>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 hover:bg-primary/20 text-muted-foreground hover:text-primary relative"
+                                        onClick={() => handleCopy(selectedProposal.target_id, 'target')}
+                                    >
+                                        <FileText className="h-4 w-4" />
+                                        {copiedId === 'target' && (
+                                            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-emerald-500 text-white text-[10px] font-black rounded shadow-xl animate-in fade-in zoom-in duration-200">
+                                                COPIED!
+                                            </span>
+                                        )}
+                                    </Button>
+                                </div>
                             </div>
                         </CardHeader>
 
@@ -609,16 +731,60 @@ export function Governance({ role, user }: GovernanceProps) {
                                     )}
                                 </>
                             ) : (
-                                <div className="w-full flex flex-col items-center justify-center p-6 bg-muted/30 rounded-2xl border border-border space-y-2">
+                                <div className="w-full flex flex-col items-center justify-center p-6 bg-muted/30 rounded-2xl border border-border space-y-4">
                                     <div className="flex items-center text-xs text-muted-foreground font-black uppercase tracking-[0.2em]">
-                                        <ShieldCheck className="h-5 w-5 mr-3 text-muted-foreground" />
-                                        Consensus Finalized & Sealed
+                                        <ShieldCheck className={`h-5 w-5 mr-3 ${selectedProposal.status === 'executed' ? 'text-emerald-500' : 'text-muted-foreground'}`} />
+                                        {selectedProposal.status === 'executed' ? 'Governance Cycle Complete' : 'Consensus Finalized & Sealed'}
                                     </div>
+                                    
+                                    {selectedProposal.status === 'passed' && role === 'admin' && (
+                                        <Button
+                                            className="w-full font-black h-14 rounded-2xl text-lg shadow-xl shadow-emerald-500/10 transition-all bg-emerald-500 text-white hover:bg-emerald-600 border border-emerald-500/20"
+                                            onClick={() => handleExecuteProposal(selectedProposal.id)}
+                                            disabled={isExecuting !== null}
+                                        >
+                                            {isExecuting === selectedProposal.id ? <Loader2 className="h-6 w-6 animate-spin mr-2" /> : <Zap className="h-6 w-6 mr-3" />}
+                                            Execute On-Chain
+                                        </Button>
+                                    )}
+
+                                    {selectedProposal.status === 'executed' && (
+                                        <div className="flex items-center gap-2 text-emerald-500 text-[10px] font-black uppercase tracking-widest bg-emerald-500/5 px-4 py-2 rounded-xl border border-emerald-500/10">
+                                            <CheckCircle2 size={12} />
+                                            Action Applied Successfully
+                                        </div>
+                                    )}
+
                                     <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-tighter">
-                                        This proposal has reached its threshold or declined.
+                                        {selectedProposal.status === 'executed' 
+                                            ? "System state has been updated to reflect the approved changes."
+                                            : "This proposal has reached its threshold and is awaiting administrative execution."}
                                     </p>
                                 </div>
                             )}
+
+                            {/* CANCEL BUTTON: Visible only within 1 hour and if not on-chain */}
+                            {(() => {
+                                const proposalAgeMs = Date.now() - new Date(selectedProposal.created_at).getTime();
+                                const isRecent = proposalAgeMs < (24 * 3600000); // Extended to 24h for testing
+                                const isNotOnChain = selectedProposal.on_chain_tx_index === null || selectedProposal.on_chain_tx_index === undefined;
+                                const isAuthorized = role === 'admin' || (user?.id && selectedProposal.proposer_id === user.id);
+                                
+                                if (selectedProposal.status === 'active' && isNotOnChain && isRecent && isAuthorized) {
+                                    return (
+                                        <Button
+                                            variant="ghost"
+                                            className="w-full text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 font-black uppercase tracking-widest text-[10px] h-10 border border-rose-500/20"
+                                            onClick={() => handleCancelProposal(selectedProposal.id)}
+                                            disabled={isCancelling !== null}
+                                        >
+                                            {isCancelling === selectedProposal.id ? <Loader2 className="h-3 w-3 animate-spin mr-2" /> : <Trash2 className="h-3 w-3 mr-2" />}
+                                            Withdraw Proposal (24h Window)
+                                        </Button>
+                                    );
+                                }
+                                return null;
+                            })()}
                         </CardFooter>
                     </Card>
                 </div>
@@ -658,8 +824,18 @@ export function Governance({ role, user }: GovernanceProps) {
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => (
-                                                <Badge key={i} variant="secondary" className="bg-primary/10 text-[10px] font-mono border-white/5 text-primary/70 selectable px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-all">
+                                                <Badge 
+                                                    key={i} 
+                                                    variant="secondary" 
+                                                    className="bg-primary/10 text-[10px] font-mono border-white/5 text-primary/70 selectable px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-all cursor-pointer relative"
+                                                    onClick={() => handleCopy(s, `signer-${i}`)}
+                                                >
                                                     {(s || "").slice(0, 14)}...{(s || "").slice(-12)}
+                                                    {copiedId === `signer-${i}` && (
+                                                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50">
+                                                            COPIED!
+                                                        </span>
+                                                    )}
                                                 </Badge>
                                             ))}
                                         </div>
@@ -709,245 +885,238 @@ export function Governance({ role, user }: GovernanceProps) {
                             </CardContent>
                         </Card>
                     ) : (
-                        <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/50">
-                            {proposals.map((prop) => (
-                                <div
-                                    key={prop.id}
-                                    className="p-4 hover:bg-muted/30 transition-all flex items-center justify-between group"
-                                >
-                                    <div className="flex items-center space-x-4 min-w-0">
-                                        <div className={`p-2 rounded-lg ${prop.status === 'executed' ? 'bg-primary/10 text-primary' :
-                                            prop.status === 'active' ? 'bg-blue-500/10 text-blue-400' :
-                                                'bg-muted text-muted-foreground'
-                                            }`}>
-                                            <Gavel className="h-4 w-4" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="flex items-center space-x-2">
-                                                <span className="text-xs font-mono font-bold text-muted-foreground">#P{prop.id}</span>
-                                                <h4 className="text-sm font-bold text-foreground truncate">{prop.title}</h4>
+                        <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+                            <div className="max-h-[420px] overflow-y-auto divide-y divide-border/30 scrollbar-thin scrollbar-thumb-primary/10">
+                                {proposals
+                                    .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected')
+                                    .map((prop) => (
+                                    <div
+                                        key={prop.id}
+                                        className={`p-3.5 transition-all cursor-pointer group flex items-center justify-between ${selectedProposalId === prop.id
+                                            ? 'bg-primary/5'
+                                            : 'bg-transparent hover:bg-muted/30'
+                                            }`}
+                                        onClick={() => setSelectedProposalId(prop.id)}
+                                    >
+                                        <div className="flex items-center space-x-4 min-w-0">
+                                            <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${selectedProposalId === prop.id
+                                                ? 'bg-primary/20 border-primary/30 text-primary'
+                                                : 'bg-muted/30 border-border/50 text-muted-foreground'
+                                                }`}>
+                                                <Gavel className="h-5 w-5" />
                                             </div>
-                                            <div className="flex items-center space-x-2 mt-0.5">
-                                                <Badge className="text-[9px] h-4 py-0 px-2 uppercase tracking-tighter bg-muted hover:bg-muted text-muted-foreground border-none">
-                                                    {prop.type.replace('_', ' ')}
-                                                </Badge>
-                                                <span className="text-[10px] text-muted-foreground/60">
-                                                    {new Date(prop.created_at).toLocaleDateString()}
-                                                </span>
-                                                {prop.on_chain_submission_time && (
-                                                    <Clock className="h-3 w-3 text-amber-500 animate-pulse" />
+                                            <div className="min-w-0">
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-[10px] font-black text-primary/40">#P{prop.id}</span>
+                                                    <h4 className="text-sm font-bold text-foreground truncate max-w-[200px] tracking-tight">{prop.title}</h4>
+                                                </div>
+                                                <div className="flex items-center space-x-3 mt-1">
+                                                    <span className="text-[10px] font-bold text-muted-foreground/60 uppercase">
+                                                        {prop.type.replace('_', ' ')}
+                                                    </span>
+                                                    <span className="h-1 w-1 rounded-full bg-border" />
+                                                    <span className="text-[10px] font-medium text-muted-foreground/40">
+                                                        {new Date(prop.created_at).toLocaleDateString()}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center space-x-6">
+                                            <div className="hidden sm:flex flex-col items-end space-y-1">
+                                                <div className="flex items-center text-[11px] font-black text-foreground/80">
+                                                    <Users2 className="h-3 w-3 mr-1.5 text-primary/60" />
+                                                    {prop.approvals} <span className="mx-1 text-muted-foreground/30">/</span> {systemSettings?.threshold || prop.threshold || 2}
+                                                </div>
+                                                {prop.status === 'active' && (
+                                                    <div className="h-1 w-12 bg-muted rounded-full overflow-hidden">
+                                                        <div 
+                                                            className="h-full bg-primary transition-all duration-500" 
+                                                            style={{ width: `${Math.min(100, (prop.approvals / (systemSettings?.threshold || prop.threshold || 2)) * 100)}%` }}
+                                                        />
+                                                    </div>
                                                 )}
                                             </div>
+
+                                            <ChevronRight className={`h-5 w-5 transition-transform ${selectedProposalId === prop.id ? 'text-primary translate-x-1' : 'text-muted-foreground/20 group-hover:text-muted-foreground/50'}`} />
                                         </div>
                                     </div>
-
-                                    <div className="flex items-center space-x-4">
-                                        <div className="hidden md:flex flex-col items-end gap-2">
-                                            {prop.status === 'active' ? (
-                                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 uppercase tracking-widest text-[9px] font-black h-fit px-3 py-1">
-                                                    Active Consensus
-                                                </Badge>
-                                            ) : prop.status === 'rejected' ? (
-                                                <Badge variant="outline" className="bg-rose-500/10 text-rose-500 border-rose-500/20 uppercase tracking-widest text-[9px] font-black h-fit px-3 py-1">
-                                                    Declined
-                                                </Badge>
-                                            ) : (
-                                                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 uppercase tracking-widest text-[9px] font-black h-fit px-3 py-1">
-                                                    {prop.status}
-                                                </Badge>
-                                            )}
-                                            <div className="flex items-center text-[10px] text-muted-foreground whitespace-nowrap">
-                                                <Users2 className="h-3 w-3 mr-1" />
-                                                {prop.approvals}/{systemSettings?.threshold || prop.threshold} Quorum
-                                            </div>
-                                        </div>
-
-                                        <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            className="bg-primary/10 text-primary hover:bg-primary hover:text-white rounded-lg font-bold group-hover:scale-105 transition-all"
-                                            onClick={() => setSelectedProposalId(prop.id)}
-                                        >
-                                            <Eye className="h-4 w-4 mr-2" />
-                                            View
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
                         </div>
                     )}
-                            </div>
-                        </div>
-
-                        {/* RIGHT COLUMN: Action Panel */}
-                        {role === 'admin' && (
-                            <div className="lg:col-span-1 sticky top-8">
-                                <Card className="bg-card border border-border/50 shadow-2xl rounded-2xl overflow-hidden">
-                                    <CardHeader className="bg-muted/30 border-b border-border/50 pb-6">
-                                        <div className="flex items-center space-x-3">
-                                            <div className="p-2 bg-primary/10 rounded-lg">
-                                                <Gavel className="h-5 w-5 text-primary" />
-                                            </div>
-                                            <div>
-                                                <CardTitle className="text-foreground font-black uppercase tracking-tighter text-lg leading-none">Initiate Action</CardTitle>
-                                                <CardDescription className="text-primary/40 text-[10px] uppercase font-bold tracking-widest mt-1">Admin Governance Node</CardDescription>
-                                            </div>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="flex flex-col gap-6 pt-6">
-
-                                        <div className="flex flex-col gap-2">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Preset Protocol</label>
-                                            <Select value={selectedPreset} onValueChange={handlePresetChange}>
-                                                <SelectTrigger className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11">
-                                                    <SelectValue placeholder="Select a preset..." />
-                                                </SelectTrigger>
-                                                <SelectContent className="bg-popover text-popover-foreground !opacity-100 border-border shadow-2xl">
-                                                    {PROPOSAL_PRESETS.map((p) => (
-                                                        <SelectItem key={p.id} value={p.id}>
-                                                            <div className="flex items-center">
-                                                                <p.icon className="h-4 w-4 mr-2 text-primary" />
-                                                                {p.label}
-                                                            </div>
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                        <div className="flex flex-col gap-2">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Action Label</label>
-                                            <Input
-                                                value={formData.title}
-                                                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                                                placeholder="e.g., Promote User to Admin"
-                                                disabled={selectedPreset !== 'custom'}
-                                                className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 focus:ring-primary/20"
-                                            />
-                                        </div>
-
-                                        <div className="flex flex-col gap-2">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                                {formData.type === 'change_threshold' ? "Target Threshold" : "Target Wallet / ID"}
-                                            </label>
-                                            <Input
-                                                value={formData.target_id}
-                                                onChange={(e) => setFormData({ ...formData, target_id: e.target.value })}
-                                                placeholder={formData.type === 'change_threshold' ? "e.g., 2" : "0x... or UUID"}
-                                                type={formData.type === 'change_threshold' ? "number" : "text"}
-                                                className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 font-mono text-sm"
-                                            />
-                                        </div>
-
-                                        <div className="flex flex-col gap-3">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus Scope</label>
-                                            <div className="flex gap-2">
-                                                {['admin', 'notary', 'all'].map((s) => (
-                                                    <button
-                                                        key={s}
-                                                        onClick={() => setFormData({ ...formData, participation_scope: s })}
-                                                        className={`flex-1 py-2 rounded-lg border text-[9px] font-black uppercase transition-all ${formData.participation_scope === s
-                                                            ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20"
-                                                            : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
-                                                            }`}
-                                                    >
-                                                        {s}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {formData.participation_scope !== 'admin' && (
-                                            <div className="flex flex-col gap-2">
-
-                                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between">
-                                                    Targeted Notaries
-                                                </label>
-                                                <div className="flex flex-wrap gap-2 p-3 bg-black/20 border border-white/10 rounded-xl min-h-[44px]">
-                                                    {allNotaries.map((notary) => (
-                                                        <Badge
-                                                            key={notary.id}
-                                                            variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
-                                                            className={`cursor-pointer transition-all text-[9px] font-black ${targetNotaries.includes(notary.id) ? "bg-primary text-primary-foreground border-none" : "bg-muted border-border text-muted-foreground hover:border-primary/50"}`}
-                                                            onClick={() => {
-                                                                setTargetNotaries(prev =>
-                                                                    prev.includes(notary.id)
-                                                                        ? prev.filter(id => id !== notary.id)
-                                                                        : [...prev, notary.id]
-                                                                )
-                                                            }}
-                                                        >
-                                                            {notary.name || notary.email}
-                                                        </Badge>
-                                                    ))}
-                                                    {allNotaries.length === 0 && <span className="text-[9px] text-slate-600 italic">No notaries indexed.</span>}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div className="flex flex-col gap-2">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quorum Window</label>
-                                            <Select value={formData.duration_hours} onValueChange={(v) => setFormData({ ...formData, duration_hours: v })}>
-                                                <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11 text-xs">
-                                                    <SelectValue placeholder="Select duration..." />
-                                                </SelectTrigger>
-                                                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
-                                                    <SelectItem value="1">1 Hour (Flash)</SelectItem>
-                                                    <SelectItem value="6">6 Hours</SelectItem>
-                                                    <SelectItem value="24">24 Hours</SelectItem>
-                                                    <SelectItem value="72">3 Days</SelectItem>
-                                                    <SelectItem value="168">7 Days (Standard)</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                        <div className="flex flex-col gap-2">
-
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Protocol Rationale</label>
-                                            <Textarea
-                                                className="min-h-[100px] bg-black/20 border-white/10 text-white rounded-xl resize-none text-sm placeholder:text-slate-700"
-                                                value={formData.description}
-                                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                                placeholder="Legal or technical justification..."
-                                            />
-                                        </div>
-
-                                        {/* Security Advisory */}
-                                        {(formData.type === 'remove_admin' || formData.type === 'add_admin' || formData.type === 'system_upgrade') && (
-                                            <div className={`p-4 rounded-xl border ${formData.type === 'add_admin' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                                                <div className={`flex items-center font-black text-[10px] uppercase tracking-widest mb-2 ${formData.type === 'add_admin' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                    <ShieldAlert className="h-4 w-4 mr-2" />
-                                                    SECURITY ADVISORY
-                                                </div>
-                                                <p className={`text-[10px] leading-relaxed italic font-medium ${formData.type === 'add_admin' ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
-                                                    {formData.type === 'add_admin' && "Adding an authority signature grants full root access."}
-                                                    {formData.type === 'remove_admin' && "Signer removal is permanent. Verify threshold safety."}
-                                                    {formData.type === 'system_upgrade' && "Logic upgrades affect all network transactions."}
-                                                </p>
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                    <CardFooter className="pb-8">
-                                        <Button
-                                            className="w-full bg-primary hover:bg-emerald-400 !text-zinc-950 font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
-                                            onClick={handleCreateProposal}
-                                            disabled={isCreating}
-                                        >
-                                            {isCreating ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Plus className="h-5 w-5 mr-3 font-black" />}
-                                            SUBMIT PROPOSAL
-                                        </Button>
-                                    </CardFooter>
-                                </Card>
-                            </div>
-                        )}
-                    </div>
                 </div>
             </div>
+
+            {/* RIGHT COLUMN: Action Panel */}
+            {role === 'admin' && (
+                <div className="lg:col-span-1 sticky top-8">
+                    <Card className="bg-card border border-border/50 shadow-2xl rounded-2xl overflow-hidden">
+                        <CardHeader className="bg-muted/30 border-b border-border/50 pb-6">
+                            <div className="flex items-center space-x-3">
+                                <div className="p-2 bg-primary/10 rounded-lg">
+                                    <Gavel className="h-5 w-5 text-primary" />
+                                </div>
+                                <div>
+                                    <CardTitle className="text-foreground font-black uppercase tracking-tighter text-lg leading-none">Initiate Action</CardTitle>
+                                    <CardDescription className="text-primary/40 text-[10px] uppercase font-bold tracking-widest mt-1">Admin Governance Node</CardDescription>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="flex flex-col gap-6 pt-6">
+
+                            <div className="flex flex-col gap-2">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Preset Protocol</label>
+                                <Select value={selectedPreset} onValueChange={handlePresetChange}>
+                                    <SelectTrigger className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11">
+                                        <SelectValue placeholder="Select a preset..." />
+                                    </SelectTrigger>
+                                    <SelectContent className="bg-popover text-popover-foreground !opacity-100 border-border shadow-2xl">
+                                        {PROPOSAL_PRESETS.map((p) => (
+                                            <SelectItem key={p.id} value={p.id}>
+                                                <div className="flex items-center">
+                                                    <p.icon className="h-4 w-4 mr-2 text-primary" />
+                                                    {p.label}
+                                                </div>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Action Label</label>
+                                <Input
+                                    value={formData.title}
+                                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                    placeholder="e.g., Promote User to Admin"
+                                    disabled={selectedPreset !== 'custom'}
+                                    className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 focus:ring-primary/20"
+                                />
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                    {formData.type === 'change_threshold' ? "Target Threshold" : "Target Wallet / ID"}
+                                </label>
+                                <Input
+                                    value={formData.target_id}
+                                    onChange={(e) => setFormData({ ...formData, target_id: e.target.value })}
+                                    placeholder={formData.type === 'change_threshold' ? "e.g., 2" : "0x... or UUID"}
+                                    type={formData.type === 'change_threshold' ? "number" : "text"}
+                                    className="bg-muted/50 border-border/50 text-foreground rounded-xl h-11 font-mono text-sm"
+                                />
+                            </div>
+
+                            <div className="flex flex-col gap-3">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Consensus Scope</label>
+                                <div className="flex gap-2">
+                                    {['admin', 'notary', 'all'].map((s) => (
+                                        <button
+                                            key={s}
+                                            onClick={() => setFormData({ ...formData, participation_scope: s })}
+                                            className={`flex-1 py-2 rounded-lg border text-[9px] font-black uppercase transition-all ${formData.participation_scope === s
+                                                ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20"
+                                                : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
+                                                }`}
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {formData.participation_scope !== 'admin' && (
+                                <div className="flex flex-col gap-2">
+
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between">
+                                        Targeted Notaries
+                                    </label>
+                                    <div className="flex flex-wrap gap-2 p-3 bg-black/20 border border-white/10 rounded-xl min-h-[44px]">
+                                        {allNotaries.map((notary) => (
+                                            <Badge
+                                                key={notary.id}
+                                                variant={targetNotaries.includes(notary.id) ? "default" : "outline"}
+                                                className={`cursor-pointer transition-all text-[9px] font-black ${targetNotaries.includes(notary.id) ? "bg-primary text-primary-foreground border-none" : "bg-muted border-border text-muted-foreground hover:border-primary/50"}`}
+                                                onClick={() => {
+                                                    setTargetNotaries(prev =>
+                                                        prev.includes(notary.id)
+                                                            ? prev.filter(id => id !== notary.id)
+                                                            : [...prev, notary.id]
+                                                    )
+                                                }}
+                                            >
+                                                {notary.name || notary.email}
+                                            </Badge>
+                                        ))}
+                                        {allNotaries.length === 0 && <span className="text-[9px] text-slate-600 italic">No notaries indexed.</span>}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex flex-col gap-2">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quorum Window</label>
+                                <Select value={formData.duration_hours} onValueChange={(v) => setFormData({ ...formData, duration_hours: v })}>
+                                    <SelectTrigger className="bg-black/20 border-white/10 text-white rounded-xl h-11 text-xs relative z-0">
+                                        <SelectValue placeholder="Select duration..." />
+                                    </SelectTrigger>
+                                    <SelectContent className="!bg-[#07090e] border-white/10 text-white shadow-2xl z-[100] !opacity-100 backdrop-blur-none">
+                                        <SelectItem value="1">1 Hour (Flash)</SelectItem>
+                                        <SelectItem value="6">6 Hours</SelectItem>
+                                        <SelectItem value="24">24 Hours</SelectItem>
+                                        <SelectItem value="72">3 Days</SelectItem>
+                                        <SelectItem value="168">7 Days (Standard)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Protocol Rationale</label>
+                                <Textarea
+                                    className="min-h-[100px] bg-black/20 border-white/10 text-white rounded-xl resize-none text-sm placeholder:text-slate-700"
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                    placeholder="Legal or technical justification..."
+                                />
+                            </div>
+
+                            {/* Security Advisory */}
+                            {(formData.type === 'remove_admin' || formData.type === 'add_admin' || formData.type === 'system_upgrade') && (
+                                <div className={`p-4 rounded-xl border ${formData.type === 'add_admin' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                                    <div className={`flex items-center font-black text-[10px] uppercase tracking-widest mb-2 ${formData.type === 'add_admin' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        <ShieldAlert className="h-4 w-4 mr-2" />
+                                        SECURITY ADVISORY
+                                    </div>
+                                    <p className={`text-[10px] leading-relaxed italic font-medium ${formData.type === 'add_admin' ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
+                                        {formData.type === 'add_admin' && "Adding an authority signature grants full root access."}
+                                        {formData.type === 'remove_admin' && "Signer removal is permanent. Verify threshold safety."}
+                                        {formData.type === 'system_upgrade' && "Logic upgrades affect all network transactions."}
+                                    </p>
+                                </div>
+                            )}
+                        </CardContent>
+                        <CardFooter className="pb-8">
+                            <Button
+                                className="w-full bg-primary hover:bg-emerald-400 !text-zinc-950 font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
+                                onClick={handleCreateProposal}
+                                disabled={isCreating}
+                            >
+                                {isCreating ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Plus className="h-5 w-5 mr-3 font-black" />}
+                                SUBMIT PROPOSAL
+                            </Button>
+                        </CardFooter>
+                    </Card>
+                </div>
+            )}
         </div>
-  );
+    </div>
+</div>
+</div>
+);
 }

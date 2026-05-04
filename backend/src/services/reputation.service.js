@@ -81,6 +81,16 @@ async function handleEvent(userId, type, documentId = null, meta = {}) {
     );
 
     console.log(`[REPUTATION_EVENT] userId=${userId} | type=${type} | delta=${scoreDelta > 0 ? '+' : ''}${scoreDelta} | docId=${documentId}`);
+
+    // 🔥 AUTOMATED NTK BURN FOR NOTARY ACTIONS
+    if (type === 'APPROVE' || type === 'REJECT') {
+      const userRes = await pool.query("SELECT wallet_address FROM users WHERE id = $1", [userId]);
+      if (userRes.rows.length > 0 && userRes.rows[0].wallet_address) {
+        const ntkService = require('./ntk.service');
+        // Fire-and-forget
+        ntkService.burnNTKForAction(userRes.rows[0].wallet_address);
+      }
+    }
   } catch (err) {
     // Never throw — reputation failure must not block document operations
     console.error(`[REPUTATION] handleEvent failed | userId=${userId} | type=${type} | error=${err.message}`);

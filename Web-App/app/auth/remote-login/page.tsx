@@ -156,10 +156,10 @@ function RemoteLoginContent() {
             console.log("🚀 [RemoteAuth] Step 6: Authorization SUCCESS!")
             toast({
                 title: "Desktop Session Authorized",
-                description: "Your desktop app is now logged in. This window will close in 3 seconds."
+                description: "Your desktop app is now logged in. This window will close in 10 seconds."
             })
             setStatus("authorized")
-            setTimeout(() => { if (typeof window !== "undefined") window.close() }, 3000)
+            setTimeout(() => { if (typeof window !== "undefined") window.close() }, 10000)
         } catch (err: any) {
             console.error("[RemoteLogin] Authorize error:", err)
             setError(err.message || "Authorization failed. Please try again.")
@@ -324,7 +324,7 @@ function RemoteLoginContent() {
                                 <div className="space-y-2">
                                     <h3 className="text-2xl font-bold text-white">Desktop Authorized</h3>
                                     <p className="text-sm text-slate-400 max-w-[220px] mx-auto">
-                                        Your desktop app is now logged in. This window will close in 3 seconds.
+                                        Your desktop app is now logged in. This window will close in 10 seconds.
                                     </p>
                                 </div>
                                 <div className="flex items-center space-x-2 text-[10px] text-emerald-500/40 uppercase tracking-widest font-bold">

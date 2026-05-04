@@ -142,8 +142,8 @@ const journeyRoutes = require('./routes/user');
 
 // Create an API router for /api prefixed routes
 const apiRouter = express.Router();
-apiRouter.use('/auth', authLimiter, authRoutes);
-apiRouter.use('/users/register', authLimiter); // Correctly apply middleware and continue
+// apiRouter.use('/auth', authRoutes); // Moved to app.use to bypass globalLimiter
+apiRouter.use('/users/register', authLimiter);
 apiRouter.use('/users', userRoutes);
 apiRouter.use('/documents', documentRoutes);
 apiRouter.use('/transactions', transactionRoutes);
@@ -154,11 +154,13 @@ apiRouter.use('/system', systemRoutes);
 apiRouter.use('/disputes', disputeRoutes);
 apiRouter.use('/user', journeyRoutes);
 
-// Mount API router with Global Rate Limiting
+// Mount API router
+// 🛡️ [UTILITY] Auth routes are exempted from globalLimiter to support Desktop App polling
+app.use('/api/auth', authRoutes);
 app.use('/api', globalLimiter, apiRouter);
 
 // Mount Legacy Routes at root
-app.use('/auth', globalLimiter, authRoutes);
+app.use('/auth', authRoutes); // Exempted
 app.use('/users', globalLimiter, userRoutes);
 app.use('/documents', globalLimiter, documentRoutes);
 app.use('/transactions', globalLimiter, transactionRoutes);

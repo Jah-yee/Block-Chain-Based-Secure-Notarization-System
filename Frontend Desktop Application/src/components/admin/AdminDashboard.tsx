@@ -68,7 +68,7 @@ export function AdminDashboard({ onNavigate, isDarkMode, user: initialUser }: { 
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-7xl mx-auto p-8 pt-8 space-y-8 pb-24">
+        <div className="max-w-7xl mx-auto p-6 pt-6 space-y-6 pb-24">
           {/* Header Header */}
           <div className="flex items-center justify-between">
             <div>

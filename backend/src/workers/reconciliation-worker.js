@@ -39,23 +39,36 @@ async function reconcile() {
 
             // --- PHASE 1: Notarization Reconciliation ---
             const docResult = await pool.query(`
-                SELECT id, idempotency_key, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
+                SELECT id, idempotency_key, file_hash, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
                 FROM documents 
-                WHERE (tx_status IN ('initiated', 'pending') OR submission_state = 'submitted_to_blockchain')
-                  AND chain_confirmed = false AND is_deleted = false
+                WHERE chain_confirmed = false AND is_deleted = false
+                ORDER BY created_at DESC
+                LIMIT 200
             `);
 
             for (const doc of docResult.rows) {
                 try {
-                    const docHash = doc.idempotency_key;
-                    if (!docHash) continue;
-                    const docHashBytes = docHash.startsWith('0x') ? docHash : `0x${docHash}`;
+                    // 🛡️ [RESILIENCE] ALWAYS use file_hash for blockchain lookup (the authoritative key)
+                    const docHash = doc.file_hash || doc.idempotency_key;
+                    console.log(`[DEBUG] Doc ${doc.id} | Hash Value: "${docHash}" | Type: ${typeof docHash} | Length: ${docHash?.length}`);
+                    if (!docHash || docHash.length < 64) {
+                        console.warn(`[RECON] Skipping document ${doc.id} due to invalid hash: ${docHash}`);
+                        continue;
+                    }
+                    let docHashBytes = docHash;
+                    if (!docHashBytes.startsWith('0x')) docHashBytes = `0x${docHashBytes}`;
+                    
+                    // Ensure it's exactly 32 bytes (66 chars including 0x)
+                    if (docHashBytes.length !== 66) {
+                        console.warn(`[RECON] Skipping document ${doc.id} due to malformed hex length: ${docHashBytes.length}`);
+                        continue;
+                    }
 
                     // 1. BLIND ON-CHAIN CHECK (Self-Heal)
                     const onChainData = await contract.getDocument(docHashBytes);
                     if (onChainData.exists && Number(onChainData.status) > 0) {
                         await pool.query(
-                            "UPDATE documents SET chain_confirmed = true, tx_status = 'confirmed', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
+                            "UPDATE documents SET chain_confirmed = true, tx_status = 'confirmed', submission_state = 'submitted_to_blockchain', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
                             [doc.id]
                         );
                         await SyncLogger.logEvent({
@@ -194,7 +207,7 @@ async function reconcile() {
 // Run every 30 seconds if called directly
 if (require.main === module) {
     pool.init();
-    const INTERVAL = process.env.RECONCILIATION_INTERVAL || 30000;
+    const INTERVAL = process.env.RECONCILIATION_INTERVAL || 5000;
     console.log(`🚀 Reconciliation Worker active. Polling interval: ${INTERVAL}ms`);
 
     reconcile();

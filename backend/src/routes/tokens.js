@@ -295,43 +295,5 @@ router.post("/deposit", requirePrivilege({ capability: 'TOKEN_MINT' }), async (r
     }
 });
 
-/**
- * POST /api/tokens/ntk/mint
- * Allows a NOTARY to mint their daily 100 NTK fuel tokens.
- */
-router.post("/ntk/mint", requirePrivilege({ capability: 'TOKEN_MINT' }), async (req, res) => {
-    const user = req.actor; // Guaranteed by middleware
-    const walletAddress = user.address;
-
-    try {
-        const config = await ConfigService.getConfig();
-        const provider = await ProviderService.getProvider();
-        const privateKey = process.env.BNB_SYSTEM_PRIVATE_KEY;
-        const ntkAddress = config.contracts.ntk;
-
-        if (!ntkAddress) {
-            return res.status(500).json({ error: "NTK contract not configured." });
-        }
-
-        const wallet = new ethers.Wallet(privateKey, provider);
-        const abi = ["function mintDailyNTK(address) external"];
-        const contract = new ethers.Contract(ntkAddress, abi, wallet);
-
-        console.log(`[NTK_MINT] Minting daily 100 NTK for notary ${walletAddress}...`);
-        const tx = await contract.mintDailyNTK(walletAddress);
-        const receipt = await tx.wait();
-
-        console.log(`[NTK_MINT] SUCCESS: ${receipt.hash}`);
-
-        res.json({
-            success: true,
-            txHash: receipt.hash,
-            message: "100 NTK fuel tokens minted to your wallet."
-        });
-    } catch (err) {
-        console.error("[NTK_MINT] Error:", err.message);
-        res.status(502).json({ error: "Failed to mint NTK. Ensure your daily cooldown has passed.", details: err.message });
-    }
-});
 
 module.exports = router;

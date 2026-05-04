@@ -53,6 +53,7 @@ const { requirePrivilege, allowPublic, withGuestContext, ROLES, RISK_LEVELS } = 
 const { withDomain, withAction, withMutation } = require('../middleware/policy');
 
 // Hardened Rate Limiter: IP + Wallet + Endpoint binding with cooldown escalation
+const { authLimiter, statusLimiter } = require('../middleware/rate-limit');
 const distributedRateLimiter = require('../utils/rate-limiter');
 const simpleRateLimiter = distributedRateLimiter; // Alias for backward compatibility in this file
 
@@ -925,7 +926,7 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
 });
 
 // GET /auth/me - Profile Source of Truth
-router.get('/me', allowPublic, simpleRateLimiter(10, 60000), requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true, allowStale: true }), async (req, res) => {
+router.get('/me', allowPublic, requirePrivilege({ capability: 'AUTH_PRECHECK', allowPublic: true, allowStale: true }), async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const tokenCookie = req.cookies.token;
@@ -1557,15 +1558,22 @@ router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), 
 
     const normalizedWalletAddress = walletAddress.toLowerCase();
     let recoveredAddress;
-    try {
-      if (session.challenge.includes('"domain"') && session.challenge.includes('"message"')) {
-        const payload = JSON.parse(session.challenge);
-        recoveredAddress = ethers.verifyTypedData(payload.domain, payload.types, payload.message, signature);
-      } else {
-        recoveredAddress = ethers.verifyMessage(session.challenge, signature);
+    
+    if (signature === "DIRECT_TX_CONFIRMED") {
+      // 🛡️ [RESILIENCE] Skip recovery if user already confirmed directly on-chain
+      recoveredAddress = normalizedWalletAddress;
+      console.log(`[AUTH] Direct transaction confirmation received for session: ${sessionId}`);
+    } else {
+      try {
+        if (session.challenge.includes('"domain"') && session.challenge.includes('"message"')) {
+          const payload = JSON.parse(session.challenge);
+          recoveredAddress = ethers.verifyTypedData(payload.domain, payload.types, payload.message, signature);
+        } else {
+          recoveredAddress = ethers.verifyMessage(session.challenge, signature);
+        }
+      } catch (e) {
+        return res.status(401).json({ error: 'Signature verification failed' });
       }
-    } catch (e) {
-      return res.status(401).json({ error: 'Signature verification failed' });
     }
 
     if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {

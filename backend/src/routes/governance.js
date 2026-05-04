@@ -72,6 +72,43 @@ router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ capabilit
     }
 });
 
+// DELETE /api/governance/proposals/:id (Admin/Proposer, 1-hour limit)
+router.delete("/proposals/:id", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_PROPOSAL_CANCEL' }), withAction('GOV_PROPOSAL_CANCEL'), withMutation(), async (req, res) => {
+    const proposalId = req.params.id;
+
+    try {
+        // 1. Fetch proposal to check constraints
+        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
+        if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
+        
+        const proposal = propRes.rows[0];
+
+        // 2. Authorization Check (Proposer or Admin)
+        if (req.actor.role < ROLES.ADMIN && proposal.proposer_id !== req.actor.id) {
+            return res.status(403).json({ error: "Unauthorized: Only the proposer or an administrator can cancel this proposal" });
+        }
+
+        // 3. Temporal Gate (24 Hours for Testing)
+        const ageInMs = Date.now() - new Date(proposal.created_at).getTime();
+        if (ageInMs > 86400000) { // 24 Hours
+            return res.status(400).json({ error: "Temporal Gate Violation: Proposals can only be cancelled within 24 hours of creation" });
+        }
+
+        // 4. Finality Gate (Not on-chain)
+        if (proposal.on_chain_tx_index !== null) {
+            return res.status(400).json({ error: "Finality Violation: Cannot delete a proposal that has already been submitted to the blockchain" });
+        }
+
+        // 5. Hard Deletion (User Request: "deleted from everywhere")
+        await pool.query("DELETE FROM governance_proposals WHERE id = $1", [proposalId]);
+
+        res.json({ message: "Proposal purged from system successfully" });
+    } catch (err) {
+        console.error("Proposal Deletion Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/governance/proposals/:id/vote (Admin/Notary depending on type - keeping Admin for now but checking threshold)
 router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_VOTE_SUBMIT' }), withAction('GOV_VOTE_SUBMIT'), withMutation(), async (req, res) => {
     const { decision, signature } = req.body;
@@ -412,7 +449,7 @@ router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({
 });
 
 // GET /api/governance/remote/vote/status/:sessionId - Poll for voting session status
-router.get('/remote/vote/status/:sessionId', allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_INIT' }), async (req, res) => {
+router.get('/remote/vote/status/:sessionId', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_STATUS', allowPublic: true }), async (req, res) => {
     try {
         const { sessionId } = req.params;
         if (!isValidUUID(sessionId)) {
@@ -446,7 +483,7 @@ router.get('/remote/vote/status/:sessionId', allowPublic, requirePrivilege({ cap
 });
 
 // POST /api/governance/remote/vote/authorize - Submit signature for remote vote
-router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE' }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
     try {
         const { sessionId, walletAddress, signature } = req.body;
 
@@ -524,4 +561,510 @@ router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, req
     }
 });
 
+// ================= REMOTE GOVERNANCE SUBMISSION ==================
+
+// POST /api/governance/remote/submit/session - Initialize remote submission session
+router.post('/remote/submit/session', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
+    try {
+        const { proposalId } = req.body;
+        if (!proposalId) {
+            return res.status(400).json({ error: 'proposalId is required' });
+        }
+
+        // Verify proposal exists
+        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
+        if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
+
+        const challenge = `BBSNS-GOV-SUBMIT-${proposalId}-${Math.random().toString(36).substring(2, 15)}`;
+        const expires_at = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes for complex signing
+
+        const result = await pool.query(
+            'INSERT INTO remote_gov_sessions (proposal_id, challenge, expires_at, type) VALUES ($1, $2, $3, $4) RETURNING id',
+            [proposalId, challenge, expires_at, 'SUBMIT']
+        );
+
+        res.json({ sessionId: result.rows[0].id });
+    } catch (error) {
+        console.error('Remote submit session error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /api/governance/remote/submit/status/:sessionId - Poll for submission session status
+router.get('/remote/submit/status/:sessionId', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_STATUS', allowPublic: true }), async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        if (!isValidUUID(sessionId)) {
+            return res.status(400).json({ error: 'Invalid session ID format' });
+        }
+        const result = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'SUBMIT'", [sessionId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        const session = result.rows[0];
+        const now = new Date();
+
+        if (session.status === 'pending' && new Date(session.expires_at) < now) {
+            await pool.query("UPDATE remote_gov_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
+            return res.json({ status: 'expired' });
+        }
+
+        res.json({
+            status: session.status,
+            challenge: session.challenge,
+            proposalId: session.proposal_id,
+            wallet_address: session.wallet_address,
+            txHash: session.tx_hash
+        });
+    } catch (error) {
+        console.error('Remote submit status error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /api/governance/remote/submit/authorize - Submit EIP-712 signature for remote proposal
+router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+    try {
+        const { sessionId, walletAddress, signature } = req.body;
+
+        if (!sessionId || !walletAddress || !signature) {
+            return res.status(400).json({ error: 'sessionId, walletAddress, and signature are required' });
+        }
+
+        const sessionResult = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'SUBMIT'", [sessionId]);
+        if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+        const session = sessionResult.rows[0];
+        if (session.status !== 'pending') return res.status(400).json({ error: `Session is already ${session.status}` });
+
+        // 1. RELAY TO BLOCKCHAIN (Logic matches /submit-on-chain)
+        const proposalId = session.proposal_id;
+        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
+        const proposal = propRes.rows[0];
+
+        const { signer } = await require("../blockchain/connection").connectBNB();
+        const config = await ConfigService.getConfig();
+        const multisigAddress = config.contracts.multisig;
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
+        const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
+
+        const to = config.contracts.documentRegistry;
+        const value = "0";
+        const data = "0x";
+        const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
+
+        console.log(`🚀 [REMOTE_RELAY] Submitting Prop ${proposalId} via session ${sessionId}...`);
+        const tx = await contract.submitWithSignature(to, value, data, signature, proposalHash);
+        const receipt = await tx.wait();
+
+        // Parse log for Index
+        const iface = new ethers.Interface(artifact.abi);
+        let txIndex;
+        for (const log of receipt.logs) {
+            try {
+                const parsed = iface.parseLog(log);
+                if (parsed.name === 'TransactionSubmitted') {
+                    txIndex = Number(parsed.args.txIndex);
+                    break;
+                }
+            } catch (e) { }
+        }
+
+        // 2. Update DB & Session
+        await pool.query(
+            "UPDATE governance_proposals SET on_chain_tx_index = $1, status = 'active' WHERE id = $2",
+            [txIndex, proposalId]
+        );
+
+        await pool.query(
+            "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, signature = $2, tx_hash = $3, authorized_at = NOW() WHERE id = $4",
+            [walletAddress.toLowerCase(), signature, receipt.hash, sessionId]
+        );
+
+        res.json({ success: true, txHash: receipt.hash });
+    } catch (error) {
+        console.error('Remote submit authorize error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+// ================= REMOTE MULTISIG CONFIRMATION ==================
+
+// POST /api/governance/remote/confirm/session
+router.post('/remote/confirm/session', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_REMOTE_INIT' }), withAction('GOV_REMOTE_INIT'), withMutation(), async (req, res) => {
+    try {
+        const { txIndex } = req.body;
+        if (txIndex === undefined) return res.status(400).json({ error: 'txIndex is required' });
+
+        const challenge = `BBSNS-GOV-CONFIRM-${txIndex}-${Math.random().toString(36).substring(2, 15)}`;
+        const expires_at = new Date(Date.now() + 15 * 60 * 1000);
+
+        const result = await pool.query(
+            "INSERT INTO remote_gov_sessions (proposal_id, challenge, expires_at, type, decision) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            [txIndex, challenge, expires_at, 'CONFIRM', 'approve']
+        );
+
+        res.json({ sessionId: result.rows[0].id });
+    } catch (error) {
+        console.error('Remote confirm session error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /api/governance/remote/confirm/status/:sessionId
+router.get('/remote/confirm/status/:sessionId', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_STATUS', allowPublic: true }), async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID format' });
+
+        const result = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'CONFIRM'", [sessionId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+        const session = result.rows[0];
+        if (session.status === 'pending' && new Date(session.expires_at) < new Date()) {
+            await pool.query("UPDATE remote_gov_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
+            return res.json({ status: 'expired' });
+        }
+
+        res.json({
+            status: session.status,
+            challenge: session.challenge,
+            txIndex: session.proposal_id,
+            wallet_address: session.wallet_address,
+            txHash: session.tx_hash
+        });
+    } catch (error) {
+        console.error('Remote confirm status error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /api/governance/remote/confirm/authorize
+router.post('/remote/confirm/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+    try {
+        const { sessionId, walletAddress, signature } = req.body;
+        if (!sessionId || !walletAddress || !signature) {
+            return res.status(400).json({ error: 'sessionId, walletAddress, and signature are required' });
+        }
+
+        const sessionResult = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'CONFIRM'", [sessionId]);
+        if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+        const session = sessionResult.rows[0];
+        if (session.status !== 'pending') return res.status(400).json({ error: `Session is already ${session.status}` });
+
+        // 1. RELAY TO BLOCKCHAIN
+        const txIndex = session.proposal_id;
+        const { signer } = await require("../blockchain/connection").connectBNB();
+        const config = await ConfigService.getConfig();
+        const multisigAddress = config.contracts.multisig;
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
+        const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
+
+        console.log(`🚀 [REMOTE_RELAY] Confirming Multisig Tx ${txIndex} via session ${sessionId}...`);
+        const tx = await contract.confirmTransaction(txIndex, signature);
+        const receipt = await tx.wait();
+
+        // 2. Update Session
+        await pool.query(
+            "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, signature = $2, tx_hash = $3, authorized_at = NOW() WHERE id = $4",
+            [walletAddress.toLowerCase(), signature, receipt.hash, sessionId]
+        );
+
+        res.json({ success: true, txHash: receipt.hash });
+    } catch (error) {
+        console.error('Remote confirm authorize error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+// POST /api/governance/proposals/:id/execute
+// Blockchain-First Atomic Execution with Idempotency and Confirmed-Receipt DB Sync
+router.post(
+    "/proposals/:id/execute",
+    withDomain('GOVERNANCE'),
+    requirePrivilege({ capability: 'GOV_PROPOSAL_EXECUTE' }),
+    withAction('GOV_PROPOSAL_EXECUTE'),
+    withMutation(),
+    async (req, res) => {
+        const proposalId = req.params.id;
+
+        // ─── STEP 1: Fetch Proposal & Idempotency Guard ──────────────────────────
+        let proposal;
+        try {
+            const propRes = await pool.query(
+                "SELECT * FROM governance_proposals WHERE id = $1",
+                [proposalId]
+            );
+            if (propRes.rows.length === 0)
+                return res.status(404).json({ error: "Proposal not found" });
+
+            proposal = propRes.rows[0];
+
+            // IDEMPOTENCY: Reject if already executed (prevents double execution)
+            if (proposal.status === 'executed') {
+                return res.status(409).json({
+                    error: "Proposal has already been executed.",
+                    status: "executed",
+                    execution_tx_hash: proposal.execution_tx_hash || null
+                });
+            }
+
+            // Guard: Only 'passed' proposals can be executed
+            if (proposal.status !== 'passed') {
+                return res.status(400).json({
+                    error: `Proposal cannot be executed. Current status: '${proposal.status}'. Required: 'passed'.`
+                });
+            }
+        } catch (dbErr) {
+            console.error(`[GOV_EXECUTE] DB fetch failed for proposal ${proposalId}:`, dbErr.message);
+            return res.status(500).json({ error: "Failed to retrieve proposal." });
+        }
+
+        const { type, target_id } = proposal;
+
+        // ─── STEP 2: Classify Action & Encode On-Chain Call Data ─────────────────
+        // The BBSNSMultiSig enforces that addSigner/removeSigner/changeThreshold
+        // can ONLY be called by the contract itself (self-call guard).
+        // Therefore: we submit a MultiSig transaction whose `data` encodes the
+        // privileged call, then executeTransaction() triggers the self-call.
+
+        const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
+        const artifact = require(artifactPath);
+
+        let config, multisigAddress, signer, multisigContract;
+        try {
+            config = await ConfigService.getConfig();
+            multisigAddress = config?.contracts?.multisig;
+            if (!multisigAddress) throw new Error("Multisig contract address not configured.");
+
+            const { signer: relayerSigner } = await require("../blockchain/connection").connectBNB();
+            signer = relayerSigner;
+            multisigContract = new ethers.Contract(multisigAddress, artifact.abi, signer);
+        } catch (connErr) {
+            console.error(`[GOV_EXECUTE] Blockchain connection failed:`, connErr.message);
+            return res.status(503).json({ error: `Blockchain connection failed: ${connErr.message}` });
+        }
+
+        // ─── STEP 3: Build Encoded Call Data Per Proposal Type ───────────────────
+        const multisigIface = new ethers.Interface(artifact.abi);
+        let encodedData;
+        let isOffChainOnly = false;
+
+        try {
+            switch (type) {
+                case 'add_admin':
+                case 'add_notary':
+                    // Encode addSigner(address) call to be executed via the multisig self-call
+                    encodedData = multisigIface.encodeFunctionData("addSigner", [target_id]);
+                    break;
+
+                case 'remove_admin':
+                case 'remove_notary':
+                    encodedData = multisigIface.encodeFunctionData("removeSigner", [target_id]);
+                    break;
+
+                case 'change_threshold':
+                    const newThreshold = parseInt(target_id, 10);
+                    if (isNaN(newThreshold) || newThreshold < 1)
+                        return res.status(400).json({ error: "Invalid threshold value in target_id." });
+                    encodedData = multisigIface.encodeFunctionData("changeThreshold", [newThreshold]);
+                    break;
+
+                case 'ban_user':
+                case 'unban_user':
+                    // Pure off-chain DB actions — no on-chain call needed
+                    isOffChainOnly = true;
+                    break;
+
+                default:
+                    return res.status(400).json({ error: `Unknown or unsupported proposal type: '${type}'.` });
+            }
+        } catch (encodeErr) {
+            console.error(`[GOV_EXECUTE] Encoding failed for type '${type}':`, encodeErr.message);
+            return res.status(400).json({ error: `Failed to encode on-chain call: ${encodeErr.message}` });
+        }
+
+        // ─── STEP 4: Execute On-Chain (HYBRID/ON_CHAIN Actions) ──────────────────
+        let txHash = null;
+        let onChainSuccess = false;
+
+        if (!isOffChainOnly) {
+            console.log(`[GOV_EXECUTE] Submitting on-chain tx for proposal ${proposalId}, type=${type}`);
+            try {
+                const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
+
+                // Submit the encoded call as a multisig transaction targeting the multisig itself
+                const submitTx = await multisigContract.submitTransaction(
+                    multisigAddress,   // target: the multisig itself (self-call)
+                    0,                 // value: 0 ETH
+                    encodedData,       // encoded function call
+                    proposalHash       // governance reference hash
+                );
+
+                console.log(`[GOV_EXECUTE] submitTransaction sent, waiting for receipt... txHash=${submitTx.hash}`);
+                const submitReceipt = await submitTx.wait(); // Wait for confirmation
+                txHash = submitReceipt.hash;
+
+                // Parse the TransactionSubmitted event to get the txIndex
+                let txIndex;
+                for (const log of submitReceipt.logs) {
+                    try {
+                        const parsed = multisigIface.parseLog(log);
+                        if (parsed && parsed.name === 'TransactionSubmitted') {
+                            txIndex = Number(parsed.args.txIndex);
+                            break;
+                        }
+                    } catch (_) {}
+                }
+
+                if (txIndex === undefined)
+                    throw new Error("TransactionSubmitted event not found in receipt. Cannot get txIndex.");
+
+                console.log(`[GOV_EXECUTE] Submitted at txIndex=${txIndex}. Now executing...`);
+
+                // Execute the transaction (this triggers the self-call inside the contract)
+                const execTx = await multisigContract.executeTransaction(txIndex);
+                console.log(`[GOV_EXECUTE] executeTransaction sent, waiting for receipt... txHash=${execTx.hash}`);
+                const execReceipt = await execTx.wait(); // ← CONFIRMED RECEIPT REQUIRED
+                txHash = execReceipt.hash;
+
+                onChainSuccess = true;
+                console.log(`[GOV_EXECUTE] ✅ On-chain execution confirmed. txHash=${txHash}`);
+
+            } catch (chainErr) {
+                // TX FAILED: Leave proposal status as 'passed', do NOT update DB
+                console.error(`[GOV_EXECUTE] ❌ On-chain execution failed for proposal ${proposalId}:`, chainErr.message);
+                return res.status(500).json({
+                    error: `On-chain execution failed. Proposal remains in 'passed' state and can be retried.`,
+                    details: chainErr.message,
+                    status: "pending",
+                    txHash: null
+                });
+            }
+        } else {
+            // Off-chain only — no blockchain needed
+            onChainSuccess = true;
+        }
+
+        // ─── STEP 5: Update DB Only After Confirmed On-Chain Success ─────────────
+        // At this point, the blockchain has confirmed. DB must now reflect reality.
+        if (onChainSuccess) {
+            try {
+                const dbClient = await pool.connect();
+                try {
+                    await dbClient.query('BEGIN');
+
+                    // Apply DB mutation based on type
+                    switch (type) {
+                        case 'add_admin':
+                            await dbClient.query(
+                                "UPDATE users SET role = 'admin' WHERE id = $1 OR wallet_address = $2",
+                                [target_id, target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'add_notary':
+                            await dbClient.query(
+                                "UPDATE users SET role = 'notary' WHERE id = $1 OR wallet_address = $2",
+                                [target_id, target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'remove_admin':
+                            await dbClient.query(
+                                "UPDATE users SET role = 'owner' WHERE id = $1 OR wallet_address = $2",
+                                [target_id, target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'remove_notary':
+                            await dbClient.query(
+                                "UPDATE users SET role = 'owner', identity_state = 'INACTIVE' WHERE id = $1 OR wallet_address = $2",
+                                [target_id, target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'ban_user':
+                            await dbClient.query(
+                                "UPDATE users SET identity_state = 'BANNED' WHERE wallet_address = $1 OR id::text = $1",
+                                [target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'unban_user':
+                            await dbClient.query(
+                                "UPDATE users SET identity_state = 'ACTIVE' WHERE wallet_address = $1 OR id::text = $1",
+                                [target_id.toLowerCase()]
+                            );
+                            break;
+                        case 'change_threshold':
+                            // DB has no threshold column — on-chain is source of truth, no DB row to update
+                            break;
+                    }
+
+                    // Mark proposal as executed
+                    await dbClient.query(
+                        `UPDATE governance_proposals
+                         SET status = 'executed',
+                             executed_at = NOW(),
+                             executed_by = $1,
+                             execution_tx_hash = $2
+                         WHERE id = $3`,
+                        [req.actor.id, txHash, proposalId]
+                    );
+
+                    // Audit log
+                    await dbClient.query(
+                        `INSERT INTO sync_events (event_type, details, created_at)
+                         VALUES ('GOVERNANCE_EXECUTED', $1, NOW())`,
+                        [JSON.stringify({ proposalId, type, target_id, executedBy: req.actor.id, txHash })]
+                    ).catch(auditErr => {
+                        // Non-fatal: log but don't roll back for audit failure
+                        console.warn(`[GOV_EXECUTE_AUDIT_WARN] Audit log write failed:`, auditErr.message);
+                    });
+
+                    await dbClient.query('COMMIT');
+                    console.log(`[GOV_EXECUTE] ✅ DB updated successfully for proposal ${proposalId}`);
+
+                } catch (dbWriteErr) {
+                    await dbClient.query('ROLLBACK');
+                    // CRITICAL: On-chain succeeded but DB failed — log for manual recovery
+                    console.error(
+                        `[GOV_EXECUTE_CRITICAL] ⚠️ DB UPDATE FAILED after confirmed on-chain tx!\n` +
+                        `  proposalId=${proposalId}, type=${type}, target=${target_id}, txHash=${txHash}\n` +
+                        `  ERROR: ${dbWriteErr.message}\n` +
+                        `  ACTION REQUIRED: Manually sync DB state for this proposal.`
+                    );
+                    // Still return success since chain is source of truth, but flag the DB desync
+                    return res.status(207).json({
+                        warning: "On-chain execution SUCCEEDED but DB update FAILED. Manual sync required.",
+                        status: "confirmed",
+                        txHash,
+                        proposalId,
+                        dbError: dbWriteErr.message
+                    });
+                } finally {
+                    dbClient.release();
+                }
+
+            } catch (poolErr) {
+                console.error(`[GOV_EXECUTE_CRITICAL] Could not acquire DB connection:`, poolErr.message);
+                return res.status(207).json({
+                    warning: "On-chain execution SUCCEEDED but DB pool unavailable. Manual sync required.",
+                    status: "confirmed",
+                    txHash
+                });
+            }
+
+            return res.json({
+                success: true,
+                status: "confirmed",
+                txHash,
+                proposalId,
+                type,
+                message: `Proposal ${proposalId} (${type}) executed successfully.`
+            });
+        }
+    }
+);
+
 module.exports = router;
+

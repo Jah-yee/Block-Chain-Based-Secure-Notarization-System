@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Filter, UserCheck, UserX, Eye, CheckCircle, ShieldAlert, RotateCw, ShieldCheck } from "lucide-react";
+import { Search, Filter, UserCheck, UserX, Eye, CheckCircle, ShieldAlert, RotateCw, ShieldCheck, FileText } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
@@ -37,6 +37,13 @@ export function ManageNotaries() {
     open: false,
     application: null as any | null,
   });
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
 
   // ===============================
@@ -160,7 +167,8 @@ export function ManageNotaries() {
   const handlePromoteOnChain = async (app: any) => {
     try {
       const config = await api.getSystemConfig();
-      const remoteUrl = `${config.remoteAuthUrl}?mode=promote&targetAddress=${app.wallet_address}`;
+      const baseAuthUrl = config.remoteAuthUrl.replace(/\/$/, "");
+      const remoteUrl = `${baseAuthUrl}/?mode=promote&targetAddress=${app.wallet_address}`;
       
       // @ts-ignore
       if (window.electronAPI) {
@@ -470,9 +478,24 @@ export function ManageNotaries() {
 
             <div className="pt-2">
               <h4 className="text-sm font-medium text-muted-foreground">On-Chain Linkage</h4>
-              <p className="text-[10px] text-muted-foreground truncate bg-muted p-2 rounded mt-1 font-mono">
-                {viewDialog.application?.wallet_address}
-              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-[10px] text-muted-foreground truncate bg-muted p-2 rounded font-mono flex-1">
+                  {viewDialog.application?.wallet_address}
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 hover:bg-primary/20 text-muted-foreground hover:text-primary relative"
+                  onClick={() => handleCopy(viewDialog.application?.wallet_address, 'view-wallet')}
+                >
+                  <FileText className="h-4 w-4" />
+                  {copiedId === 'view-wallet' && (
+                    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50 animate-in fade-in zoom-in duration-200">
+                      COPIED!
+                    </span>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
           {/* 🛡️ [ACTION_BRIDGE] Bunker V3.6.1: Integrated Modal Control */}
@@ -530,8 +553,21 @@ export function ManageNotaries() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-             <div className="p-4 bg-white/5 rounded-xl border border-white/10 space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Wallet to Promote</p>
+             <div className="p-4 bg-white/5 rounded-xl border border-white/10 space-y-2 relative group">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Wallet to Promote</p>
+                  <button 
+                    onClick={() => handleCopy(promotionDialog.application?.wallet_address, 'promo-wallet')}
+                    className="text-slate-500 hover:text-emerald-400 p-1 relative"
+                  >
+                    <FileText size={12} />
+                    {copiedId === 'promo-wallet' && (
+                      <span className="absolute bottom-full right-0 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50 animate-in fade-in zoom-in duration-200">
+                        COPIED!
+                      </span>
+                    )}
+                  </button>
+                </div>
                 <code className="text-xs text-emerald-500 block truncate font-mono">
                   {promotionDialog.application?.wallet_address}
                 </code>

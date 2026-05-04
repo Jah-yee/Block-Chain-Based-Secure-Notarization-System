@@ -122,12 +122,12 @@ function RemoteSignContent() {
                 description: "The proposal has been updated. This window will close automatically."
             })
 
-            // Auto-close after 3 seconds
+            // Auto-close after 10 seconds
             setTimeout(() => {
                 if (typeof window !== 'undefined') {
                     window.close();
                 }
-            }, 3000);
+            }, 10000);
         } catch (err: any) {
             console.error(err)
             setError(err.message || "Failed to sign vote")
@@ -219,7 +219,7 @@ function RemoteSignContent() {
                                 <div className="space-y-2">
                                     <h3 className="text-2xl font-bold text-white">Entry Recorded</h3>
                                     <p className="text-sm text-slate-400 max-w-[200px] mx-auto">
-                                        Your signature has been cryptographically attached. This tab will close in 3 seconds.
+                                        Your signature has been cryptographically attached. This tab will close in 10 seconds.
                                     </p>
                                 </div>
                                 <div className="flex items-center space-x-2 text-[10px] text-emerald-500/40 uppercase tracking-widest font-bold">

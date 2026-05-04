@@ -23,6 +23,7 @@ const storageService = require('../services/storage.service');
 const ConfigService = require('../services/config.service');
 const DocumentStatusService = require('../services/document-status.service');
 const maintenanceService = require('../services/maintenance.service');
+const { sendApprovalTx } = require('../utils/blockchain');
 
 // Configure Multer for secure memory-safe uploads
 const memoryUpload = multer({
@@ -68,7 +69,7 @@ function mapToDetailedDoc(doc) {
     uxCode = UX_CODES.CHAIN_SYNC_DELAYED;
   }
 
-  const derivedStatus = doc.submission_state;
+  const derivedStatus = (doc.submission_state === 'submitted_to_blockchain' || doc.chain_confirmed) ? 'approved' : doc.submission_state;
 
   return {
     id: doc.id,
@@ -82,7 +83,7 @@ function mapToDetailedDoc(doc) {
     storage_key: doc.storage_key || null,
     storage_state: doc.storage_state || 'STORED',
     type: doc.mimetype || null,
-    status: derivedStatus,
+    status: (derivedStatus === 'approved' || derivedStatus === 'rejected' || derivedStatus === 'pending') ? derivedStatus : 'pending',
     state: doc.submission_state, // Raw backend state
     code: uxCode, // Transformed UX Contract code
     elapsed_ms, // Time-Aware metric
@@ -368,9 +369,20 @@ router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ 
     // 2. DOC_CREATED
     const docRes = await client.query(
       `INSERT INTO documents
-         (user_id, filename, storage_key, file_hash, submission_state, ntkr_sent, payment_tx_hash, storage_state, mimetype, created_at, updated_at, is_deleted)
-       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7,$8,NOW(),NOW(),false) RETURNING *`,
-      [intent.user_id, intent.filename, intent.storage_key, intent.file_hash, intent.amount, tx_hash, intent.storage_key.startsWith('intents/') ? 'STORED' : 'STORED', intent.mimetype]
+         (user_id, filename, title, storage_key, file_hash, idempotency_key, submission_state, ntkr_sent, payment_tx_hash, storage_state, mimetype, created_at, updated_at, is_deleted)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,NOW(),NOW(),false) RETURNING *`,
+      [
+        intent.user_id, 
+        intent.filename, 
+        intent.title || intent.filename,
+        intent.storage_key, 
+        intent.file_hash, 
+        intent.file_hash, // Use file_hash as authoritative idempotency_key
+        intent.amount, 
+        tx_hash, 
+        intent.storage_key.startsWith('intents/') ? 'STORED' : 'STORED', 
+        intent.mimetype
+      ]
     );
     const newDoc = docRes.rows[0];
     await client.query("UPDATE upload_intents SET status='DOC_CREATED' WHERE id=$1", [intent_id]);
@@ -483,8 +495,10 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' })
     }
 
     const r = await pool.query(query, params);
-    // Sanitize results
-    const sanitized = r.rows.map(doc => sanitizeDocument(doc, req.actor));
+    
+    // Sanitize and Map results
+    const mapped = r.rows.map(doc => mapToDetailedDoc(doc));
+    const sanitized = mapped.map(doc => sanitizeDocument(doc, req.actor));
     res.json(sanitized);
   } catch (err) {
     console.error(err);
@@ -766,11 +780,15 @@ async function handleDocumentPatch(req, res) {
         });
       }
 
-      const { status, signature, timestamp, document_summary, rejection_reason } = req.body;
+      const { status, signature, timestamp, document_summary, rejection_reason, txHash } = req.body;
 
-      // 0. LOCKING: Prevent re-submission or modifications to verified docs
+      // 0. IDEMPOTENCY: If already confirmed or submitted, return success rather than error
       if (doc.chain_confirmed || doc.submission_state === 'submitted_to_blockchain') {
-        return res.status(403).json({ error: 'Document is already in verification or confirmed. Cannot modify action.' });
+        return res.status(200).json({ 
+          message: 'Document already finalized or in-flight.', 
+          document: sanitizeDocument(doc, actor),
+          status: 'success' 
+        });
       }
 
       // 1. RE-VERIFY FILE INTEGRITY (Hash Authority)
@@ -818,8 +836,8 @@ async function handleDocumentPatch(req, res) {
         doc.revision,
         doc.submission_state, // Stay in current state (e.g. pending) but take ownership
         {
-          idempotency_key: 'file_hash',
-          tx_status: "'initiated'",
+          idempotency_key: doc.file_hash,
+          tx_status: 'initiated',
           processing_started_at: 'NOW()',
           notary_id: actor.id,
           document_summary: document_summary,
@@ -831,7 +849,11 @@ async function handleDocumentPatch(req, res) {
       );
 
       if (statusResult.error === 'STATE_CONFLICT') {
-        return res.status(403).json({ error: 'Document is already being processed or is confirmed.' });
+        return res.status(200).json({ 
+          message: 'Document already being processed or confirmed.', 
+          document: sanitizeDocument(doc, actor),
+          status: 'success'
+        });
       }
 
       const previous_state = doc.submission_state;
@@ -910,25 +932,39 @@ async function handleDocumentPatch(req, res) {
       };
 
       try {
-        const recoveredSigner = ethers.verifyTypedData(domain, types, message, signature);
+        let recoveredSigner = null;
+        if (signature === "DIRECT_TX_CONFIRMED") {
+          // If user sent directly, the "signer" is inferred from the actor address
+          recoveredSigner = (actor.address || actor.wallet_address);
+        } else {
+          recoveredSigner = ethers.verifyTypedData(domain, types, message, signature);
+        }
         const expectedAddress = (actor.address || actor.wallet_address || "").toLowerCase();
         
         if (!recoveredSigner || recoveredSigner.toLowerCase() !== expectedAddress) {
-          await DocumentStatusService.updateStatus(client, id, claimedDoc.submission_state, claimedDoc.revision, claimedDoc.submission_state, { tx_status: "'failed'" });
+          await DocumentStatusService.updateStatus(client, id, claimedDoc.submission_state, claimedDoc.revision, claimedDoc.submission_state, { tx_status: 'failed' });
           return res.status(401).json({ error: 'Invalid signature or recovery failure.' });
         }
 
         const txSendStart = Date.now();
-        const txResult = await sendApprovalTx(
-          docHashBytes,
-          ownerAddress,
-          status,
-          signature,
-          parseInt(timestamp),
-          summaryHash,
-          rejectionHash,
-          recoveredSigner
-        );
+        let txResult;
+
+        if (signature === "DIRECT_TX_CONFIRMED") {
+          logger.info('USER_DIRECT_TX_DETECTION', { id, correlation_id: correlationId });
+          // If the user already sent it, we just need to wait for confirmation or use the provided hash
+          txResult = { txHash: txHash || 'PENDING_USER_TX', simulated: false };
+        } else {
+          txResult = await sendApprovalTx(
+            docHashBytes,
+            ownerAddress,
+            status,
+            signature,
+            parseInt(timestamp),
+            summaryHash,
+            rejectionHash,
+            recoveredSigner
+          );
+        }
         const txSendDuration = Date.now() - txSendStart;
 
         logger.info('TX_SENT', { 
@@ -949,7 +985,7 @@ async function handleDocumentPatch(req, res) {
           dbStatus,
           {
             tx_hash: txResult.txHash,
-            tx_status: "'pending'",
+            tx_status: 'pending',
             needs_cleanup: 'true',
             updated_at: 'NOW()',
             status_updated_at: 'NOW()'
@@ -1003,13 +1039,11 @@ async function handleDocumentPatch(req, res) {
           claimedDoc.revision, 
           claimedDoc.submission_state, 
           { 
-            tx_status: "'failed'", 
-            last_error: '$5', 
+            tx_status: 'failed', 
+            last_error: JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.SEND, message: txErr.message }), 
             updated_at: 'NOW()', 
             status_updated_at: 'NOW()' 
-          },
-          "",
-          [JSON.stringify({ type: ERROR_TYPES.RPC, stage: ERROR_STAGES.SEND, message: txErr.message })]
+          }
         );
         return res.status(502).json({ error: 'Blockchain alignment failed.', details: txErr.message });
       }
@@ -1122,7 +1156,7 @@ router.delete('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_DE
       return res.status(403).json({ error: 'Only owner or admin can delete document' });
     }
 
-    await DocumentStatusService.updateStatus(pool, id, doc.submission_state, doc.revision, doc.submission_state, { is_deleted: "'true'" });
+    await DocumentStatusService.updateStatus(pool, id, doc.submission_state, doc.revision, doc.submission_state, { is_deleted: true });
     res.status(204).send();
   } catch (err) {
     console.error(err);

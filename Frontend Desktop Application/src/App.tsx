@@ -440,7 +440,8 @@ export default function App() {
               <Button 
                 className="w-full h-20 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xl rounded-2xl border-b-8 border-emerald-800 shadow-emerald-900/40 shadow-2xl transition-all"
                 onClick={() => {
-                  const url = `${config.remoteAuthUrl}/?mode=genesis`;
+                  const baseAuthUrl = config.remoteAuthUrl.replace(/\/$/, "");
+                  const url = `${baseAuthUrl}/?mode=genesis`;
                   (window as any).electronAPI ? (window as any).electronAPI.openExternal(url) : window.open(url, '_blank');
                 }}
               >

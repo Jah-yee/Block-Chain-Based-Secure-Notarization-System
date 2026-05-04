@@ -81,6 +81,7 @@ function getImpactMessage(data: string) {
   }
 }
 export function MultiSigApprovals() {
+  const { config } = useConfig();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [contractAddress, setContractAddress] = useState("");
@@ -195,8 +196,8 @@ export function MultiSigApprovals() {
       if (!window.ethereum) {
         // --- REMOTE SIGNING FLOW ---
         const session = await api.initRemoteMultiSigSession(tx.index);
-        const { config } = useConfig();
-        const link = `${config?.webAppUrl}/governance/multisig/remote-confirm?sessionId=${session.sessionId}`;
+        const baseAuthUrl = (config?.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
+        const link = `${baseAuthUrl}/?mode=multisig&sessionId=${session.sessionId}`;
         setRemoteSessionLink(link);
 
         // Open automatically if possible

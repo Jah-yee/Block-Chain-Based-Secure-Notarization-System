@@ -76,8 +76,28 @@ const authLimiter = rateLimit({
   }
 });
 
+/**
+ * 🛡️ STATUS POLLING LIMITER (Relaxed)
+ * 2000 requests per 15 minutes per IP.
+ * Specifically for the Desktop App status bridge.
+ */
+const statusLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 2000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => getClientIP(req),
+  handler: (req, res) => {
+    res.status(429).json({
+      error: "Status polling limit reached.",
+      code: "STATUS_RATE_LIMIT"
+    });
+  }
+});
+
 module.exports = {
   globalLimiter,
   uploadLimiter,
-  authLimiter
+  authLimiter,
+  statusLimiter
 };

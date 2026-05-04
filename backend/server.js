@@ -226,6 +226,15 @@ async function bootstrap() {
     } catch (cbErr) {
       console.error("❌ Warning: Failed to initialize Circuit Breaker State:", cbErr.message);
     }
+
+    // [PHASE 7.3] Automated NTK distribution
+    try {
+      const ntkWorker = require("./src/workers/ntk-worker");
+      ntkWorker.start();
+      console.log("   ✅ NTK Distribution Worker registered.");
+    } catch (workerErr) {
+      console.error("❌ Warning: Failed to register NTK worker:", workerErr.message);
+    }
   });
 }
 

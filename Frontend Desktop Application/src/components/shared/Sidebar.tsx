@@ -1,5 +1,6 @@
 import { Home, Users, FileText, CheckSquare, Settings, LogOut, User, Gavel, ChevronLeft, ChevronRight, Shield, Sun, Moon, LayoutDashboard, Database, Activity } from "lucide-react";
 import { Button } from "../ui/button";
+import { useState } from "react";
 
 interface SidebarProps {
   role: "admin" | "notary" | "owner";
@@ -22,6 +23,8 @@ interface MenuItem {
 }
 
 export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertCount = 0, isCollapsed, onToggleCollapse, isDarkMode, onToggleDarkMode }: SidebarProps) {
+  const [showCopied, setShowCopied] = useState(false);
+
   const adminMenuItems: MenuItem[] = [
     { id: "dashboard", label: "Overview", icon: LayoutDashboard },
     { id: "manage-notaries", label: "Notary Management", icon: Users },
@@ -46,8 +49,16 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
 
   const menuItems: MenuItem[] = role === "admin" ? adminMenuItems : (role === "notary" ? notaryMenuItems : ownerMenuItems);
 
+  const handleCopy = () => {
+    if (user?.wallet_address) {
+      navigator.clipboard.writeText(user.wallet_address);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    }
+  };
+
   return (
-    <div className={`${isCollapsed ? "w-20" : "w-56"} bg-card border-r border-border/50 flex flex-col h-full transition-all duration-500 ease-in-out relative z-40 overflow-visible shadow-[10px_0_30px_rgba(0,0,0,0.1)] dark:shadow-[10px_0_30px_rgba(0,0,0,0.5)] flex-none`}>
+    <div className={`${isCollapsed ? "w-20" : "w-48"} bg-card border-r border-border/50 flex flex-col h-full transition-all duration-500 ease-in-out relative z-40 overflow-visible shadow-[10px_0_30px_rgba(0,0,0,0.1)] dark:shadow-[10px_0_30px_rgba(0,0,0,0.5)] flex-none`}>
       {/* 🛡️ [AESTHETIC] Animated Background Glow */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none opacity-20">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/20 blur-[100px] rounded-full animate-pulse" />
@@ -90,18 +101,31 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       {/* Profile Section - Premium Overhaul */}
       {!isCollapsed ? (
         <div className="px-4 mt-2 animate-in fade-in duration-500">
-          <div className="p-4 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-2xl flex items-center gap-3 group hover:border-white/10 transition-colors">
+          <div className="p-4 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-2xl flex items-center gap-3 group hover:border-white/10 transition-colors relative">
             <div className="relative shrink-0">
                <div className="absolute inset-0 bg-emerald-500/20 blur-md rounded-full" />
-               <div className="relative w-10 h-10 rounded-full bg-muted border border-border/50 flex items-center justify-center text-primary font-black shadow-inner">
+               <div className="relative w-8 h-8 rounded-full bg-muted border border-border/50 flex items-center justify-center text-primary font-black shadow-inner text-xs">
                   {(user?.name || "U").slice(0, 1).toUpperCase()}
                </div>
             </div>
-            <div className="overflow-hidden">
-              <p className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">{user?.name || "System Actor"}</p>
-              <div className="flex items-center gap-1.5 text-[9px] font-mono text-white/40">
-                  <Database size={8} />
-                  <span className="truncate">{(user?.wallet_address || "0x00...000").slice(0, 6)}...{(user?.wallet_address || "0000").slice(-4)}</span>
+            <div className="overflow-hidden flex-1">
+              <p className="text-[11px] font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">{user?.name || "System Actor"}</p>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 text-[8px] font-mono text-white/40 overflow-hidden">
+                    <span className="truncate selectable">{user?.wallet_address || "0x00...000"}</span>
+                </div>
+                <button 
+                  onClick={handleCopy}
+                  className="p-1 hover:bg-white/10 rounded transition-colors text-white/20 hover:text-emerald-400 relative"
+                  title="Copy Wallet Address"
+                >
+                  <FileText size={10} />
+                  {showCopied && (
+                    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg animate-in fade-in zoom-in duration-200">
+                      COPIED!
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
           </div>

@@ -125,7 +125,10 @@ const ACTION_POLICIES = {
         rules: [
             { table: 'DOCUMENTS', op: 'SELECT' },
             { table: 'DOCUMENTS', op: 'UPDATE' },
-            { table: 'USERS', op: 'SELECT' }
+            { table: 'USERS', op: 'SELECT' },
+            { table: 'RELAYER_NONCES', op: 'SELECT' },
+            { table: 'RELAYER_NONCES', op: 'UPDATE' },
+            { table: 'RELAYER_NONCES', op: 'INSERT' }
         ]
     },
     DOC_DELETE: {
@@ -239,10 +242,24 @@ const ACTION_POLICIES = {
     GOV_READ: { description: "Read multisig settings", actor: "ANY", requiresStrong: false, rules: [{ table: 'SYSTEM_CONFIG', op: 'SELECT' }] },
     GOV_PROPOSAL_LIST: { description: "List governance proposals", actor: "ANY", requiresStrong: false, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'SELECT' }] },
     GOV_PROPOSAL_CREATE: { description: "Create gov proposal", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'INSERT' }] },
+    GOV_PROPOSAL_CANCEL: { description: "Cancel gov proposal", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'UPDATE' }] },
     GOV_VOTE_SUBMIT: { description: "Submit vote", actor: "NOTARY", requiresStrong: true, rules: [{ table: 'GOVERNANCE_VOTES', op: 'INSERT' }] },
     GOV_ONCHAIN_SUBMIT: { description: "Submit to chain", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'UPDATE' }] },
     GOV_REMOTE_INIT: { description: "Initiate remote vote", actor: "NOTARY", requiresStrong: true, rules: [{ table: 'GOVERNANCE_VOTES', op: 'INSERT' }] },
     GOV_REMOTE_AUTHORIZE: { description: "Authorize vote", actor: "ANY", requiresStrong: false, rules: [{ table: 'GOVERNANCE_VOTES', op: 'UPDATE' }] },
+    GOV_REMOTE_STATUS: { description: "Poll remote session status", actor: "GUEST", requiresStrong: false, rules: [{ table: 'REMOTE_GOV_SESSIONS', op: 'SELECT' }] },
+    GOV_PROPOSAL_EXECUTE: {
+        description: "Fulfill approved proposal on-chain and off-chain",
+        actor: "ADMIN",
+        requiresStrong: true,
+        rules: [
+            { table: 'GOVERNANCE_PROPOSALS', op: 'SELECT' },
+            { table: 'GOVERNANCE_PROPOSALS', op: 'UPDATE' },
+            { table: 'USERS', op: 'UPDATE', optional: true },
+            { table: 'SYSTEM_CONFIG', op: 'SELECT', optional: true },
+            { table: 'SYSTEM_LOGS', op: 'INSERT' }
+        ]
+    },
 
     // --- TRANSACTIONS ---
     TX_APPROVE_VOTE: { description: "Approve transaction", actor: "NOTARY", requiresStrong: true, rules: [{ table: 'NTKR_TRANSACTIONS', op: 'UPDATE' }] },

@@ -8,6 +8,7 @@ type AppStatus = "loading" | "ready" | "signing" | "authorized" | "expired" | "e
 
 function App() {
   const [status, setStatus] = useState<AppStatus>("loading");
+  const [activeMode, setActiveMode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [challenge, setChallenge] = useState<string | null>(null);
@@ -55,12 +56,19 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const mode = params.get("mode");
-    const sid = params.get("sessionId");
-    const target = params.get("targetAddress");
+    let params = new URLSearchParams(window.location.search);
+    let mode = params.get("mode");
+    let sid = params.get("sessionId");
+    let target = params.get("targetAddress");
 
-    const allowedModes = ["login", "genesis", "notarize", "token", "promote"];
+    if (!mode && window.location.hash) {
+      params = new URLSearchParams(window.location.hash.substring(1));
+      mode = params.get("mode");
+      sid = params.get("sessionId");
+      target = params.get("targetAddress");
+    }
+
+    const allowedModes = ["login", "genesis", "notarize", "promote", "gov-vote", "gov-submit", "multisig"];
 
     const init = async () => {
       // 1. HARD INPUT VALIDATION
@@ -70,8 +78,8 @@ function App() {
         return;
       }
 
-      // sid is required for all modes EXCEPT genesis, token, and promote
-      if (!sid && !["genesis", "token", "promote"].includes(mode)) {
+      // sid is required for all modes EXCEPT genesis and promote
+      if (!sid && !["genesis", "promote"].includes(mode)) {
         setError("Missing session identifier (sessionId).");
         setStatus("error");
         return;
@@ -100,12 +108,9 @@ function App() {
 
       // 3. DETERMINISTIC STATE MACHINE
       console.log(`[PROTOCOL] Mode: ${mode} | Initialized: ${systemInitialized} | Session: ${sid}`);
+      setActiveMode(mode);
 
       switch (mode) {
-        case "token":
-          setStatus("token");
-          break;
-
         case "promote":
           if (!target) {
             setError("Missing targetAddress parameter for promotion.");
@@ -118,12 +123,15 @@ function App() {
 
         case "login":
         case "notarize":
+        case "gov-vote":
+        case "gov-submit":
+        case "multisig":
           if (!systemInitialized) {
             setError(`Protocol violation: ${mode} requested, but system is not yet initialized. Use Genesis first.`);
             setStatus("error");
           } else {
             setSessionId(sid);
-            fetchSession(sid!);
+            fetchSession(sid!, mode);
           }
           break;
 
@@ -146,9 +154,18 @@ function App() {
     init();
   }, [checkSystemStatus]);
 
-  const fetchSession = async (sid: string) => {
+  const fetchSession = async (sid: string, currentMode: string) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/remote/status/${sid}`);
+      let endpointBase = `${BACKEND_URL}/api/auth/remote`;
+      if (currentMode === "gov-vote") {
+        endpointBase = `${BACKEND_URL}/api/governance/remote/vote`;
+      } else if (currentMode === "gov-submit") {
+        endpointBase = `${BACKEND_URL}/api/governance/remote/submit`;
+      } else if (currentMode === "multisig") {
+        endpointBase = `${BACKEND_URL}/api/governance/remote/confirm`;
+      }
+
+      const res = await fetch(`${endpointBase}/status/${sid}`);
       if (!res.ok) throw new Error("Session not found or expired.");
       const data = await res.json();
 
@@ -156,6 +173,7 @@ function App() {
         setStatus("expired");
       } else if (data.status === "authorized") {
         setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
       } else {
         setChallenge(data.challenge);
         
@@ -181,6 +199,33 @@ function App() {
       setStatus("error");
     }
   };
+
+  // 🛡️ [RESILIENCE] On-Chain Sync: Detect if notarization happened via other channel
+  useEffect(() => {
+    if (notarizeMetadata && config && status === "ready") {
+      const checkOnChain = async () => {
+        try {
+          const provider = new ethers.BrowserProvider((window as any).ethereum);
+          const contract = new ethers.Contract(
+            config.contracts.documentRegistry,
+            ["function getDocument(bytes32) view returns (address, uint256, uint8, bool)"],
+            provider
+          );
+          const docHash = notarizeMetadata.docHash;
+          const onChain = await contract.getDocument(docHash);
+          
+          if (onChain[3]) { // exists == true
+            console.log("✨ [SYNC] Document already on-chain. Auto-authorizing...");
+            setStatus("authorized");
+            setTimeout(() => window.close(), 10000);
+          }
+        } catch (e) {
+          console.warn("[SYNC_ERR] Could not verify on-chain state:", e);
+        }
+      };
+      checkOnChain();
+    }
+  }, [notarizeMetadata, config, status]);
 
   const connectWallet = async () => {
     if (!(window as any).ethereum) {
@@ -283,7 +328,7 @@ function App() {
       }
 
       setStatus("authorized");
-      setTimeout(() => window.close(), 3000);
+      setTimeout(() => window.close(), 10000);
     } catch (err: any) {
       setError(err.message);
       setStatus("onboarding");
@@ -301,10 +346,42 @@ function App() {
       // Check if this is a Notarization Payload (EIP-712 formatted)
       let parsedPayload: any = null;
       try {
-        if (challenge.includes('"domain"') && challenge.includes('"message"')) {
+        if (challenge && challenge.includes('"domain"') && challenge.includes('"message"')) {
           parsedPayload = JSON.parse(challenge);
         }
       } catch (e) { /* Not a JSON payload */ }
+
+      if (activeMode === "gov-vote" || activeMode === "gov-submit" || activeMode === "multisig") {
+        let authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/vote/authorize`;
+        if (activeMode === "gov-submit") authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/submit/authorize`;
+        else if (activeMode === "multisig") authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/confirm/authorize`;
+
+        let signature;
+        if (parsedPayload) {
+          signature = await signer.signTypedData(
+            parsedPayload.domain,
+            parsedPayload.types,
+            parsedPayload.message
+          );
+        } else {
+          signature = await signer.signMessage(challenge!);
+        }
+
+        const res = await fetch(authorizeEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, walletAddress: address, signature })
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Governance Authorization failed on server");
+        }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
+        return;
+      }
 
       if (parsedPayload && isDirect) {
         // DIRECT TRANSACTION (Self-Paid)
@@ -343,6 +420,9 @@ function App() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Failed to notify backend of transaction");
         }
+        
+        setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
       } else if (parsedPayload) {
         // GASLESS (Relayer-Managed)
         const signature = await signer.signTypedData(
@@ -361,6 +441,9 @@ function App() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "Authorization failed on server");
         }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
       } else if (notarizeMetadata) {
         // 🛡️ [Step B] Notarize-Mode EIP-712 Signing
         console.log(`[AUTH] Initiating Notarization Signing for doc: ${notarizeMetadata.docHash}`);
@@ -413,7 +496,7 @@ function App() {
         }
 
         setStatus("authorized");
-        setTimeout(() => window.close(), 3000);
+        setTimeout(() => window.close(), 10000);
       } else if (handshakeDomain && handshakeTypes) {
         // 🛡️ [Hardening 11.3] Atomic Single-Signature Handshake
         console.log(`[AUTH] Initiating Atomic Handshake for sessionId: ${sessionId}`);
@@ -454,7 +537,7 @@ function App() {
         }
 
         setStatus("authorized");
-        setTimeout(() => window.close(), 3000);
+        setTimeout(() => window.close(), 10000);
       } else {
         // Standard Identity Binding Flow
         console.log(`[AUTH] Falling back to Legacy Dual-Signature flow for sessionId: ${sessionId}`);
@@ -513,39 +596,15 @@ function App() {
         }
 
         setStatus("authorized");
-        setTimeout(() => window.close(), 3000);
+        setTimeout(() => window.close(), 10000);
       }
-
-      setStatus("authorized");
-      setTimeout(() => window.close(), 3000);
     } catch (err: any) {
       setError(err.reason || err.message);
       setStatus("error");
     }
   };
 
-  const handleAddToken = async () => {
-    if (!(window as any).ethereum) {
-      setError("Web3 Wallet not found.");
-      return;
-    }
-    try {
-      await (window as any).ethereum.request({
-        method: 'wallet_watchAsset',
-        params: {
-          type: 'ERC20',
-          options: {
-            address: config.contracts.ntk,
-            symbol: 'NTK',
-            decimals: 18,
-          },
-        },
-      });
-      setStatus("authorized");
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
+
 
   const handlePromote = async () => {
     if (!targetAddress || !isConnected) return;
@@ -570,11 +629,20 @@ function App() {
       console.log(`[PROMOTION] Transaction confirmed!`);
       
       setStatus("authorized");
+      setTimeout(() => window.close(), 10000);
     } catch (err: any) {
-      console.error("[PROMOTION_ERROR]", err);
-      setError(err.reason || err.message || "On-chain promotion failed.");
-    } finally {
-      setIsPromoting(false);
+      console.error("[AUTHORIZE_ERROR]", err);
+      
+      // 🛡️ [RESILIENCE] If it failed because it's already there, that's a WIN for the user
+      if (err.message && err.message.includes("Record already exists")) {
+        console.log("✨ [SYNC] Caught 'Already Exists' error - treating as success.");
+        setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
+        return;
+      }
+
+      setError(err.reason || err.message);
+      setStatus("error");
     }
   };
 
@@ -584,9 +652,9 @@ function App() {
         <Shield size={64} className="icon-pulse" color={status === "error" ? "var(--error)" : "var(--primary)"} />
       </div>
 
-      <h1>BBSNS {status.startsWith("genesis") || status === "onboarding" ? "Initialization" : status === "token" ? "Token Management" : status === "promote" ? "Governance Action" : "Remote Auth"}</h1>
+      <h1>BBSNS {status.startsWith("genesis") || status === "onboarding" ? "Initialization" : status === "promote" ? "Governance Action" : activeMode?.startsWith("gov") || activeMode === "multisig" ? "Governance Authorization" : "Remote Auth"}</h1>
       <p style={{ color: "var(--muted)", marginBottom: "2rem" }}>
-        {status === "onboarding" ? "Setting up Genesis Admin Identity" : status === "token" ? "Manage BBSNS Tokens in your Wallet" : status === "promote" ? "Elevate account to Notary Status" : "Secure Handshake for Protocol Operations"}
+        {status === "onboarding" ? "Setting up Genesis Admin Identity" : status === "promote" ? "Elevate account to Notary Status" : activeMode?.startsWith("gov") || activeMode === "multisig" ? "Securely signing a governance transaction" : "Secure Handshake for Protocol Operations"}
       </p>
 
       {status === "loading" && <div className="status-spinner" />}
@@ -642,27 +710,7 @@ function App() {
         </form>
       )}
 
-      {status === "token" && (
-        <div className="view-container">
-           <div className="alert alert-info">
-            <strong>NTK Utility Token</strong><br/>
-            Add the NTK token to your MetaMask to track your reputation and rewards.
-          </div>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', textAlign: 'left' }}>
-             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                <Coins size={20} color="var(--primary)" />
-                <span style={{ fontWeight: '600' }}>NTK Token Address</span>
-             </div>
-             <code style={{ fontSize: '0.75rem', wordBreak: 'break-all', display: 'block', padding: '0.5rem', background: 'rgba(0,0,0,0.2)', borderRadius: '0.5rem' }}>
-                {config?.contracts.ntk}
-             </code>
-          </div>
-          <button className="button" onClick={handleAddToken}>
-            <Plus size={18} style={{ marginRight: "10px" }} />
-            Add NTK to MetaMask
-          </button>
-        </div>
-      )}
+
 
       {status === "promote" && (
         <div className="view-container">
@@ -747,16 +795,10 @@ function App() {
             <>
               <div className="address-chip" style={{ marginBottom: "1rem" }}>{walletAddress}</div>
               {challenge?.includes('"domain"') ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                  <button className="button" onClick={() => handleAuthorize(false)}>
-                    <LogIn size={18} style={{ marginRight: "10px" }} />
-                    Approve (Gasless)
-                  </button>
-                  <button className="button outline" onClick={() => handleAuthorize(true)} style={{ borderColor: 'var(--primary)' }}>
+                  <button className="button" onClick={() => handleAuthorize(true)} style={{ width: '100%' }}>
                     <Shield size={18} style={{ marginRight: "10px" }} />
                     Approve & Pay Gas
                   </button>
-                </div>
               ) : (
                 <button className="button" onClick={() => handleAuthorize(false)}>
                   <LogIn size={18} style={{ marginRight: "10px" }} />
@@ -781,7 +823,7 @@ function App() {
           <CheckCircle2 size={64} color="var(--primary)" style={{ margin: "0 auto 1.5rem" }} />
           <h2 style={{ color: "var(--primary)", marginBottom: "0.5rem" }}>Operation Successful!</h2>
           <p style={{ color: "var(--muted)" }}>You can now return to the desktop app.</p>
-          <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontStyle: "italic" }}>Closing in 3 seconds...</span>
+          <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontStyle: "italic" }}>Closing in 10 seconds...</span>
         </div>
       )}
 

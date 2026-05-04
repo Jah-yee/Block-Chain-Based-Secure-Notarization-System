@@ -211,6 +211,10 @@ const api = {
     });
   },
 
+  async executeProposal(id) {
+    return this.request(`/api/governance/proposals/${id}/execute`, { method: 'POST' });
+  },
+
   async prepareProposalOnChain(id) {
     return this.request(`/api/governance/proposals/${id}/prepare-on-chain`, { method: 'POST' });
   },

@@ -104,12 +104,12 @@ function RemoteConfirmContent() {
                 variant: result.executed ? "default" : "default"
             })
 
-            // Auto-close after 5 seconds
+            // Auto-close after 10 seconds
             setTimeout(() => {
                 if (typeof window !== 'undefined') {
                     window.close();
                 }
-            }, 5000);
+            }, 10000);
         } catch (err: any) {
             console.error(err)
             setError(err.message || "Failed to sign transaction")
@@ -201,7 +201,7 @@ function RemoteConfirmContent() {
                                 <div className="space-y-2">
                                     <h3 className="text-2xl font-bold text-white">Confirmed!</h3>
                                     <p className="text-sm text-slate-400 max-w-[200px] mx-auto">
-                                        Transaction has been confirmed and/or executed on-chain.
+                                        Transaction has been confirmed and/or executed on-chain. This window will close in 10 seconds.
                                     </p>
                                 </div>
                                 <div className="flex items-center space-x-2 text-[10px] text-emerald-500/40 uppercase tracking-widest font-bold">

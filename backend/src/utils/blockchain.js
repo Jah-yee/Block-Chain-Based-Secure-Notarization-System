@@ -16,6 +16,13 @@ const sendApprovalTx = async (docHash, ownerAddress, status, signature, timestam
       const { contract: registry, signer } = await connectBNB();
       const nm = new NonceManager(signer);
 
+      // PRE-SUBMISSION CHECK: Avoid double-burn if already notarized (race condition)
+      const onChain = await registry.getDocument(docHash);
+      if (onChain.exists && Number(onChain.status) > 0) {
+        console.log(`✅ [RACE_CONDITION_PREVENTED] Document ${docHash} is already on-chain. Skipping redundant submission.`);
+        return { txHash: 'ALREADY_NOTARIZED_SYNC', simulated: false };
+      }
+
       const statusUint = status === 'rejected' ? 2 : 1;
 
       // 1. Get Protocol Nonce (Internal Notary Nonce)
@@ -64,6 +71,12 @@ const sendApprovalTx = async (docHash, ownerAddress, status, signature, timestam
         // Force sync with node if nonce is out of sync
         const { signer } = await connectBNB();
         await (new NonceManager(signer)).syncNonceWithNode();
+      }
+
+      // 🛡️ [RESILIENCE] If the record already exists, it's a success for our state machine
+      if (error.message.includes("Record already exists")) {
+        console.log(`✨ [RESOLVED_CONFLICT] Document already exists on-chain. Synchronizing state.`);
+        return { txHash: 'ALREADY_ON_CHAIN', simulated: false, alreadyExists: true };
       }
 
       if (attempt >= maxAttempts) throw error;
