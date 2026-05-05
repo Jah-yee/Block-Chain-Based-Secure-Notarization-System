@@ -11,5 +11,12 @@
 ## [BUG-003] Missing Initial NTK Minting on Notary Activation
 **Status:** 🔴 OPEN
 **Severity:** High
-**Description:** New Notaries are successfully activated in the database and on-chain, but they start with a 0.0 NTK balance. They are currently forced to wait for the daily background worker to run before they can perform their first notarization.
-**Required Fix:** Integrate a "Welcome Mint" trigger in `UserService.js` and the Notary Onboarding route to instantly credit new accounts.
+**Description:** New Notaries start with a 0.0 NTK balance and are forced to wait for the daily background worker.
+**Required Fix:** Integrate a "Welcome Mint" trigger in `UserService.js` and the Notary Onboarding route.
+
+## [BUG-004] Governance Privilege Leak (Notary Access to Admin Votes)
+**Status:** 🔴 OPEN
+**Severity:** Critical (Security)
+**Description:** Notaries are able to view proposals intended for Administrators only. 
+**Suspected Cause:** The `GET /proposals` query in `governance.js` treats `NULL` or empty `target_notaries` fields as "Public" rather than "Admin-Only."
+**Location:** `backend/src/routes/governance.js` (Line 29)
