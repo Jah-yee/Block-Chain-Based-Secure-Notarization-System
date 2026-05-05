@@ -320,6 +320,10 @@ const api = {
 
   async getSystemConfig() {
     return this.request('/api/system/config');
+  },
+  
+  async getOnChainRole(address) {
+    return this.request(`/api/notaries/onchain-role/${address}`);
   }
 };
 

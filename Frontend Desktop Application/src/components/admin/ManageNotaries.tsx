@@ -33,11 +33,38 @@ export function ManageNotaries() {
     application: null as any | null,
   });
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [onChainStatuses, setOnChainStatuses] = useState<Record<string, boolean>>({});
+  const [isAuditing, setIsAuditing] = useState(false);
   const [promotionDialog, setPromotionDialog] = useState({
     open: false,
     application: null as any | null,
   });
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // ===============================
+  // BLOCKCHAIN AUDIT LOGIC
+  // ===============================
+  const auditOnChainStatus = async (apps: any[]) => {
+    setIsAuditing(true);
+    const statuses: Record<string, boolean> = {};
+    
+    // Audit in parallel with rate control
+    const auditPromises = apps
+      .filter(app => app.wallet_address)
+      .map(async (app) => {
+        try {
+          const res = await api.getOnChainRole(app.wallet_address);
+          statuses[app.wallet_address.toLowerCase()] = res.data.isOnChain;
+        } catch (err) {
+          console.warn(`[AUDIT_FAIL] ${app.wallet_address}:`, err);
+          statuses[app.wallet_address.toLowerCase()] = false;
+        }
+      });
+
+    await Promise.all(auditPromises);
+    setOnChainStatuses(prev => ({ ...prev, ...statuses }));
+    setIsAuditing(false);
+  };
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -88,6 +115,9 @@ export function ManageNotaries() {
 
       setApplications(merged);
       setSyncError(null);
+      
+      // 🛡️ [AUDIT_SYNC] Trigger Real-time Blockchain Pulse
+      auditOnChainStatus(merged);
     } catch (err: any) {
       console.error("[NOTARIES_LOAD_FAIL]", err);
       setSyncError("Data sync error — invalid response format");
@@ -308,7 +338,18 @@ export function ManageNotaries() {
                         {app.license_number}
                       </TableCell>
                       <TableCell className="text-sm">{app.email}</TableCell>
-                      <TableCell>{getStatusBadge(app.status)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(app.status)}
+                          {app.wallet_address && (status === 'APPROVED' || status === 'ACTIVATED') && (
+                            onChainStatuses[app.wallet_address.toLowerCase()] ? (
+                              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" title="On-Chain Verified" />
+                            ) : (
+                              <div className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]" title="Missing On-Chain (Action Required)" />
+                            )
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button
@@ -533,6 +574,20 @@ export function ManageNotaries() {
             >
               Close Profile
             </Button>
+            
+            {viewDialog.application?.wallet_address && 
+             (normalizeStatus(viewDialog.application.status) === 'APPROVED' || normalizeStatus(viewDialog.application.status) === 'ACTIVATED') && 
+             !onChainStatuses[viewDialog.application.wallet_address.toLowerCase()] && (
+              <Button 
+                onClick={() => {
+                  handlePromoteOnChain(viewDialog.application);
+                }}
+                className="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter animate-pulse ml-auto"
+              >
+                <ShieldAlert size={14} className="mr-2" />
+                Promote to On-chain (Sync Required)
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

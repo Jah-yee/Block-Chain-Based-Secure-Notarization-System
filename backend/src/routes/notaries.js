@@ -58,6 +58,44 @@ router.get("/applications/status/:id", allowPublic, requirePrivilege({ capabilit
   }
 });
 
+/**
+ * 🛡️ [AUDIT] Check on-chain role status
+ * Used by Admin Management to show Red/Green sync dots.
+ */
+router.get("/onchain-role/:address", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST', minRole: ROLES.ADMIN }), async (req, res) => {
+    const { address } = req.params;
+    if (!address) return res.status(400).json({ error: "Address required" });
+
+    try {
+        const ConfigService = require('../services/config.service');
+        const ProviderService = require('../blockchain/provider-service');
+        const { ethers } = require('ethers');
+
+        const config = await ConfigService.getConfig();
+        const provider = await ProviderService.getProvider();
+        
+        const registry = new ethers.Contract(
+            config.contracts.notaryRegistry, 
+            ["function getUserRole(address) view returns (uint8)"], 
+            provider
+        );
+        
+        const liveRole = await registry.getUserRole(address);
+        
+        res.json({
+            status: "ok",
+            data: {
+                address,
+                role: Number(liveRole),
+                isOnChain: Number(liveRole) === 2 // 2 = Notary in BBSNS Protocol
+            }
+        });
+    } catch (err) {
+        console.error("[ONCHAIN_AUDIT_ERROR]", err);
+        res.status(500).json({ error: "Failed to verify on-chain state" });
+    }
+});
+
 // PUBLIC: Submit initial notary application
 router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePrivilege({ capability: 'NOTARY_APP_SUBMIT', allowPublic: true }), withGuestContext, validateBody(notarySchema), withAction('NOTARY_APP_SUBMIT'), withMutation(), async (req, res) => {
   const { fullName, email, walletAddress, phone, license, experience, nationalId, nationality } = req.body;
