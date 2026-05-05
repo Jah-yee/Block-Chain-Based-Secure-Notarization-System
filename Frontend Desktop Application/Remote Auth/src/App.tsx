@@ -621,28 +621,50 @@ function App() {
       
       const contract = new ethers.Contract(config.contracts.notaryRegistry, registryAbi, signer);
       
-      console.log(`[PROMOTION] Sending promoteToNotary for: ${targetAddress}`);
-      const tx = await contract.promoteToNotary(targetAddress);
-      console.log(`[PROMOTION] Transaction sent: ${tx.hash}`);
+      console.log(`[PROMOTION] Attempting Direct Promotion for: ${targetAddress}`);
       
-      await tx.wait();
-      console.log(`[PROMOTION] Transaction confirmed!`);
-      
-      setStatus("authorized");
-      setTimeout(() => window.close(), 10000);
-    } catch (err: any) {
-      console.error("[AUTHORIZE_ERROR]", err);
-      
-      // 🛡️ [RESILIENCE] If it failed because it's already there, that's a WIN for the user
-      if (err.message && err.message.includes("Record already exists")) {
-        console.log("✨ [SYNC] Caught 'Already Exists' error - treating as success.");
+      try {
+        const tx = await contract.promoteToNotary(targetAddress);
+        console.log(`[PROMOTION] Transaction sent: ${tx.hash}`);
+        await tx.wait();
         setStatus("authorized");
         setTimeout(() => window.close(), 10000);
-        return;
-      }
+      } catch (innerErr: any) {
+        // 🛡️ [GOVERNANCE_RECOVERY] Detect Protocol Restriction
+        if (innerErr.message && innerErr.message.includes("Not governance")) {
+          console.warn("⚠️ [PROTOCOL_REVERT] NotaryRegistry is in Governance-Only mode.");
+          
+          // Redirect to Backend Proposal Creation
+          const res = await fetch(`${BACKEND_URL}/api/governance/proposals`, {
+            method: "POST",
+            headers: { 
+               "Content-Type": "application/json",
+               "Authorization": `Bearer ${localStorage.getItem('bbsns_token')}` // Use existing session if available
+            },
+            body: JSON.stringify({
+              title: "On-Chain Notary Promotion",
+              description: `Elevate wallet ${targetAddress} to Notary role via Governance Authority.`,
+              type: "NOTARY_PROMOTION",
+              target_id: targetAddress,
+              expires_in_days: 7
+            })
+          });
 
+          if (!res.ok) throw new Error("Failed to create Governance Proposal. Please use the Admin Dashboard.");
+          
+          setStatus("authorized"); // Treatment as success since proposal is created
+          alert("Direct promotion restricted. A Governance Proposal has been created automatically. Please approve it in the Governance Dashboard.");
+          setTimeout(() => window.close(), 10000);
+        } else {
+          throw innerErr;
+        }
+      }
+    } catch (err: any) {
+      console.error("[AUTHORIZE_ERROR]", err);
       setError(err.reason || err.message);
       setStatus("error");
+    } finally {
+      setIsPromoting(false);
     }
   };
 

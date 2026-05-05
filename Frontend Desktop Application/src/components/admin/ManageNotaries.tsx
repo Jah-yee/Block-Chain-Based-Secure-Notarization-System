@@ -87,8 +87,8 @@ export function ManageNotaries() {
       
       const applicationsArray = unwrapResponse(applicationsRes).map((app: any) => ({
         ...app,
-        id: app.application_id || app.id, // Normalize application_id
-        status: normalizeStatus(app.status) // [NORMALIZE ONCE] Force to Backend Authority
+        id: app.application_id || app.id,
+        status: normalizeStatus(app.status || 'PENDING')
       }));
       
       const activeNotaries = unwrapResponse(activeNotariesRes).map((notary: any) => ({
@@ -99,16 +99,17 @@ export function ManageNotaries() {
       const merged = [...applicationsArray];
 
       activeNotaries.forEach((notary: any) => {
+        const wallet = (notary.wallet_address || "").toLowerCase();
         const existing = merged.find(a =>
-          (a.wallet_address || "").toLowerCase() === (notary.wallet_address || "").toLowerCase()
+          (a.wallet_address || "").toLowerCase() === wallet
         );
 
         if (!existing) {
-          merged.push({ ...notary, status: "approved" });
+          merged.push({ ...notary, status: "ACTIVATED" });
         } else {
           existing.id = existing.id || notary.id;
           if (notary.role === "notary") {
-            existing.status = "approved";
+            existing.status = "ACTIVATED";
           }
         }
       });
@@ -341,7 +342,7 @@ export function ManageNotaries() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {getStatusBadge(app.status)}
-                          {app.wallet_address && (status === 'APPROVED' || status === 'ACTIVATED') && (
+                          {app.wallet_address && (status.toUpperCase() === 'APPROVED' || status.toUpperCase() === 'ACTIVATED') && (
                             onChainStatuses[app.wallet_address.toLowerCase()] ? (
                               <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" title="On-Chain Verified" />
                             ) : (
