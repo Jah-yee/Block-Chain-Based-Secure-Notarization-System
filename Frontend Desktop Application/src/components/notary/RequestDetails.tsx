@@ -27,6 +27,8 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
         action: "approve" | "reject" | null;
     }>({ open: false, action: null });
 
+    const [ntkBalance, setNtkBalance] = useState<string>("...");
+
     useEffect(() => {
         loadDocument();
         return () => {
@@ -44,6 +46,13 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
             const blob = await api.getDocumentFile(requestId, doc.mimetype);
             const url = URL.createObjectURL(blob);
             setFileUrl(url);
+
+            // Fetch NTK balance
+            const user = await api.getMe();
+            if (user?.wallet_address) {
+                const balRes = await api.getOnChainBalance(user.wallet_address, 'ntk');
+                setNtkBalance(balRes.balance);
+            }
 
         } catch (err: any) {
             console.error(err);
@@ -370,8 +379,9 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 </div>
 
                 {/* Right Panel - Information & Actions */}
-                <div className="w-96 bg-card flex flex-col max-h-full overflow-y-auto border-l border-border custom-scrollbar">
-                    <div className="p-6 space-y-6 pb-24">
+                <div className="w-96 bg-card flex flex-col border-l border-border h-full overflow-hidden">
+                    {/* Scrollable Information Area */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                         {/* Client Information */}
                         <div>
                             <h3 className="text-foreground mb-4 flex items-center gap-2">
@@ -403,19 +413,36 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             <p className="text-xs text-muted-foreground font-mono break-all">{request.file_hash}</p>
                         </div>
 
+                        {/* NTK Balance Card (Newly Added) */}
+                        <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Coins className="text-primary" size={16} />
+                                <p className="text-xs text-primary font-bold uppercase tracking-wider">Protocol Tokens (NTK)</p>
+                            </div>
+                            <div className="flex items-baseline gap-1">
+                                <p className="text-xl font-black text-foreground">{ntkBalance}</p>
+                                <p className="text-[10px] text-muted-foreground font-bold uppercase">NTK Available</p>
+                            </div>
+                            <p className="text-[9px] text-muted-foreground mt-2 leading-relaxed">
+                                Notarization requires 1.0 NTK per document.
+                            </p>
+                        </div>
+
                         <div className="bg-muted/50 rounded-xl p-4">
                             <p className="text-xs text-muted-foreground mb-1">Created At</p>
                             <p className="text-sm text-foreground">{new Date(request.created_at).toLocaleString()}</p>
                         </div>
+                    </div>
 
-                        {/* Action Buttons */}
+                    {/* Sticky Action Footer */}
+                    <div className="flex-none p-6 border-t border-border bg-background/50 backdrop-blur-md z-30">
                         {request.status === 'pending' ? (
-                            <div className="space-y-3 pt-4">
+                            <div className="space-y-3">
                                 <Button
                                     onClick={() => handleAction("approve")}
                                     disabled={submitting}
                                     variant="default"
-                                    className="w-full rounded-xl h-11"
+                                    className="w-full rounded-xl h-11 shadow-lg shadow-primary/20"
                                 >
                                     <CheckCircle size={16} className="mr-2" />
                                     Approve Request
@@ -431,8 +458,8 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                                 </Button>
                             </div>
                         ) : (
-                            <div className="pt-4 text-center">
-                                <Badge variant="outline" className="text-muted-foreground border-border">
+                            <div className="text-center">
+                                <Badge variant="outline" className="text-muted-foreground border-border w-full justify-center py-2 rounded-xl">
                                     {request.status === 'approved' ? 'Transaction Completed' : 'Transaction Rejected'}
                                 </Badge>
                             </div>
