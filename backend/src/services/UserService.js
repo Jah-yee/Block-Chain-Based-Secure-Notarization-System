@@ -1,6 +1,7 @@
 const pool = require('../db');
 const { Logger } = require('./logger.service');
 const logger = new Logger('UserService');
+const ntkService = require('./ntk.service');
 
 /**
  * UserService: Hardened Identity Lifecycle Authority
@@ -62,6 +63,14 @@ class UserService {
       );
 
       logger.info('USER_CREATED', { email: user.email, userId: user.id, state: user.identity_state });
+
+      // 🚀 [NTK_TRIGGER] Instant provisioning for active notaries
+      if (user.role === 'notary' && user.identity_state === 'ACTIVE') {
+          ntkService.verifyAndProvisionInitialNTK(user.id).catch(err => {
+              logger.error('NTK_PROVISION_FAILED', { userId: user.id, error: err.message });
+          });
+      }
+
       return user;
     } catch (err) {
       logger.error('USER_CREATION_FAILED', { error: err.message }, err);
@@ -191,6 +200,14 @@ class UserService {
         newState, 
         actorId: actor ? actor.id : 0 
       });
+
+      // 🚀 [NTK_TRIGGER] Instant provisioning for active notaries
+      if (newState === 'ACTIVE') {
+          ntkService.verifyAndProvisionInitialNTK(userId).catch(err => {
+              logger.error('NTK_PROVISION_FAILED', { userId, error: err.message });
+          });
+      }
+
       return true;
     } catch (err) {
       await client.query('ROLLBACK');

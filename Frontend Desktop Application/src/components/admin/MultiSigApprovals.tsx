@@ -343,14 +343,14 @@ export function MultiSigApprovals() {
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
       {/* Header */}
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-border bg-background">
+      <div className="flex-none p-8 pt-10 pb-8 border-b border-border bg-background">
         <div className="flex justify-between items-end">
           <div>
-            <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">CONSENSUS VAULT</h1>
-            <p className="text-sm text-slate-400 font-medium italic uppercase tracking-widest">Protocol Control Center • Multi-Sig Authority</p>
+            <h1 className="text-3xl font-bold text-foreground tracking-tight leading-none mb-2">Governance Approvals</h1>
+            <p className="text-sm text-muted-foreground font-medium">Review and authorize administrative protocol actions and multi-sig transactions.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-xl px-6 h-11 border-border hover:bg-muted text-[10px] font-black tracking-widest text-muted-foreground hover:text-foreground transition-all">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "REFRESH STATE"}
+          <Button variant="outline" size="sm" onClick={loadTransactions} disabled={loading} className="rounded-xl px-6 h-11 border-border hover:bg-muted text-xs font-semibold text-muted-foreground hover:text-foreground transition-all">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
           </Button>
         </div>
       </div>

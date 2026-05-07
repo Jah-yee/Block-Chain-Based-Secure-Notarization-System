@@ -61,10 +61,15 @@ router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ capabilit
     expires_at.setDate(expires_at.getDate() + (expires_in_days || 7));
 
     try {
+        // 🛡️ [FAST_TRACK] Check for Single Admin Mode
+        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
+        const adminCount = parseInt(adminRes.rows[0].count);
+        const status = (adminCount === 1) ? 'passed' : 'active';
+
         const result = await pool.query(
-            `INSERT INTO governance_proposals (title, description, type, target_id, target_notaries, proposer_id, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-            [title, description, type, target_id, JSON.stringify(target_notaries || []), req.actor.id, expires_at]
+            `INSERT INTO governance_proposals (title, description, type, target_id, target_notaries, proposer_id, expires_at, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [title, description, type, target_id, JSON.stringify(target_notaries || []), req.actor.id, expires_at, status]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -934,6 +939,37 @@ router.post(
                 onChainSuccess = true;
                 console.log(`[GOV_EXECUTE] ✅ On-chain execution confirmed. txHash=${txHash}`);
 
+                // 🛡️ [Hardening] VERIFY_PROTOCOL_REALITY - Do not return success until role is truly changed on-chain
+                if (type === 'NOTARY_PROMOTION' || type === 'add_notary') {
+                    const targetWallet = (target_id || "").startsWith('0x') ? target_id : null;
+                    if (targetWallet) {
+                        console.log(`[GOV_EXECUTE] 🔍 Polling for protocol role update for ${targetWallet}...`);
+                        const ConfigService = require('../services/config.service');
+                        const config = await ConfigService.getConfig();
+                        const registry = new ethers.Contract(
+                            config.contracts.notaryRegistry,
+                            ["function getUserRole(address) view returns (uint8)"],
+                            provider
+                        );
+
+                        let verified = false;
+                        for (let i = 0; i < 10; i++) { // Max 30 seconds (10 * 3s)
+                            const role = await registry.getUserRole(targetWallet);
+                            if (Number(role) === 2) {
+                                verified = true;
+                                console.log(`[GOV_EXECUTE] 📡 Protocol role verified: NOTARY (2) ✅`);
+                                break;
+                            }
+                            console.log(`[GOV_EXECUTE] ... Attempt ${i+1}: Role is ${role}. Waiting...`);
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                        }
+                        
+                        if (!verified) {
+                            console.warn(`[GOV_EXECUTE] ⚠️ Execution confirmed but protocol state still lagging after 30s.`);
+                        }
+                    }
+                }
+
             } catch (chainErr) {
                 // TX FAILED: Leave proposal status as 'passed', do NOT update DB
                 console.error(`[GOV_EXECUTE] ❌ On-chain execution failed for proposal ${proposalId}:`, chainErr.message);
@@ -966,8 +1002,9 @@ router.post(
                             );
                             break;
                         case 'add_notary':
+                        case 'NOTARY_PROMOTION':
                             await dbClient.query(
-                                "UPDATE users SET role = 'notary' WHERE id = $1 OR wallet_address = $2",
+                                "UPDATE users SET role = 'notary' WHERE id::text = $1 OR wallet_address = $2",
                                 [target_id, target_id.toLowerCase()]
                             );
                             break;

@@ -31,39 +31,18 @@ const registerNotaryOnChain = async (walletAddress) => {
     const { contract, signer } = await attachNotaryRegistry();
 
     try {
-        // 0. Ensure Relayer is set (if not already)
-        // Public variables in Solidity create a getter function of the same name
-        const currentRelayer = await contract.relayer();
-        const signerAddress = await signer.getAddress();
-
-        if (currentRelayer === ethers.ZeroAddress) {
-            console.log(`   - Initializing Relayer to: ${signerAddress}...`);
-            const txR = await contract.updateRelayer(signerAddress);
-            await txR.wait();
-        }
-
-        // 1. Assign Owner Role (Step 1 in Enum)
+        // 1. Perform direct promotion to NOTARY
         const rawRole = await contract.getUserRole(walletAddress);
         const currentRole = Number(rawRole);
 
-        if (currentRole === 0) { // Role.NONE
-            console.log(`   - Step 1: Assigning OWNER role...`);
-            const tx1 = await contract.assignOwner(walletAddress);
-            await tx1.wait();
-            console.log(`   ✅ OWNER role assigned: ${tx1.hash}`);
-        }
-
-        // 2. Promote to Notary (Step 2 in Enum)
-        // Refresh role after step 1
-        const refreshedRole = Number(await contract.getUserRole(walletAddress));
-
-        if (refreshedRole <= 1) { // Role.NONE or Role.OWNER
-            console.log(`   - Step 2: Promoting to NOTARY role...`);
-            const tx2 = await contract.promoteToNotary(walletAddress);
-            const receipt = await tx2.wait();
-            console.log(`   ✅ NOTARY role promoted: ${tx2.hash}`);
+        if (currentRole < 2) { // Role.NONE (0) or Role.OWNER (1)
+            console.log(`   - Initiating direct on-chain promotion for: ${walletAddress}`);
+            const tx = await contract.promoteToNotary(walletAddress);
+            const receipt = await tx.wait();
+            console.log(`   ✅ NOTARY role promoted: ${tx.hash}`);
             return { txHash: receipt.hash, success: true };
         }
+
 
         console.log(`   ℹ️ User already has role: ${currentRole}`);
         return { success: true, alreadyExists: true };

@@ -253,6 +253,13 @@ const api = {
     return this.request(`/api/notaries/applications/${id}/reject`, { method: 'POST' });
   },
 
+  async settleManualPromotion(id, txHash) {
+    return this.request(`/api/notaries/applications/${id}/sync-settle`, {
+      method: 'POST',
+      body: JSON.stringify({ txHash })
+    });
+  },
+
   async resendNotaryActivation(id) {
     return this.request(`/api/notaries/applications/${id}/resend-activation`, { method: 'POST' });
   },
@@ -261,7 +268,7 @@ const api = {
     return this.request('/api/governance/multisig/transactions');
   },
 
-  async getMultiSigSettings() {
+  async getMultisigSettings() {
     return this.request('/api/governance/multisig/settings');
   },
 
@@ -293,6 +300,13 @@ const api = {
 
   async getSystemLogs() {
     return this.request('/api/system/logs');
+  },
+  
+  async initRemoteVoteSession(data) {
+    return this.request('/api/governance/remote/vote/session', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
   },
   
   async createRemoteNotarizeSession(data) {

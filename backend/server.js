@@ -227,13 +227,17 @@ async function bootstrap() {
       console.error("❌ Warning: Failed to initialize Circuit Breaker State:", cbErr.message);
     }
 
-    // [PHASE 7.3] Automated NTK distribution
-    try {
-      const ntkWorker = require("./src/workers/ntk-worker");
-      ntkWorker.start();
-      console.log("   ✅ NTK Distribution Worker registered.");
-    } catch (workerErr) {
-      console.error("❌ Warning: Failed to register NTK worker:", workerErr.message);
+    // [PHASE 7.3] Automated NTK distribution (Worker Process Only)
+    if (process.env.BBSNS_RUNTIME === 'worker') {
+      try {
+        const ntkWorker = require("./src/workers/ntk-worker");
+        ntkWorker.start();
+        console.log("   ✅ NTK Distribution Worker registered.");
+      } catch (workerErr) {
+        console.error("❌ Warning: Failed to register NTK worker:", workerErr.message);
+      }
+    } else {
+      console.log("   - [ISOLATION] NTK Worker suppressed (Web Authority Mode)");
     }
   });
 }

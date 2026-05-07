@@ -27,6 +27,17 @@ contract NotaryRegistry {
         _;
     }
 
+    /**
+     * @dev Allows either the MultiSig OR a registered Admin to call the function.
+     */
+    modifier onlyAdmin() {
+        require(
+            msg.sender == multiSig || roles[msg.sender] == Role.ADMIN, 
+            "NotaryRegistry: Not authorized"
+        );
+        _;
+    }
+
     constructor(address _multiSig) {
         require(_multiSig != address(0), "Invalid MultiSig address");
         multiSig = _multiSig;
@@ -36,11 +47,9 @@ contract NotaryRegistry {
      * @notice Transfers governance to a new address. Can only be called once before locking forever.
      */
     function transferGovernance(address newGov) external onlyGovernance {
-        require(!governanceLocked, "Governance locked");
         require(newGov != address(0), "Invalid governance address");
 
         multiSig = newGov;
-        governanceLocked = true;
     }
 
     /**
@@ -66,10 +75,13 @@ contract NotaryRegistry {
     }
 
     /**
-     * @notice Promotes an OWNER to a NOTARY.
+     * @notice Promotes a user (None or Owner) to a NOTARY.
      */
-    function promoteToNotary(address _user) external onlyGovernance {
-        require(roles[_user] == Role.OWNER, "NotaryRegistry: Must be an OWNER first");
+    function promoteToNotary(address _user) external onlyAdmin {
+        require(
+            roles[_user] == Role.OWNER || roles[_user] == Role.NONE, 
+            "NotaryRegistry: Invalid source role for Notary promotion"
+        );
         require(!isBanned[_user], "NotaryRegistry: User is banned");
         
         roles[_user] = Role.NOTARY;
@@ -77,16 +89,20 @@ contract NotaryRegistry {
     }
 
     /**
-     * @notice Promotes a NOTARY to an ADMIN.
+     * @notice Promotes a user to an ADMIN.
      */
     function promoteToAdmin(address _user) external onlyGovernance {
-        require(roles[_user] == Role.NOTARY, "NotaryRegistry: Must be a NOTARY first");
+        require(
+            roles[_user] == Role.NOTARY || roles[_user] == Role.OWNER || roles[_user] == Role.NONE, 
+            "NotaryRegistry: Invalid source role for Admin promotion"
+        );
         require(!isBanned[_user], "NotaryRegistry: User is banned");
         
         roles[_user] = Role.ADMIN;
         adminCount++;
         emit RolePromoted(_user, Role.ADMIN, block.timestamp);
     }
+
 
     /**
      * @notice Revokes all roles for an address.

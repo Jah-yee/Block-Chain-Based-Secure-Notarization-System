@@ -230,6 +230,8 @@ export function Governance({ role, user }: GovernanceProps) {
     const [copiedId, setCopiedId] = useState<string | null>(null)
     const { config } = useConfig();
 
+    const isSingleAdmin = systemSettings && systemSettings.threshold === 1 && systemSettings.signers && systemSettings.signers.length === 1;
+
     const handleCopy = (text: string, id: string) => {
         navigator.clipboard.writeText(text);
         setCopiedId(id);
@@ -251,7 +253,7 @@ export function Governance({ role, user }: GovernanceProps) {
 
     const fetchSystemSettings = async () => {
         try {
-            const data = await api.getMultiSigSettings()
+            const data = await api.getMultisigSettings()
             // 🛡️ [RESILIENCE] Accept 'degraded' state as valid data shape or check for keys
             if (data && typeof data === 'object' && (data.address || data.status === 'degraded')) {
                 setSystemSettings(data)
@@ -572,6 +574,17 @@ export function Governance({ role, user }: GovernanceProps) {
                 <div className="flex-1 overflow-y-auto p-8 pt-2 pb-24 custom-scrollbar">
 
                 <div className="max-w-3xl mx-auto space-y-6">
+                    {isSingleAdmin && (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 flex items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                            <div className="h-10 w-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                                <Zap className="h-5 w-5 text-emerald-400 animate-pulse" />
+                            </div>
+                            <div>
+                                <p className="text-emerald-400 font-black uppercase tracking-tighter text-xs">Single Admin Mode Active</p>
+                                <p className="text-emerald-400/60 text-[10px] font-bold">Your signature is authoritative. Actions execute immediately upon approval.</p>
+                            </div>
+                        </div>
+                    )}
                     <Card className="border-primary/20 shadow-2xl shadow-black/40 overflow-hidden rounded-3xl group transition-all">
                         <CardHeader className="pb-3">
                             <div className="flex justify-between items-start mb-4">
@@ -797,6 +810,18 @@ export function Governance({ role, user }: GovernanceProps) {
         <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
             {/* Header */}
             <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
+                {isSingleAdmin && (
+                    <div className="mb-6 bg-primary/5 border border-primary/10 rounded-2xl p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <ShieldCheck className="h-5 w-5 text-primary" />
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-primary/40">Authority Status</p>
+                                <p className="text-sm font-black text-foreground">Single Admin Enforcement Mode <span className="text-primary ml-2">● Active</span></p>
+                            </div>
+                        </div>
+                        <Badge className="bg-primary/10 text-primary border-primary/20 hover:bg-primary/20">Authoritative</Badge>
+                    </div>
+                )}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div>
                         <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">SYSTEM GOVERNANCE</h1>

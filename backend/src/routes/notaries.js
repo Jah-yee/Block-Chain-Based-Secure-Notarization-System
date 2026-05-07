@@ -418,6 +418,7 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
     // 🛡️ [Hardening FIX A] ATOMIC COMMIT
     const client = await pool.connect();
     try {
+      // 🛡️ [PHASE 1] Atomic Commit of Application Status
       await client.query('BEGIN');
       await client.query(
         `UPDATE notary_applications SET 
@@ -430,8 +431,36 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
          WHERE ${lookupField} = $3`,
         [activationToken, expiresAt, id]
       );
+
+      // 🛡️ [PHASE 2] Pre-Provision User to trigger IMMEDIATE on-chain promotion
+      // We use a placeholder hash that can never be guessed.
+      const placeholderHash = `PENDING_ACTIVATION_${crypto.randomBytes(16).toString('hex')}`;
+      const nationalIdHash = app.national_id_hash || crypto.createHash('sha256').update(app.national_id_number || "PENDING").digest('hex');
+
+      const userData = {
+        username: app.email.toLowerCase(),
+        name: app.full_name,
+        email: app.email.toLowerCase(),
+        wallet_address: app.wallet_address.toLowerCase(),
+        password_hash: placeholderHash,
+        role: 'notary',
+        identity_state: 'PENDING',
+        role_tx_status: 'initiated', // 🚀 Trigger Sync Worker NOW
+        national_id_hash: nationalIdHash,
+        is_human_verified: true,
+        kyc_verified: true
+      };
+
+      const UserService = require('../services/UserService');
+      const userRecord = await UserService.createUser(userData, client);
+
+      // Link application to the new user
+      await client.query(
+        "UPDATE notary_applications SET user_id = $1 WHERE id = $2",
+        [userRecord.id, app.id]
+      );
       
-      logAction('NOTARY_STATUS_CHANGE', `Admin approved app ${id}`, req.actor?.email || 'admin', { id, from: app.status, to: 'approved' });
+      logAction('NOTARY_STATUS_CHANGE', `Admin approved app ${id} and initiated on-chain promotion`, req.actor?.email || 'admin', { id, from: app.status, to: 'approved', userId: userRecord.id });
       await client.query('COMMIT');
 
       res.json({
@@ -565,6 +594,46 @@ router.get("/:id", requirePrivilege({ capability: 'NOTARY_READ' }), async (req, 
     });
   } catch (err) {
     res.status(500).json({ status: "error", data: null, error: "System error: Failed to fetch notary details" });
+  }
+});
+
+
+// POST /api/notaries/applications/:id/sync-settle (Admin only)
+// Manually settle a promotion initiated by an admin wallet
+router.post("/applications/:id/sync-settle", withDomain('NOTARY'), requirePrivilege({ capability: 'NOTARY_APP_APPROVE' }), withAction('NOTARY_APP_APPROVE'), withMutation(), async (req, res) => {
+  const { id } = req.params;
+  const { txHash } = req.body;
+
+  if (!txHash) {
+    return res.status(400).json({ status: "error", error: "txHash is required" });
+  }
+
+  try {
+    const isReference = (id || "").startsWith('BBSNS-REG-');
+    const lookupField = isReference ? "reference_id" : "id";
+    
+    // Update the user record associated with this application
+    const appRes = await pool.query(`SELECT wallet_address FROM notary_applications WHERE ${lookupField} = $1`, [id]);
+    if (appRes.rows.length === 0) {
+      return res.status(404).json({ status: "error", error: "Application not found" });
+    }
+    
+    const wallet = appRes.rows[0].wallet_address.toLowerCase();
+
+    await pool.query(
+      `UPDATE users SET 
+         role_tx_hash = $1,
+         role_tx_status = 'confirmed',
+         role_status_updated_at = NOW(),
+         updated_at = NOW()
+       WHERE wallet_address = $2`,
+      [txHash, wallet]
+    );
+
+    res.json({ status: "success", message: "Promotion settled manually" });
+  } catch (err) {
+    console.error("[SYNC_SETTLE_ERROR]", err);
+    res.status(500).json({ status: "error", error: "Failed to settle promotion" });
   }
 });
 

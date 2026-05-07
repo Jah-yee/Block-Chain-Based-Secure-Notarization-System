@@ -1,8 +1,10 @@
 {
   "network": "bnbTestnet",
-  "notaryRegistry": "0x437A119Be71e2EA6c1fe669ddf4bA08a1f5E6a07",
-  "ntkr": "0xD59a331bC1e2439b686d75cffBdDE419a51eeFCE",
-  "ntk": "0x1889a4dB26dAAbBE612F65f98F81944b7996923B",
-  "registry": "0x34B08CAC11884D9Ef46C86a326e9551d7Fc82f03",
-  "timestamp": "2026-03-21T06:24:03.499Z"
+  "genesisNft": "0x1Bc76774b4Af936b5e3422D01f72B4b526474588",
+  "notaryRegistry": "0x0DD325C87CDF2B00ef6cE9de537AFD4826c98f3c",
+  "ntk": "0x981cE4Ef97B3A45f7ae02da8d2C228F9ae5B95aF",
+  "ntkr": "0x02183134884276149d942FE573a3BAAd9E2F632b",
+  "documentRegistry": "0x45F31eC24b8892D09bd85b655dBf609a984Fa03C",
+  "genesisActivation": "0x8cD99b69E0192C2803eC178E859d671F015A83b3",
+  "timestamp": "2026-05-07T12:44:37.450Z"
 }

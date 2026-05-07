@@ -12,13 +12,18 @@ export class ConfigValidator {
   static async validate(config) {
     if (!config || typeof config !== 'object') return false;
 
-    // 1. Schema Integrity
-    const required = ['rpcUrl', 'chainId', 'contracts', 'apiBaseUrl'];
-    for (const field of required) {
+    // 1. Schema Integrity (Critical Only)
+    const critical = ['rpcUrl', 'chainId', 'contracts'];
+    for (const field of critical) {
       if (!config[field]) {
-        console.error(`[VALIDATOR] Missing required field: ${field}`);
+        console.error(`[VALIDATOR] Missing critical field: ${field}`);
         return false;
       }
+    }
+
+    // 🛡️ [RESILIENCE] Warning only for metadata URLs
+    if (!config.apiBaseUrl) {
+      console.warn('[VALIDATOR] Missing apiBaseUrl. Using defaults.');
     }
 
     // 2. Chain Sanity
@@ -36,10 +41,9 @@ export class ConfigValidator {
       return false;
     }
 
-    // 4. URL Sanity
-    if (!config.apiBaseUrl.startsWith('http')) {
-      console.error('[VALIDATOR] Invalid API Base URL.');
-      return false;
+    // 4. URL Sanity (Non-Blocking)
+    if (config.apiBaseUrl && !config.apiBaseUrl.startsWith('http')) {
+      console.warn('[VALIDATOR] Invalid API Base URL format.');
     }
 
     return true;

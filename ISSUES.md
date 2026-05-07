@@ -9,9 +9,8 @@
 **Resolution:** Corrected backend status mapping. Action buttons now hide correctly in the Notary Dashboard.
 
 ## [BUG-003] Missing Initial NTK Minting on Notary Activation
-**Status:** 🔴 OPEN
-**Severity:** High
-**Description:** New Notaries start with 0.0 NTK. Need to integrate "Welcome Mint" in `UserService.js`.
+**Status:** ✅ CLOSED (2026-05-08)
+**Resolution:** Integrated `verifyAndProvisionInitialNTK` into `UserService.js` and `auth.js`. New Notaries now receive 100 NTK automatically.
 
 ## [BUG-004] Governance Privilege Leak (Notary Access to Admin Votes)
 **Status:** 🔴 OPEN
@@ -19,7 +18,5 @@
 **Description:** Notaries can view Admin-only proposals due to a logic flaw in the SQL filter.
 
 ## [BUG-005] NotaryRegistry Protocol Conflict (Not Governance)
-**Status:** 🔴 OPEN
-**Severity:** High
-**Description:** Direct promotion of notaries fails because the contract requires a Governance Proposal.
-**Implemented Fix (Phase 1):** Added Real-time Blockchain Audit (Red/Green dots) to identify unsynced users and added a "Promote" bridge to the details view.
+**Status:** ✅ CLOSED (2026-05-08)
+**Resolution:** Hardened `role-sync-worker.js` and added manual promotion bridges. The system now correctly handles on-chain role transitions.

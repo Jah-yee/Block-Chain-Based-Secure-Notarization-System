@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
-import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint, Coins, Plus } from "lucide-react";
+import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fingerprint } from "lucide-react";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
 
@@ -607,62 +607,46 @@ function App() {
 
 
   const handlePromote = async () => {
-    if (!targetAddress || !isConnected) return;
+    if (!isConnected || !walletAddress || !targetAddress) return;
     setIsPromoting(true);
     setError(null);
-
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
       
-      const registryAbi = [
-        "function promoteToNotary(address target) external"
+      const abi = [
+        "function getUserRole(address) view returns (uint8)",
+        "function assignOwner(address) external",
+        "function promoteToNotary(address) external"
       ];
+      const contract = new ethers.Contract(config.contracts.notaryRegistry, abi, signer);
       
-      const contract = new ethers.Contract(config.contracts.notaryRegistry, registryAbi, signer);
+      console.log(`[PROMOTE] Checking current role for: ${targetAddress}`);
+      const currentRole = Number(await contract.getUserRole(targetAddress));
       
-      console.log(`[PROMOTION] Attempting Direct Promotion for: ${targetAddress}`);
-      
-      try {
-        const tx = await contract.promoteToNotary(targetAddress);
-        console.log(`[PROMOTION] Transaction sent: ${tx.hash}`);
-        await tx.wait();
+      if (currentRole >= 2) { // Already Notary (2) or Admin (3)
+        console.log(`[PROMOTE] ✅ User already promoted on-chain (Role: ${currentRole}). Finishing.`);
         setStatus("authorized");
         setTimeout(() => window.close(), 10000);
-      } catch (innerErr: any) {
-        // 🛡️ [GOVERNANCE_RECOVERY] Detect Protocol Restriction
-        if (innerErr.message && innerErr.message.includes("Not governance")) {
-          console.warn("⚠️ [PROTOCOL_REVERT] NotaryRegistry is in Governance-Only mode.");
-          
-          // Redirect to Backend Proposal Creation
-          const res = await fetch(`${BACKEND_URL}/api/governance/proposals`, {
-            method: "POST",
-            headers: { 
-               "Content-Type": "application/json",
-               "Authorization": `Bearer ${localStorage.getItem('bbsns_token')}` // Use existing session if available
-            },
-            body: JSON.stringify({
-              title: "On-Chain Notary Promotion",
-              description: `Elevate wallet ${targetAddress} to Notary role via Governance Authority.`,
-              type: "NOTARY_PROMOTION",
-              target_id: targetAddress,
-              expires_in_days: 7
-            })
-          });
-
-          if (!res.ok) throw new Error("Failed to create Governance Proposal. Please use the Admin Dashboard.");
-          
-          setStatus("authorized"); // Treatment as success since proposal is created
-          alert("Direct promotion restricted. A Governance Proposal has been created automatically. Please approve it in the Governance Dashboard.");
-          setTimeout(() => window.close(), 10000);
-        } else {
-          throw innerErr;
-        }
+        return;
       }
+
+      // Step 2: Direct promotion (NONE -> NOTARY or OWNER -> NOTARY)
+      console.log(`[PROMOTE] Step 2: Initiating on-chain promotion for: ${targetAddress}`);
+      const tx2 = await contract.promoteToNotary(targetAddress);
+      
+      console.log(`[PROMOTE] Transaction submitted: ${tx2.hash}`);
+      await tx2.wait();
+
+
+
+      
+      console.log(`[PROMOTE] Success! Finalizing session...`);
+      setStatus("authorized");
+      setTimeout(() => window.close(), 10000);
     } catch (err: any) {
-      console.error("[AUTHORIZE_ERROR]", err);
-      setError(err.reason || err.message);
-      setStatus("error");
+      console.error("[PROMOTE_FAIL]", err);
+      setError(err.reason || err.message || "On-chain promotion failed. Please ensure you have ADMIN role and enough BNB for gas.");
     } finally {
       setIsPromoting(false);
     }

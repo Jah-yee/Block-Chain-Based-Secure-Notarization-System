@@ -9,17 +9,35 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { toast } from "sonner";
 import api from "../../services/api";
 import { normalizeStatus, getDisplayStatus } from "../../utils/status";
+import { ethers } from "ethers";
+import { useConfig } from "../../contexts/ConfigAuthority";
 
 
 function unwrapResponse(res: any) {
-  if (res?.status === "ok" && Array.isArray(res.data)) {
-    return res.data;
+  if (!res) return res;
+
+  // If it's already an array, perfect.
+  if (Array.isArray(res)) return res;
+
+  if (typeof res === 'object') {
+    // Standard BBSNS Wrapper: { status: "ok", data: [...] }
+    if (res.status === "ok" && res.data !== undefined) return res.data;
+
+    // Electron Bridge Wrapper (sometimes double-wrapped): { success: true, data: [...] }
+    if (res.success === true && res.data !== undefined) return res.data;
+
+    // If it has data but no status, it's likely the payload
+    if (res.data !== undefined && res.status === undefined) return res.data;
+
+    // If it's just an object, return it (e.g., multisig settings)
+    return res;
   }
-  console.error("CONTRACT_VIOLATION:", res);
-  throw new Error("Invalid API contract");
+
+  return res;
 }
 
 export function ManageNotaries() {
+  const { config } = useConfig();
   const [applications, setApplications] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -40,28 +58,33 @@ export function ManageNotaries() {
     application: null as any | null,
   });
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [activeProposals, setActiveProposals] = useState<any[]>([]);
+  const [adminSettings, setAdminSettings] = useState<{ threshold: number; signers: string[] } | null>(null);
 
   // ===============================
   // BLOCKCHAIN AUDIT LOGIC
   // ===============================
   const auditOnChainStatus = async (apps: any[]) => {
+    console.log("🔍 [AUDIT_START] Checking blockchain status for", apps.length, "notaries...");
     setIsAuditing(true);
     const statuses: Record<string, boolean> = {};
-    
+
     // Audit in parallel with rate control
     const auditPromises = apps
       .filter(app => app.wallet_address)
       .map(async (app) => {
         try {
           const res = await api.getOnChainRole(app.wallet_address);
+          console.log(`📡 [AUDIT_RESULT] ${app.wallet_address}:`, res.data.isOnChain ? "Verified ✅" : "Missing ❌");
           statuses[app.wallet_address.toLowerCase()] = res.data.isOnChain;
         } catch (err) {
-          console.warn(`[AUDIT_FAIL] ${app.wallet_address}:`, err);
+          console.error(`❌ [AUDIT_ERROR] Failed for ${app.wallet_address}:`, err);
           statuses[app.wallet_address.toLowerCase()] = false;
         }
       });
 
     await Promise.all(auditPromises);
+    console.log("🏁 [AUDIT_COMPLETE] Final Statuses:", statuses);
     setOnChainStatuses(prev => ({ ...prev, ...statuses }));
     setIsAuditing(false);
   };
@@ -78,25 +101,38 @@ export function ManageNotaries() {
   // ===============================
   const loadApplications = async () => {
     try {
-      const [applicationsRes, activeNotariesRes] = await Promise.all([
+      const [applicationsRes, activeNotariesRes, proposalsRes, multisigSettingsRes] = await Promise.all([
         api.getNotaryApplications(),
-        api.getNotaries()
+        api.getNotaries(),
+        api.getProposals(),
+        api.getMultisigSettings()
       ]);
 
-      console.log("RAW APPLICATION RESPONSE:", applicationsRes);
-      
-      const applicationsArray = unwrapResponse(applicationsRes).map((app: any) => ({
+      const appsData = unwrapResponse(applicationsRes);
+      const apps = (Array.isArray(appsData) ? appsData : []).map((app: any) => ({
         ...app,
         id: app.application_id || app.id,
         status: normalizeStatus(app.status || 'PENDING')
       }));
-      
-      const activeNotaries = unwrapResponse(activeNotariesRes).map((notary: any) => ({
+      setApplications(apps);
+      if (apps.length > 0) auditOnChainStatus(apps);
+
+      const proposalsData = unwrapResponse(proposalsRes);
+      setActiveProposals(Array.isArray(proposalsData) ? proposalsData : []);
+
+      const settings = unwrapResponse(multisigSettingsRes);
+      if (settings && settings.threshold) {
+        setAdminSettings(settings);
+      }
+
+      const notariesData = unwrapResponse(activeNotariesRes);
+      const activeNotaries = (Array.isArray(notariesData) ? notariesData : []).map((notary: any) => ({
         ...notary,
         status: normalizeStatus(notary.status || 'ACTIVATED')
       }));
 
-      const merged = [...applicationsArray];
+      // Merge logic
+      const merged = [...apps];
 
       activeNotaries.forEach((notary: any) => {
         const wallet = (notary.wallet_address || "").toLowerCase();
@@ -116,20 +152,57 @@ export function ManageNotaries() {
 
       setApplications(merged);
       setSyncError(null);
-      
+
       // 🛡️ [AUDIT_SYNC] Trigger Real-time Blockchain Pulse
       auditOnChainStatus(merged);
     } catch (err: any) {
       console.error("[NOTARIES_LOAD_FAIL]", err);
       setSyncError("Data sync error — invalid response format");
       toast.error(err.message || "Failed to load applications");
-      setApplications([]); 
+      setApplications([]);
     }
   };
 
   useEffect(() => {
     loadApplications();
   }, []);
+
+  // Helper to determine on-chain status indicator
+  const getOnChainIndicator = (notary: any) => {
+    if (!notary.wallet_address) return null;
+    const wallet = notary.wallet_address.toLowerCase();
+    const isVerified = onChainStatuses[wallet];
+
+    // Check if there is an active proposal for this notary
+    const hasPendingProposal = activeProposals.some(p =>
+      p.type === 'NOTARY_PROMOTION' &&
+      p.target_id?.toLowerCase() === wallet &&
+      (p.status === 'active' || p.status === 'signed')
+    );
+
+    if (isVerified) {
+      return (
+        <div className="h-2 w-2 rounded-full bg-emerald-500" title="On-Chain Verified ✅" />
+      );
+    }
+
+    if (hasPendingProposal) {
+      return (
+        <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" title="Promotion Pending Signature/Execution ⏳" />
+      );
+    }
+
+    // 🛡️ [Hardening] Show Gray Dot while auditing, then Red if missing
+    if (isVerified === undefined && isAuditing) {
+      return (
+        <div className="h-2 w-2 rounded-full bg-slate-500/50 animate-pulse" title="Verifying On-Chain Status..." />
+      );
+    }
+
+    return (
+      <div className="h-2 w-2 rounded-full bg-rose-500" title="Missing On-Chain (Action Required) ❌" />
+    );
+  };
 
   // ===============================
   // FILTER LOGIC
@@ -172,7 +245,7 @@ export function ManageNotaries() {
       if (confirmDialog.action === "approve") {
         await api.approveNotaryApplication(targetId);
         toast.success("Application approved in database");
-        
+
         // 🛡️ [GOVERNANCE_SYNC] Trigger On-Chain Promotion Dialog
         setPromotionDialog({
           open: true,
@@ -195,12 +268,18 @@ export function ManageNotaries() {
     }
   };
 
-  const handlePromoteOnChain = async (app: any) => {
+
+  const handleDirectOnChainPromotion = async (app: any) => {
     try {
-      const config = await api.getSystemConfig();
-      const baseAuthUrl = config.remoteAuthUrl.replace(/\/$/, "");
-      const remoteUrl = `${baseAuthUrl}/?mode=promote&targetAddress=${app.wallet_address}`;
+      const configRes = await api.getSystemConfig();
+      const baseAuthUrl = configRes.remoteAuthUrl.replace(/\/$/, "");
       
+      // 🛡️ [REMOTE_HANDSHAKE] Open Remote Auth portal in "promote" mode
+      // This mode doesn't require a sessionId as it uses direct wallet execution
+      const remoteUrl = `${baseAuthUrl}/?mode=promote&targetAddress=${app.wallet_address}`;
+
+      toast.info("Opening secure authorization portal in your browser...");
+
       // @ts-ignore
       if (window.electronAPI) {
         // @ts-ignore
@@ -208,9 +287,15 @@ export function ManageNotaries() {
       } else {
         window.open(remoteUrl, "_blank");
       }
-      toast.info("Promotion portal opened in external browser.");
+
+      // 🛡️ [UI_SYNC] Update view dialog
+      setViewDialog({ ...viewDialog, open: false });
+      
+      // Periodically refresh to catch the on-chain status update
+      setTimeout(() => loadApplications(), 15000);
     } catch (err: any) {
-      toast.error("Failed to fetch system configuration.");
+      console.error("[PROMOTION_FAIL]", err);
+      toast.error(err.message || "Failed to initiate remote promotion.");
     }
   };
 
@@ -218,7 +303,7 @@ export function ManageNotaries() {
   const openView = (app: any) => {
     setViewDialog({ open: true, application: app });
   };
-  
+
   const handleResend = async (app: any) => {
     try {
       await api.resendNotaryActivation(app.application_id || app.id);
@@ -255,237 +340,231 @@ export function ManageNotaries() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
-        <h1 className="text-4xl font-black text-foreground italic tracking-tighter uppercase leading-none mb-3">NOTARY MANAGEMENT</h1>
-        <p className="text-sm text-slate-400 font-medium italic">
-          Review and approve verification requests within the administrative vault
+      <div className="flex-none p-8 pt-10 pb-8 border-b border-border/50 bg-background">
+        <h1 className="text-3xl font-bold text-foreground tracking-tight leading-none mb-2">Notary Management</h1>
+        <p className="text-sm text-muted-foreground font-medium">
+          Review and process notary candidate applications and on-chain roles.
         </p>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar relative">
         <div className="p-8 pb-32">
 
-      {syncError && (
-        <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold animate-pulse">
-          <ShieldAlert size={18} />
-          {syncError}
-        </div>
-      )}
+          {syncError && (
+            <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold animate-pulse">
+              <ShieldAlert size={18} />
+              {syncError}
+            </div>
+          )}
 
-      <div className="flex flex-col gap-8">
-        {/* Filters */}
-        <div className="flex gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-            <Input
-              placeholder="Search by name or License ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-12 bg-muted/50 border-border/50 text-foreground rounded-xl h-12 w-full focus:border-primary/50"
-            />
-          </div>
+          <div className="flex flex-col gap-8">
+            {/* 🔍 Search and Filters */}
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative flex-1 max-w-2xl">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4 pointer-events-none" />
+                <Input
+                  placeholder="Search by name or License ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="bg-slate-900/50 border-slate-800 text-slate-200 focus:ring-amber-500/20 focus:border-amber-500/50 pl-10"
+                />
+              </div>
 
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-56 bg-muted/50 border-border/50 text-foreground rounded-xl h-12">
-              <Filter size={16} className="mr-2 text-slate-400" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-[#0d1425] border-white/10 text-white">
-              <SelectItem value="all">ALL STATUS</SelectItem>
-              <SelectItem value="PENDING">PENDING</SelectItem>
-              <SelectItem value="KYC_VERIFIED">VERIFIED</SelectItem>
-              <SelectItem value="APPROVED">APPROVED</SelectItem>
-              <SelectItem value="ACTIVATED">ACTIVE NOTARIES</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-56 bg-muted/50 border-border/50 text-foreground rounded-xl h-12">
+                  <Filter size={16} className="mr-2 text-slate-400" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+                  <SelectItem value="all">ALL STATUS</SelectItem>
+                  <SelectItem value="PENDING">PENDING</SelectItem>
+                  <SelectItem value="KYC_VERIFIED">VERIFIED</SelectItem>
+                  <SelectItem value="APPROVED">APPROVED</SelectItem>
+                  <SelectItem value="ACTIVATED">ACTIVE NOTARIES</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-        {/* Table */}
-        <div className="bg-[#0d1425] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
-          <Table>
-            <TableHeader className="bg-white/5">
-              <TableRow className="border-white/5 hover:bg-transparent">
-                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest pl-8">Name</TableHead>
-                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">License No.</TableHead>
-                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Email</TableHead>
-                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</TableHead>
-                <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-8">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
+            {/* Table */}
+            <div className="bg-[#0d1425] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+              <Table>
+                <TableHeader className="bg-white/5">
+                  <TableRow className="border-white/5 hover:bg-transparent">
+                    <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest pl-8">Name</TableHead>
+                    <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">License No.</TableHead>
+                    <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Email</TableHead>
+                    <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</TableHead>
+                    <TableHead className="py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-8">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
 
-            <TableBody>
-              {filteredApplications.length === 0 ? (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5} className="py-32">
-                    <div className="flex flex-col items-center justify-center space-y-4 opacity-40">
-                       <ShieldAlert size={64} strokeWidth={1} className="text-slate-500" />
-                       <div className="text-center">
-                         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">No applications found</p>
-                         <p className="text-[9px] text-slate-600 mt-1">The administrative vault is currently clear.</p>
-                       </div>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredApplications.map((app) => {
-                  const status = normalizeStatus(app.status);
-                  const canAdminAct = status === "KYC_VERIFIED";
-
-
-                  return (
-                    <TableRow key={app.id}>
-                      <TableCell className="font-medium">{app.name || app.full_name}</TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {app.license_number}
-                      </TableCell>
-                      <TableCell className="text-sm">{app.email}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getStatusBadge(app.status)}
-                          {app.wallet_address && (status.toUpperCase() === 'APPROVED' || status.toUpperCase() === 'ACTIVATED') && (
-                            onChainStatuses[app.wallet_address.toLowerCase()] ? (
-                              <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" title="On-Chain Verified" />
-                            ) : (
-                              <div className="h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]" title="Missing On-Chain (Action Required)" />
-                            )
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openView(app)}
-                            className="text-primary hover:bg-primary/20"
-                          >
-                            <Eye size={14} className="mr-1" />
-                            View
-                          </Button>
-
-                          {canAdminAct && (
-                            <>
-                              <Button
-                                size="sm"
-                                onClick={() => handleAction("approve", app)}
-                                className="bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30"
-                              >
-                                <UserCheck size={14} className="mr-1" />
-                                Approve
-                              </Button>
-
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => handleAction("reject", app)}
-                                className="bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/30"
-                              >
-                                <UserX size={14} className="mr-1" />
-                                Reject
-                              </Button>
-                            </>
-                          )}
-
-                          {status === "approved" && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handlePromoteOnChain(app)}
-                                className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10"
-                              >
-                                <ShieldCheck size={14} className="mr-1" />
-                                Promote On-Chain
-                              </Button>
-
-
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleResend(app)}
-                                className="text-amber-500 hover:bg-amber-500/10"
-                              >
-                                <RotateCw size={14} className="mr-1" />
-                                Resend
-                              </Button>
-                            </>
-                          )}
+                <TableBody>
+                  {filteredApplications.length === 0 ? (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={5} className="py-32">
+                        <div className="flex flex-col items-center justify-center space-y-4 opacity-40">
+                          <ShieldAlert size={64} strokeWidth={1} className="text-slate-500" />
+                          <div className="text-center">
+                            <p className="text-sm font-semibold text-slate-400">No applications found</p>
+                            <p className="text-xs text-slate-600 mt-1">There are currently no notary applications requiring review.</p>
+                          </div>
                         </div>
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
+                  ) : (
+                    filteredApplications.map((app) => {
+                      const status = normalizeStatus(app.status);
+                      const canAdminAct = status === "KYC_VERIFIED";
+
+
+                      return (
+                        <TableRow key={app.id}>
+                          <TableCell className="font-medium">{app.name || app.full_name}</TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {app.license_number}
+                          </TableCell>
+                          <TableCell className="text-sm">{app.email}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getStatusBadge(app.status)}
+                              {getOnChainIndicator(app)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => openView(app)}
+                                className="text-primary hover:bg-primary/20"
+                              >
+                                <Eye size={14} className="mr-1" />
+                                View
+                              </Button>
+
+                              {canAdminAct && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleAction("approve", app)}
+                                    className="bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30"
+                                  >
+                                    <UserCheck size={14} className="mr-1" />
+                                    Approve
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => handleAction("reject", app)}
+                                    className="bg-destructive/20 text-destructive hover:bg-destructive/30 border border-destructive/30"
+                                  >
+                                    <UserX size={14} className="mr-1" />
+                                    Reject
+                                  </Button>
+                                </>
+                              )}
+
+                              {status === "approved" && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDirectOnChainPromotion(app)}
+                                    className="text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/10"
+                                  >
+                                    <ShieldCheck size={14} className="mr-1" />
+                                    Promote On-Chain
+                                  </Button>
+
+
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleResend(app)}
+                                    className="text-amber-500 hover:bg-amber-500/10"
+                                  >
+                                    <RotateCw size={14} className="mr-1" />
+                                    Resend
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
-        <DialogContent className="bg-card border-border text-foreground">
-          <DialogHeader>
-            <DialogTitle>Confirm {confirmDialog.action === "approve" ? "Approval" : "Rejection"}</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Are you sure you want to {confirmDialog.action} the application for {" "}
-              <span className="text-primary">{confirmDialog.application?.name || confirmDialog.application?.full_name}</span>?
-              {confirmDialog.action === "approve" && " This will create a verified Notary account and enable access."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setConfirmDialog({ open: false, action: "", application: null })}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmAction}
-              className={
-                confirmDialog.action === "approve"
-                  ? "bg-primary hover:bg-primary/90 text-primary-foreground"
-                  : "bg-destructive hover:bg-destructive/90 text-destructive-foreground"
-              }
-            >
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {/* Confirmation Dialog */}
+        <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
+          <DialogContent className="bg-card border-border text-foreground">
+            <DialogHeader>
+              <DialogTitle>Confirm {confirmDialog.action === "approve" ? "Approval" : "Rejection"}</DialogTitle>
+              <DialogDescription className="text-muted-foreground">
+                Are you sure you want to {confirmDialog.action} the application for {" "}
+                <span className="text-primary">{confirmDialog.application?.name || confirmDialog.application?.full_name}</span>?
+                {confirmDialog.action === "approve" && " This will create a verified Notary account and enable access."}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirmDialog({ open: false, action: "", application: null })}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmAction}
+                className={
+                  confirmDialog.action === "approve"
+                    ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    : "bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                }
+              >
+                Confirm
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* View Details Dialog */}
-      <Dialog open={viewDialog.open} onOpenChange={(open) => setViewDialog({ ...viewDialog, open })}>
-        <DialogContent className="bg-card border-border text-foreground max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Application Details</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Review full profile and verification data for this notary.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-6 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Applicant Name</h4>
-                <p className="text-foreground font-medium">{viewDialog.application?.name || viewDialog.application?.full_name}</p>
+        {/* View Details Dialog */}
+        <Dialog open={viewDialog.open} onOpenChange={(open) => setViewDialog({ ...viewDialog, open })}>
+          <DialogContent className="bg-card border-border text-foreground max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Application Details</DialogTitle>
+              <DialogDescription className="text-muted-foreground">
+                Review full profile and verification data for this notary.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-6 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Applicant Name</h4>
+                  <p className="text-foreground font-medium">{viewDialog.application?.name || viewDialog.application?.full_name}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">License Number</h4>
+                  <p className="font-mono text-primary">{viewDialog.application?.license_number || "Not provided"}</p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">License Number</h4>
-                <p className="font-mono text-primary">{viewDialog.application?.license_number || "Not provided"}</p>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Email Address</h4>
-                <p className="text-foreground">{viewDialog.application?.email || "Not provided"}</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Email Address</h4>
+                  <p className="text-foreground">{viewDialog.application?.email || "Not provided"}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Phone Number</h4>
+                  <p className="text-foreground">{viewDialog.application?.phone || "Not provided"}</p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Phone</h4>
-                <p className="text-foreground">{viewDialog.application?.phone || "Not provided"}</p>
-              </div>
-            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -503,9 +582,8 @@ export function ManageNotaries() {
               <div className="flex items-center gap-3">
                 {getStatusBadge(viewDialog.application?.status)}
                 {viewDialog.application?.status === 'KYC_VERIFIED' && (
-
                   <div className="flex items-center gap-2 text-xs text-emerald-500 font-medium">
-                    <CheckCircle size={14} /> Identity Integrity Verified by System
+                    <CheckCircle size={14} /> Identity Integrity Verified
                   </div>
                 )}
               </div>
@@ -513,145 +591,147 @@ export function ManageNotaries() {
 
             <div>
               <h4 className="text-sm font-medium text-muted-foreground">Experience & Qualifications</h4>
-              <div className="mt-2 p-3 bg-muted/50 rounded-lg border border-border text-sm leading-relaxed whitespace-pre-wrap">
+              <div className="mt-2 p-3 bg-slate-900/40 rounded-lg border border-border text-sm leading-relaxed whitespace-pre-wrap text-slate-300">
                 {viewDialog.application?.experience || "No details provided."}
               </div>
             </div>
 
             <div className="pt-2">
-              <h4 className="text-sm font-medium text-muted-foreground">On-Chain Linkage</h4>
+              <h4 className="text-sm font-medium text-muted-foreground">On-Chain Wallet</h4>
               <div className="flex items-center gap-2 mt-1">
-                <p className="text-[10px] text-muted-foreground truncate bg-muted p-2 rounded font-mono flex-1">
+                <p className="text-xs text-foreground truncate bg-slate-900/50 p-2 rounded font-mono flex-1 border border-border/50">
                   {viewDialog.application?.wallet_address}
                 </p>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="icon"
-                  className="h-8 w-8 hover:bg-primary/20 text-muted-foreground hover:text-primary relative"
+                  className="h-8 w-8 border-slate-700 hover:bg-primary/10"
                   onClick={() => handleCopy(viewDialog.application?.wallet_address, 'view-wallet')}
                 >
                   <FileText className="h-4 w-4" />
-                  {copiedId === 'view-wallet' && (
-                    <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50 animate-in fade-in zoom-in duration-200">
-                      COPIED!
-                    </span>
-                  )}
                 </Button>
               </div>
             </div>
           </div>
-          {/* 🛡️ [ACTION_BRIDGE] Bunker V3.6.1: Integrated Modal Control */}
-          <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t border-border/50">
-            {viewDialog.application?.status === 'KYC_VERIFIED' && (
 
-              <div className="flex gap-2 w-full justify-end">
-                <Button 
-                  onClick={() => {
-                    setViewDialog({ ...viewDialog, open: false });
-                    handleAction("reject", viewDialog.application);
-                  }}
-                  variant="destructive"
-                  className="bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 border border-rose-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter"
-                >
-                  <UserX size={14} className="mr-2" />
-                  Reject Application
-                </Button>
-                <Button 
-                  onClick={() => {
-                    setViewDialog({ ...viewDialog, open: false });
-                    handleAction("approve", viewDialog.application);
-                  }}
-                  className="bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border border-emerald-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter"
-                >
-                  <UserCheck size={14} className="mr-2" />
-                  Approve Notary
-                </Button>
-              </div>
-            )}
+          <DialogFooter className="gap-2 pt-6 border-t border-border/50">
             <Button 
-              variant="ghost" 
+              variant="outline" 
               onClick={() => setViewDialog({ ...viewDialog, open: false })}
-              className="text-[10px] font-bold uppercase tracking-widest text-slate-500"
+              className="px-6 py-2 border-slate-600 bg-slate-800/80 hover:bg-slate-700 text-white font-bold shadow-lg"
             >
               Close Profile
             </Button>
-            
-            {viewDialog.application?.wallet_address && 
-             (normalizeStatus(viewDialog.application.status) === 'APPROVED' || normalizeStatus(viewDialog.application.status) === 'ACTIVATED') && 
-             !onChainStatuses[viewDialog.application.wallet_address.toLowerCase()] && (
-              <Button 
-                onClick={() => {
-                  handlePromoteOnChain(viewDialog.application);
-                }}
-                className="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 px-6 font-bold uppercase text-[10px] tracking-tighter animate-pulse ml-auto"
-              >
-                <ShieldAlert size={14} className="mr-2" />
-                Promote to On-chain (Sync Required)
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {/* Governance Promotion Dialog (Post-Approval) */}
-      <Dialog open={promotionDialog.open} onOpenChange={(open) => setPromotionDialog({ ...promotionDialog, open })}>
-        <DialogContent className="bg-[#0d1425] border-emerald-500/30 text-white max-w-md">
-          <DialogHeader>
-            <div className="flex justify-center mb-4">
-              <div className="p-3 bg-emerald-500/10 rounded-full border border-emerald-500/20">
-                <ShieldCheck size={40} className="text-emerald-500" />
-              </div>
-            </div>
-            <DialogTitle className="text-center text-xl font-black italic tracking-tighter uppercase">Governance Sync Required</DialogTitle>
-            <DialogDescription className="text-center text-slate-400">
-              The application for <span className="text-emerald-400 font-bold">{promotionDialog.application?.name || promotionDialog.application?.full_name}</span> has been approved in the database.
-              <br/><br/>
-              To officially authorize this Notary on the <span className="text-white font-bold">BNB Testnet</span>, you must perform an on-chain promotion.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-             <div className="p-4 bg-white/5 rounded-xl border border-white/10 space-y-2 relative group">
-                <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Wallet to Promote</p>
-                  <button 
-                    onClick={() => handleCopy(promotionDialog.application?.wallet_address, 'promo-wallet')}
-                    className="text-slate-500 hover:text-emerald-400 p-1 relative"
+
+              <div className="flex-1" />
+
+              {viewDialog.application?.status === 'KYC_VERIFIED' && (
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => {
+                      setViewDialog({ ...viewDialog, open: false });
+                      handleAction("reject", viewDialog.application);
+                    }}
+                    variant="destructive"
+                    className="px-8 h-12 rounded-xl font-bold shadow-lg shadow-rose-900/20"
                   >
-                    <FileText size={12} />
+                    Reject
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setViewDialog({ ...viewDialog, open: false });
+                      handleAction("approve", viewDialog.application);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 h-12 rounded-xl font-bold shadow-lg shadow-emerald-900/20"
+                  >
+                    Approve Notary
+                  </Button>
+                </div>
+              )}
+
+              {(() => {
+                const wallet = viewDialog.application?.wallet_address?.toLowerCase();
+                const isVerified = wallet && onChainStatuses[wallet];
+
+                if (viewDialog.application?.wallet_address &&
+                  (normalizeStatus(viewDialog.application.status) === 'APPROVED' || normalizeStatus(viewDialog.application.status) === 'ACTIVATED') &&
+                  !isVerified) {
+
+                  return (
+                    <Button
+                      onClick={() => handleDirectOnChainPromotion(viewDialog.application)}
+                      className="bg-amber-600 hover:bg-amber-700 hover:scale-[1.02] active:scale-[0.98] text-white px-8 h-12 rounded-xl font-bold shadow-lg shadow-amber-900/40 transition-all border border-amber-500/30 flex items-center gap-2 group"
+                    >
+                      <ShieldCheck size={18} className="group-hover:rotate-12 transition-transform" />
+                      Finalize Blockchain Role
+                    </Button>
+                  );
+                }
+                return null;
+              })()}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {/* 🛡️ Direct Sync Dialog (Post-Approval) */}
+        <Dialog open={promotionDialog.open} onOpenChange={(open) => setPromotionDialog({ ...promotionDialog, open })}>
+          <DialogContent className="bg-[#0d1425] border-amber-500/30 text-white max-w-md rounded-2xl shadow-2xl">
+            <DialogHeader>
+              <div className="flex justify-center mb-6">
+                <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20 shadow-inner">
+                  <ShieldCheck size={48} className="text-amber-500 animate-pulse" />
+                </div>
+              </div>
+              <DialogTitle className="text-center text-2xl font-bold tracking-tight text-foreground">Activation Complete</DialogTitle>
+              <DialogDescription className="text-center text-slate-400 mt-2 px-4">
+                The application for <span className="text-amber-400 font-bold">{promotionDialog.application?.name || promotionDialog.application?.full_name}</span> is now approved.
+                <br /><br />
+                Finalize the process by granting the <span className="text-white font-bold underline decoration-amber-500/50 underline-offset-4">On-Chain Notary Role</span> via your administrative wallet.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-6">
+              <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3 group transition-all hover:bg-white/10">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Registry Target Address</p>
+                  <button
+                    onClick={() => handleCopy(promotionDialog.application?.wallet_address, 'promo-wallet')}
+                    className="text-slate-500 hover:text-amber-400 p-1 transition-colors"
+                  >
+                    <FileText size={14} />
                     {copiedId === 'promo-wallet' && (
-                      <span className="absolute bottom-full right-0 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50 animate-in fade-in zoom-in duration-200">
-                        COPIED!
+                      <span className="absolute -top-8 right-0 px-2 py-1 bg-amber-500 text-white text-[10px] font-bold rounded-lg shadow-xl z-50">
+                        COPIED
                       </span>
                     )}
                   </button>
                 </div>
-                <code className="text-xs text-emerald-500 block truncate font-mono">
+                <code className="text-xs text-amber-500 block truncate font-mono bg-black/30 p-2 rounded-lg border border-white/5">
                   {promotionDialog.application?.wallet_address}
                 </code>
-             </div>
-          </div>
-          <DialogFooter className="flex-col sm:flex-col gap-2">
-            <Button
-              onClick={() => {
-                handlePromoteOnChain(promotionDialog.application);
-                setPromotionDialog({ open: false, application: null });
-              }}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 text-primary-foreground font-black uppercase italic tracking-tighter"
-            >
-              <ShieldCheck size={16} className="mr-2" />
-              Finalize on Blockchain
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => setPromotionDialog({ open: false, application: null })}
-              className="w-full text-slate-500 hover:text-white"
-            >
-              I'll Sync Later
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              </div>
+            </div>
+            <DialogFooter className="flex-col sm:flex-col gap-3 pb-4">
+              <Button
+                onClick={() => {
+                  handleDirectOnChainPromotion(promotionDialog.application);
+                  setPromotionDialog({ open: false, application: null });
+                }}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white h-12 rounded-xl font-bold shadow-lg shadow-amber-900/40 border border-amber-500/30 transition-all hover:scale-[1.02]"
+              >
+                <ShieldCheck size={18} className="mr-2" />
+                Finalize Blockchain Role
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setPromotionDialog({ open: false, application: null })}
+                className="w-full text-slate-500 hover:text-white hover:bg-white/5 h-10 rounded-xl font-medium"
+              >
+                I'll Sync Later
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
-  </div>
   );
 }
 

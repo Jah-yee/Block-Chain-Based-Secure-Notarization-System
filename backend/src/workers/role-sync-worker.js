@@ -1,6 +1,7 @@
 require('dotenv').config();
 const pool = require('../db/index.js');
 const { attachNotaryRegistry } = require('../blockchain/notary-registry.js');
+const ntkService = require('../services/ntk.service.js');
 const SyncLogger = require('../services/SyncLogger.js');
 const SYNC_INTERVAL_MS = 60000; // Check every 60 seconds
 
@@ -101,6 +102,8 @@ async function executeAuthoritativePromotion(user) {
             "UPDATE users SET role_tx_status = 'confirmed', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $1",
             [user.id]
           );
+          // 🚀 [NTK_TRIGGER] Check for instant provisioning
+          await ntkService.verifyAndProvisionInitialNTK(user.id);
           await SyncLogger.logEvent({
             userId: user.id, syncType: 'role', eventType: SyncLogger.EVENTS.TX_CONFIRMED,
             statusBefore: 'processing', statusAfter: 'confirmed', txHash: user.role_tx_hash
@@ -135,6 +138,8 @@ async function executeAuthoritativePromotion(user) {
         "UPDATE users SET role_tx_status = 'confirmed', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $1",
         [user.id]
       );
+      // 🚀 [NTK_TRIGGER] Check for instant provisioning
+      await ntkService.verifyAndProvisionInitialNTK(user.id);
       await SyncLogger.logEvent({
         userId: user.id, syncType: 'role', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
         statusBefore: 'processing', statusAfter: 'confirmed', metadata: { reason: 'already_notary_onchain' }
@@ -144,19 +149,33 @@ async function executeAuthoritativePromotion(user) {
 
     // --- PATH 3: SEND_TX (Submission Mode) ---
     console.log(`[ROLE_SYNC] 🚀 Submitting promotion for ${user.wallet_address}...`);
-    const tx = await contract.promoteToNotary(user.wallet_address);
-    if (tx && tx.hash) {
+    const { registerNotaryOnChain } = require('../blockchain/notary-registry.js');
+    
+    // The utility already handles the linear check, but we'll add extra logging here
+    const result = await registerNotaryOnChain(user.wallet_address);
+    
+    if (result && result.success && result.txHash) {
       // IMMEDIATE PERSISTENCE (Idempotency Anchor)
       await pool.query(
         "UPDATE users SET role_tx_hash = $1, role_tx_status = 'initiated', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $2",
-        [tx.hash, user.id]
+        [result.txHash, user.id]
       );
       await SyncLogger.logEvent({
         userId: user.id, syncType: 'role', eventType: SyncLogger.EVENTS.TX_SUBMITTED,
-        statusBefore: 'processing', statusAfter: 'initiated', txHash: tx.hash, retryCount: user.role_retry_count
+        statusBefore: 'processing', statusAfter: 'initiated', txHash: result.txHash, retryCount: user.role_retry_count
       });
-      console.log(`[ROLE_SYNC] 🏁 TX Submitted & Locked: ${tx.hash}`);
+      console.log(`[ROLE_SYNC] 🏁 TX Submitted & Locked: ${result.txHash}`);
+    } else if (result && result.alreadyExists) {
+        console.log(`[ROLE_SYNC] ✅ User already a Notary on-chain. Settling.`);
+        await pool.query(
+            "UPDATE users SET role_tx_status = 'confirmed', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $1",
+            [user.id]
+        );
+        // 🚀 [NTK_TRIGGER] Check for instant provisioning
+        await ntkService.verifyAndProvisionInitialNTK(user.id);
     }
+
+
 
   } catch (err) {
     await handleFailure(user, err.message);

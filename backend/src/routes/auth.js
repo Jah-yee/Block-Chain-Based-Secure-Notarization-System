@@ -12,6 +12,7 @@ const { ACTOR_IDS } = require('../constants/protocol');
 const { generateNonce } = require('../utils/nonce');
 const { ethers } = require('ethers');
 const ConfigService = require('../services/config.service');
+const ntkService = require('../services/ntk.service');
 const ProviderService = require('../blockchain/provider-service');
 const { 
     IDENTITY_PROTOCOL, 
@@ -650,7 +651,7 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
 
             // 2. Password Check (Non-Admin)
             // 3. National ID Match
-            if (Number(liveRoleValue) !== 3) {
+            if (Number(liveRoleValue) !== 3 && Number(liveRoleValue) !== 2) {
               // 🛡️ [Hardening] Restore strict enforcement for Non-Admins now that middleware is relaxed
               if (!password || !nationalId) {
                 await auditClient.query('ROLLBACK');
@@ -868,32 +869,61 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
           [walletAddress]
         );
 
-        if (userResult.rowCount > 0) {
-          const error = new Error("Wallet already associated with an existing role. Use a separate wallet for notary registration.");
-          error.status = 409;
-          throw error;
-        }
-
-        // 2. Provision User Credentials
+        // 2. Provision/Update User Credentials
         const bcrypt = require('bcrypt');
         const hashedPassword = await bcrypt.hash(password, 10);
         let userId;
 
-        const userData = {
-          username: application.email.toLowerCase(),
-          name: application.full_name,
-          email: application.email.toLowerCase(),
-          wallet_address: walletAddress.toLowerCase(),
-          password_hash: hashedPassword,
-          role: 'notary',
-          identity_state: 'ACTIVE',
-          tx_status: 'pending', // 🛡️ [PHASE 2.4] Initial status to trigger sync worker
-          national_id_hash: application.national_id_hash,
-          is_human_verified: true
-        };
+        // Check if user already pre-provisioned (Immediate Approval flow)
+        const existingUser = await auditClient.query(
+          "SELECT id, role, identity_state FROM users WHERE LOWER(wallet_address) = LOWER($1)",
+          [walletAddress]
+        );
+
+        if (existingUser.rowCount > 0) {
+          const user = existingUser.rows[0];
           
-        const userRecord = await UserService.createUser(userData, auditClient);
-        userId = userRecord.id;
+          // 🛡️ [Hardening] Safety Check: Ensure we only activate PENDING notaries
+          if (user.role !== 'notary' || user.identity_state !== 'PENDING') {
+            throw new Error(`Invalid account state for activation: ${user.role} (${user.identity_state})`);
+          }
+
+          await auditClient.query(
+            `UPDATE users 
+             SET password_hash = $1, 
+                 identity_state = 'ACTIVE',
+                 updated_at = NOW() 
+             WHERE id = $2`,
+            [hashedPassword, user.id]
+          );
+          userId = user.id;
+          
+          // Log Transition
+          await auditClient.query(
+            `INSERT INTO user_state_history (user_id, from_state, to_state, reason, changed_by) 
+             VALUES ($1, 'PENDING', 'ACTIVE', 'NOTARY_ACTIVATION', $1)`,
+            [userId]
+          );
+
+          // 🚀 [NTK_TRIGGER] Instant provisioning for new notary
+          await ntkService.verifyAndProvisionInitialNTK(userId);
+        } else {
+          // Fallback: Legacy creation (should be rare with new flow)
+          const userData = {
+            username: application.email.toLowerCase(),
+            name: application.full_name,
+            email: application.email.toLowerCase(),
+            wallet_address: walletAddress.toLowerCase(),
+            password_hash: hashedPassword,
+            role: 'notary',
+            identity_state: 'ACTIVE',
+            tx_status: 'pending',
+            national_id_hash: application.national_id_hash,
+            is_human_verified: true
+          };
+          const userRecord = await UserService.createUser(userData, auditClient);
+          userId = userRecord.id;
+        }
 
         // 3. Finalize Activation
         await auditClient.query(

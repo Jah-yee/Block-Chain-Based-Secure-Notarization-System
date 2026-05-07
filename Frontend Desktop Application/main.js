@@ -268,6 +268,7 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/notaries\/applications\/[\w-]+\/approve$/, methods: ["POST"] },
     { path: /^\/api\/notaries\/applications\/[\w-]+\/reject$/, methods: ["POST"] },
     { path: /^\/api\/notaries$/, methods: ["GET"] },
+    { path: /^\/api\/notaries\/onchain-role\/[\w-]+$/, methods: ["GET"] },
 
     // 📂 DOCUMENT FLOW
     { path: /^\/api\/documents$/, methods: ["GET"] },
@@ -286,6 +287,7 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/governance\/proposals$/, methods: ["GET", "POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/prepare-on-chain$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/submit-on-chain$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/proposals\/[\w-]+\/execute$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/vote$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+$/, methods: ["GET", "DELETE"] },
     { path: /^\/api\/governance\/proposals\/0\/confirm-on-chain$/, methods: ["POST"] },

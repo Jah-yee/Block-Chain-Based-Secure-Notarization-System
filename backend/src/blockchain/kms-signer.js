@@ -54,28 +54,39 @@ class KMSSigner extends AbstractSigner {
     async signTransaction(tx) {
         const address = await this.getAddress();
 
-        const resolvedTx = await resolveProperties(tx);
-        if (resolvedTx.from != null) {
-            if (ethers.getAddress(resolvedTx.from) !== address) {
-                throw new Error("Transaction 'from' mismatch");
-            }
-            delete resolvedTx.from;
+        // 🛡️ 1. Populate the transaction (gas, nonce, etc.)
+        // This handles ENS resolution and Promise fulfillment.
+        const populatedTx = await this.populateTransaction(tx);
+
+        // 🛡️ 2. DEFENSIVE RE-ATTACHMENT
+        // If the original 'tx' had 'to' or 'data', ensure 'populatedTx' still has them.
+        // Some ethers v6 versions/configurations strip these during population if not careful.
+        if (tx.to && !populatedTx.to) populatedTx.to = tx.to;
+        if (tx.data && !populatedTx.data) populatedTx.data = tx.data;
+
+        // 🛡️ 3. CLEANUP FOR SERIALIZATION
+        // Clone and remove fields that Ethers v6 Transaction.from() doesn't like.
+        const txData = { ...populatedTx };
+        delete txData.from;
+
+        // 🛡️ 4. ANTI-CONTRACT-CREATION GUARD
+        // If we intended to send to a contract but 'to' is now missing, STOP.
+        if (tx.to && !txData.to) {
+            throw new Error("[KMS_SIGNER_FATAL] Destination address ('to') was lost during transaction population. Aborting to prevent accidental contract creation.");
         }
 
-        // Populate transaction
-        const populatedTx = await this.populateTransaction(resolvedTx);
-
-        // Get the digest to sign
-        const unsignedTx = Transaction.from(populatedTx);
+        // 🛡️ 5. CREATE UNSIGNED DIGEST
+        const unsignedTx = Transaction.from(txData);
         const digest = unsignedTx.unsignedHash;
 
-        // Sign the digest
+        // 🛡️ 6. SIGN VIA KMS
         const signature = await this._signDigest(digest);
 
-        // Finalize with signature
-        unsignedTx.signature = signature;
-
-        return unsignedTx.serialized;
+        // 🛡️ 7. RETURN SERIALIZED ENVELOPE
+        return Transaction.from({
+            ...txData,
+            signature: signature
+        }).serialized;
     }
 
     async signMessage(message) {

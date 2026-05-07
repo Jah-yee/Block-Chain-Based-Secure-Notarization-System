@@ -245,7 +245,7 @@ const ACTION_POLICIES = {
     GOV_PROPOSAL_CANCEL: { description: "Cancel gov proposal", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'UPDATE' }] },
     GOV_VOTE_SUBMIT: { description: "Submit vote", actor: "NOTARY", requiresStrong: true, rules: [{ table: 'GOVERNANCE_VOTES', op: 'INSERT' }] },
     GOV_ONCHAIN_SUBMIT: { description: "Submit to chain", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_PROPOSALS', op: 'UPDATE' }] },
-    GOV_REMOTE_INIT: { description: "Initiate remote vote", actor: "NOTARY", requiresStrong: true, rules: [{ table: 'GOVERNANCE_VOTES', op: 'INSERT' }] },
+    GOV_REMOTE_INIT: { description: "Initiate remote vote", actor: "ADMIN", requiresStrong: true, rules: [{ table: 'GOVERNANCE_VOTES', op: 'INSERT' }] },
     GOV_REMOTE_AUTHORIZE: { description: "Authorize vote", actor: "ANY", requiresStrong: false, rules: [{ table: 'GOVERNANCE_VOTES', op: 'UPDATE' }] },
     GOV_REMOTE_STATUS: { description: "Poll remote session status", actor: "GUEST", requiresStrong: false, rules: [{ table: 'REMOTE_GOV_SESSIONS', op: 'SELECT' }] },
     GOV_PROPOSAL_EXECUTE: {

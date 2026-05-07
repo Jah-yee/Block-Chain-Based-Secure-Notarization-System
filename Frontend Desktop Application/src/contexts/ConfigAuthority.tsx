@@ -31,12 +31,15 @@ export interface Config {
   checksum: string;
 }
 
+export type SyncStep = 'IDLE' | 'HANDSHAKE' | 'INTEGRITY' | 'PERSISTENCE' | 'FINALIZING';
 export type ConfigMode = 'LIVE' | 'DEGRADED' | 'STALE' | 'EMERGENCY';
 export type ConfigStatus = 'loading' | 'ready' | 'error';
 
 interface ConfigContextType {
   status: ConfigStatus;
   mode: ConfigMode;
+  syncStep: SyncStep;
+  retryCount: number;
   config: Config | null;
   error: { code: string; message: string } | null;
   retry: () => void;
@@ -53,10 +56,14 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
   const [mode, setMode] = useState<ConfigMode>('LIVE');
   const [config, setConfig] = useState<Config | null>(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
+  const [syncStep, setSyncStep] = useState<SyncStep>('IDLE');
+  const [attempt, setAttempt] = useState(0);
+  const [manualRetryTrigger, setManualRetryTrigger] = useState(0);
 
   const fetchConfig = useCallback(async () => {
     setStatus('loading');
+    setSyncStep('HANDSHAKE');
+    setAttempt(1);
     setError(null);
     
     const electronAPI = (window as any).electronAPI;
@@ -66,37 +73,49 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
       let modeAssignment = 'LIVE';
       
       try {
-        // 🟢 TIER 1: Authoritative Sync (3 Retries)
-        for (let i = 0; i < 3; i++) {
+        // 🟢 TIER 1: Authoritative Sync (5 Retries for high stability)
+        for (let i = 0; i < 5; i++) {
+          setAttempt(i + 1);
           try {
-            const response = await axios.get(`${DEFAULT_API_URL}/api/system/config`, { timeout: 5000 });
+            setSyncStep('HANDSHAKE');
+            // 🛡️ [RESILIENCE] Increased timeout to 10s for slower global nodes
+            const response = await axios.get(`${DEFAULT_API_URL}/api/system/config`, { 
+              timeout: 10000,
+              headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' }
+            });
             const payload = response.data;
             
-            if (payload && payload.apiBaseUrl) {
+            if (payload && payload.contracts) {
+              setSyncStep('INTEGRITY');
               // 🛡️ INTEGRITY: Verify Schema & Checksum
               const isValid = await ConfigValidator.validate(payload);
               const isIntact = await ConfigValidator.verifyChecksum(payload, payload.checksum);
 
               if (isValid && isIntact) {
+                console.log('[CONFIG] Authority synchronized successfully.');
+                setSyncStep('PERSISTENCE');
                 setMode('LIVE');
                 modeAssignment = 'LIVE';
                 resolvedConfig = payload;
+
+                // 💾 PERSIST: Save to OS-level cache for offline recovery
+                if (electronAPI?.config?.save) {
+                  await electronAPI.config.save(payload);
+                }
+                setSyncStep('FINALIZING');
                 break;
               } else if (isValid && !isIntact) {
-                console.warn(`[CONFIG] Authority integrity violation: CHECKSUM_MISMATCH. Entering RESILIENCE mode.`);
+                console.warn(`[CONFIG] Authority integrity violation: CHECKSUM_MISMATCH.`);
                 setMode('EMERGENCY');
                 modeAssignment = 'EMERGENCY';
                 resolvedConfig = payload;
                 break;
-              } else {
-                const reason = !isValid ? "SCHEMA_INVALID" : "UNIDENTIFIED_FAULT";
-                console.error(`[CONFIG] Authority integrity violation: ${reason}`);
-                throw new Error(`CRITICAL: Configuration ${reason}. System cannot trust authority.`);
               }
             }
           } catch (e) {
-            if (i < 2) {
-              const delay = i === 0 ? 2000 : 5000;
+            console.warn(`[CONFIG] Sync attempt ${i + 1} failed:`, e instanceof Error ? e.message : 'Unknown Error');
+            if (i < 4) {
+              const delay = i === 0 ? 1000 : (i + 1) * 2000; // Progressive backoff
               await new Promise(r => setTimeout(r, delay));
             }
           }
@@ -105,10 +124,12 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
         // 🟠 TIER 2: OS-Level Cache Fallback
         if (!resolvedConfig && electronAPI?.config?.load) {
           try {
+            setSyncStep('PERSISTENCE'); // Reading from cache
             const cached = await electronAPI.config.load();
             if (cached && cached.data) {
               const { data, timestamp } = cached;
               
+              setSyncStep('INTEGRITY');
               // 🛡️ INTEGRITY: Verify Cached Schema
               if (await ConfigValidator.validate(data)) {
                   const age = Date.now() - timestamp;
@@ -123,6 +144,7 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
                       setMode('DEGRADED');
                       modeAssignment = 'DEGRADED';
                   }
+                  setSyncStep('FINALIZING');
               } else {
                   console.warn('[CONFIG] OS level cache is corrupted. Clearing.');
               }
@@ -135,6 +157,7 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
         // 🔴 TIER 3: Emergency Fallback (Bootstrap Only)
         if (!resolvedConfig) {
           console.error('[CONFIG] Critical connection failure. Entering EMERGENCY mode.');
+          setSyncStep('IDLE');
           setMode('EMERGENCY');
           modeAssignment = 'EMERGENCY';
           resolvedConfig = {
@@ -158,11 +181,12 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
       }
 
       setConfig(resolvedConfig);
+      setSyncStep('FINALIZING');
       setStatus('ready');
-      setRetryCount(0);
 
     } catch (err: any) {
       console.error('❌ [CONFIG_AUTHORITY_CRITICAL]', err);
+      setSyncStep('IDLE');
       setError({
         code: err.code || 'CONFIG_CORRUPTION',
         message: err.message || 'System failed to load configuration.'
@@ -174,16 +198,17 @@ export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = 
 
   useEffect(() => {
     fetchConfig();
-  }, [fetchConfig]);
+  }, [fetchConfig, manualRetryTrigger]);
 
   const value = {
     status,
     mode,
+    syncStep,
+    retryCount: attempt,
     config,
     error,
     retry: () => {
-      setRetryCount(prev => prev + 1);
-      fetchConfig();
+      setManualRetryTrigger(prev => prev + 1);
     }
   };
 

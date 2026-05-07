@@ -43,9 +43,10 @@ export function RoleSelection({ onSelectRole }: RoleSelectionProps) {
           </button>
         </div>
 
-        <div className="text-center text-sm">
-          <p className="text-gray-600 mb-4">v1.0.0 | Powered by Electron + Node.js + Web3</p>
-
+        <div className="text-center">
+          <p className="text-slate-700 text-[10px] font-bold uppercase tracking-[0.3em]">
+            BBSNS Domain Authority | Cryptographic Root of Trust
+          </p>
         </div>
       </div>
     </div>

@@ -69,7 +69,7 @@ const userSchema = Joi.object({
 });
 
 const loginSchema = Joi.object({
-    email: Joi.string().trim().lowercase().regex(REGEX.EMAIL).required(),
+    email: Joi.string().trim().lowercase().regex(REGEX.EMAIL).optional(),
     password: Joi.string().optional(),
     nationalId: Joi.string().trim().regex(REGEX.ALPHA_NUMERIC).optional().messages({
         'string.pattern.base': 'National ID must be 6-20 alphanumeric characters'
