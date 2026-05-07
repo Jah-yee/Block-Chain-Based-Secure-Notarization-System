@@ -164,17 +164,6 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${stat.color === 'primary' ? 'bg-primary/10 text-primary border-primary/20' : colorMap[stat.color as keyof typeof colorMap]}`}>
                                             <Icon size={24} />
                                         </div>
-                                        {stat.action && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-8 px-2 text-primary hover:bg-primary/10"
-                                                onClick={stat.action.onClick}
-                                            >
-                                                <stat.action.icon size={14} className="mr-1" />
-                                                {stat.action.label}
-                                            </Button>
-                                        )}
                                     </div>
                                     <div>
                                         <h2 className="text-2xl font-bold text-foreground mb-1">{stat.value}</h2>

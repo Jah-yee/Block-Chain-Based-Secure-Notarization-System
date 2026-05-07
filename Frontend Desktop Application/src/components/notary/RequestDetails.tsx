@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ZoomIn, ZoomOut, FileText, Image as ImageIcon, User, Wallet, Hash, CheckCircle, XCircle, ArrowLeft, Loader2, ExternalLink } from "lucide-react";
+import { ZoomIn, ZoomOut, FileText, Image as ImageIcon, User, Wallet, Hash, CheckCircle, XCircle, ArrowLeft, Loader2, ExternalLink, Coins } from "lucide-react";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
