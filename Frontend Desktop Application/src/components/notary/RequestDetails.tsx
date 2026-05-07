@@ -250,7 +250,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
             {/* Header */}
-            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-4 pt-8 pb-4">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-4 pt-4 pb-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
