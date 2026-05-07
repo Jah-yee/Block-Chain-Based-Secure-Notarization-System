@@ -70,13 +70,13 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
         <div className={`flex items-center ${isCollapsed ? "flex-col" : "gap-3"}`}>
           <div className="relative group">
               <div className="absolute inset-0 bg-emerald-500/40 blur-lg rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="relative bg-gradient-to-br from-emerald-400 to-emerald-600 p-2 rounded-xl border border-white/10 shadow-lg transform group-hover:rotate-6 transition-transform">
-                  <Shield size={isCollapsed ? 24 : 20} className="text-primary-foreground" />
+              <div className={`relative bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl border border-white/10 shadow-lg transform group-hover:rotate-6 transition-transform ${isCollapsed ? 'p-1.5' : 'p-2'}`}>
+                  <Shield size={isCollapsed ? 18 : 20} className="text-primary-foreground" />
               </div>
           </div>
           {!isCollapsed && (
             <div className="animate-in fade-in slide-in-from-left-2 duration-500">
-              <h2 className="text-xl font-black italic tracking-tighter text-foreground">BBSNS</h2>
+              <h2 className="text-lg font-black italic tracking-tighter text-foreground leading-none">BBSNS</h2>
               <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   <p className="text-[9px] text-emerald-500/80 uppercase font-black tracking-widest">

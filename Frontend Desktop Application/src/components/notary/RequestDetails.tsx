@@ -248,9 +248,9 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     const fileType = isImage ? "Image" : "PDF";
 
     return (
-        <div className="h-full flex flex-col min-h-0 bg-[#07090e]">
+        <div className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
             {/* Header */}
-            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-4 pt-8 pb-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
@@ -381,15 +381,15 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 {/* Right Panel - Information & Actions */}
                 <div className="w-96 bg-card flex flex-col border-l border-border h-full overflow-hidden">
                     {/* Scrollable Information Area */}
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                         {/* Client Information */}
                         <div>
-                            <h3 className="text-foreground mb-4 flex items-center gap-2">
-                                <User size={18} className="text-primary" />
+                            <h3 className="text-[12px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                                <User size={16} className="text-primary" />
                                 Client Information
                             </h3>
-                            <div className="space-y-3">
-                                <div className="bg-muted/50 rounded-xl p-4">
+                            <div className="space-y-2">
+                                <div className="bg-muted/50 rounded-xl p-3">
                                     <p className="text-xs text-muted-foreground mb-1">Full Name</p>
                                     <p className="text-sm text-foreground font-medium">{request.owner_name || 'Anonymous User'}</p>
                                 </div>
@@ -397,20 +397,20 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                                     <p className="text-xs text-muted-foreground mb-1">Email Address</p>
                                     <p className="text-sm text-foreground">{request.owner_email || 'N/A'}</p>
                                 </div>
-                                <div className="bg-muted/50 rounded-xl p-4">
-                                    <p className="text-xs text-muted-foreground mb-1">Wallet Address</p>
+                                <div className="bg-muted/50 rounded-xl p-3">
+                                    <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider font-bold">Wallet Address</p>
                                     <p className="text-sm text-foreground font-mono text-[10px] break-all">{request.owner_wallet}</p>
                                 </div>
                             </div>
                         </div>
 
                         {/* File Hash */}
-                        <div className="bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30 rounded-xl p-4">
+                        <div className="bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/10 dark:border-emerald-500/30 rounded-xl p-3">
                             <div className="flex items-center gap-2 mb-2">
-                                <Hash className="text-emerald-700 dark:text-emerald-500" size={16} />
-                                <p className="text-xs text-emerald-700 dark:text-emerald-500">File Hash Verified</p>
+                                <Hash className="text-emerald-700 dark:text-emerald-500" size={14} />
+                                <p className="text-[10px] text-emerald-700 dark:text-emerald-500 font-bold uppercase tracking-wider">File Hash Verified</p>
                             </div>
-                            <p className="text-xs text-muted-foreground font-mono break-all">{request.file_hash}</p>
+                            <p className="text-[10px] text-muted-foreground font-mono break-all leading-tight">{request.file_hash}</p>
                         </div>
 
                         {/* NTK Balance Card (Newly Added) */}
@@ -428,33 +428,33 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             </p>
                         </div>
 
-                        <div className="bg-muted/50 rounded-xl p-4">
-                            <p className="text-xs text-muted-foreground mb-1">Created At</p>
+                        <div className="bg-muted/50 rounded-xl p-3">
+                            <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider font-bold">Created At</p>
                             <p className="text-sm text-foreground">{new Date(request.created_at).toLocaleString()}</p>
                         </div>
                     </div>
 
                     {/* Sticky Action Footer */}
-                    <div className="flex-none p-6 border-t border-border bg-background/50 backdrop-blur-md z-30">
+                    <div className="flex-none p-3 border-t border-border bg-background/80 backdrop-blur-md z-30">
                         {request.status === 'pending' ? (
-                            <div className="space-y-3">
+                            <div className="flex gap-2">
                                 <Button
                                     onClick={() => handleAction("approve")}
                                     disabled={submitting}
                                     variant="default"
-                                    className="w-full rounded-xl h-11 shadow-lg shadow-primary/20"
+                                    className="flex-1 rounded-xl h-10 shadow-lg shadow-primary/20 text-[11px] font-black uppercase tracking-wider"
                                 >
-                                    <CheckCircle size={16} className="mr-2" />
-                                    Approve Request
+                                    <CheckCircle size={14} className="mr-1.5" />
+                                    Approve
                                 </Button>
                                 <Button
                                     onClick={() => handleAction("reject")}
                                     disabled={submitting}
                                     variant="outline"
-                                    className="w-full border-red-200 text-red-700 hover:bg-red-50 dark:border-red-500/50 dark:text-red-500 dark:hover:bg-red-500/10 rounded-xl h-11"
+                                    className="flex-1 border-red-500/30 text-red-500 hover:bg-red-500/10 rounded-xl h-10 text-[11px] font-black uppercase tracking-wider"
                                 >
-                                    <XCircle size={16} className="mr-2" />
-                                    Reject Request
+                                    <XCircle size={14} className="mr-1.5" />
+                                    Reject
                                 </Button>
                             </div>
                         ) : (
