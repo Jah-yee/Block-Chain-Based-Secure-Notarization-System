@@ -66,20 +66,20 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       </div>
 
       {/* Brand Header & Toggle Consolidation */}
-      <div className={`flex items-center transition-all ${isCollapsed ? "py-6 flex-col gap-8 justify-center" : "p-5 border-b border-border/50 justify-between"}`}>
-        <div className={`flex items-center ${isCollapsed ? "flex-col" : "gap-3"}`}>
+      <div className={`flex items-center transition-all ${isCollapsed ? "py-4 flex-col gap-4" : "p-4 border-b border-border/50 justify-between"}`}>
+        <div className={`flex items-center ${isCollapsed ? "flex-col gap-4" : "gap-3"}`}>
           <div className="relative group">
               <div className="absolute inset-0 bg-primary/20 blur-lg rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className={`relative bg-primary p-2 rounded-xl border border-white/10 shadow-[0_0_15px_rgba(16,185,129,0.3)] transform group-hover:rotate-6 transition-transform flex items-center justify-center ${isCollapsed ? 'w-10 h-10' : 'w-9 h-9'}`}>
-                  <Shield size={isCollapsed ? 22 : 18} className="text-primary-foreground" />
+              <div className={`relative bg-primary rounded-xl border border-white/10 shadow-[0_0_15px_rgba(16,185,129,0.3)] transform group-hover:rotate-6 transition-transform flex items-center justify-center ${isCollapsed ? 'w-10 h-10' : 'w-8 h-8'}`}>
+                  <Shield size={isCollapsed ? 20 : 16} className="text-primary-foreground" />
               </div>
           </div>
           {!isCollapsed && (
             <div className="animate-in fade-in slide-in-from-left-2 duration-500 flex flex-col justify-center">
-              <h2 className="text-[16px] font-black italic tracking-tighter text-foreground leading-none mb-0.5">BBSNS</h2>
+              <h2 className="text-[14px] font-black italic tracking-tighter text-foreground leading-none mb-0.5">BBSNS</h2>
               <div className="flex items-center gap-1.5">
                   <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[8px] text-emerald-500 font-black uppercase tracking-[0.2em]">
+                  <p className="text-[7px] text-emerald-500 font-black uppercase tracking-[0.2em]">
                       {role === "admin" ? "Administrator" : (role === "notary" ? "Notary" : "Owner")}
                   </p>
               </div>
@@ -87,29 +87,29 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
           )}
         </div>
 
-        {/* Improved Toggle Button */}
+        {/* Improved Toggle Button - Integrated for better layout */}
         <button
           onClick={onToggleCollapse}
-          className={`bg-muted/50 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-lg p-2 transition-all border border-border/50 hover:border-primary/30 ${isCollapsed ? "w-10 h-10 flex items-center justify-center" : ""}`}
+          className={`bg-muted/30 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded-lg transition-all border border-border/30 hover:border-primary/30 flex items-center justify-center ${isCollapsed ? "w-8 h-8" : "w-8 h-8"}`}
           title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
-          {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
       </div>
 
 
       {/* Profile Section - Premium Overhaul */}
       {!isCollapsed ? (
-        <div className="px-4 mt-2 animate-in fade-in duration-500">
-          <div className="p-4 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-2xl flex items-center gap-3 group hover:border-white/10 transition-colors relative">
+        <div className="px-3 mt-1 animate-in fade-in duration-500">
+          <div className="p-3 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-xl flex items-center gap-3 group hover:border-white/10 transition-colors relative">
             <div className="relative shrink-0">
                <div className="absolute inset-0 bg-emerald-500/20 blur-md rounded-full" />
-               <div className="relative w-8 h-8 rounded-full bg-muted border border-border/50 flex items-center justify-center text-primary font-black shadow-inner text-xs">
+               <div className="relative w-7 h-7 rounded-full bg-muted border border-border/50 flex items-center justify-center text-primary font-black shadow-inner text-xs">
                   {(user?.name || "U").slice(0, 1).toUpperCase()}
                </div>
             </div>
             <div className="overflow-hidden flex-1">
-              <p className="text-[11px] font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">{user?.name || "System Actor"}</p>
+              <p className="text-[10px] font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">{user?.name || "System Actor"}</p>
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 text-[8px] font-mono text-white/40 overflow-hidden">
                     <span className="truncate selectable">{user?.wallet_address || "0x00...000"}</span>
@@ -119,7 +119,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
                   className="p-1 hover:bg-white/10 rounded transition-colors text-white/20 hover:text-emerald-400 relative"
                   title="Copy Wallet Address"
                 >
-                  <FileText size={10} />
+                  <FileText size={8} />
                   {showCopied && (
                     <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg animate-in fade-in zoom-in duration-200">
                       COPIED!
@@ -131,8 +131,8 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center mt-6 group animate-in zoom-in duration-300">
-           <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black shadow-lg group-hover:border-emerald-500/50 transition-all">
+        <div className="flex flex-col items-center mt-2 group animate-in zoom-in duration-300">
+           <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-black shadow-lg group-hover:border-emerald-500/50 transition-all text-xs">
                {user?.name?.slice(0, 1).toUpperCase() || "U"}
            </div>
         </div>

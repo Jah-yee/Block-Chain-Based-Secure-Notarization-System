@@ -429,7 +429,7 @@ export default function App() {
         )}
 
         {appState === "notary-app" && (
-          <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex overflow-hidden min-h-0 bg-background">
             <Sidebar role="notary" user={user} activeScreen={notaryScreen} onNavigate={(s) => setNotaryScreen(s as NotaryScreen)} onLogout={() => setLogoutDialogOpen(true)} alertCount={alertCount} isCollapsed={isSidebarCollapsed} onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />
             <main className="flex-1 bg-background overflow-hidden flex flex-col">
               {notaryScreen === "dashboard" && <NotaryDashboard onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
@@ -443,7 +443,7 @@ export default function App() {
         )}
 
         {appState === "owner-app" && (
-          <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex overflow-hidden min-h-0 bg-background">
             <Sidebar role="owner" user={user} activeScreen="dashboard" onNavigate={() => {}} onLogout={() => setLogoutDialogOpen(true)} alertCount={0} isCollapsed={isSidebarCollapsed} onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />
             <main className="flex-1 bg-background p-8 overflow-y-auto custom-scrollbar">
               <JourneyErrorBoundary><JourneyBox /></JourneyErrorBoundary>

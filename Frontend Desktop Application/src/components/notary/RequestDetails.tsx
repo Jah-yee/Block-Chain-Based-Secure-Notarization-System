@@ -250,7 +250,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
             {/* Header */}
-            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-4 pt-4 pb-4">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm px-4 py-2">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
@@ -435,7 +435,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                     </div>
 
                     {/* Sticky Action Footer */}
-                    <div className="flex-none p-3 border-t border-border bg-background/80 backdrop-blur-md z-30">
+                    <div className="flex-none p-3 pb-6 border-t border-border bg-background/95 backdrop-blur-md z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.1)]">
                         {request.status === 'pending' ? (
                             <div className="flex gap-2">
                                 <Button
