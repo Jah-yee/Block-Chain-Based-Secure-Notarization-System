@@ -434,11 +434,19 @@ function runWithSystemContext(service, reason, fn) {
     return fn();
   };
 
+  const rawRuntime = (process.env.BBSNS_RUNTIME || '').trim().toLowerCase();
+  
   // 🛡️ [ENFORCEMENT] structural Execution Isolation
-  // Allow if explicitly set to 'worker' OR if running in a non-web environment (e.g. CLI/Cron)
-  const isWeb = process.env.BBSNS_RUNTIME === 'web' || !process.env.BBSNS_RUNTIME;
-  if (isWeb && !process.env.ALLOW_SYSTEM_IN_WEB) {
-    console.error(`❌ [ISOLATION_VIOLATION] from ${process.env.BBSNS_RUNTIME || 'WEB_ROUTER'}`);
+  // Rules:
+  // 1. If runtime is 'worker', always allowed.
+  // 2. If runtime is empty/undefined, assume 'web' (safe default) and block unless ALLOW_SYSTEM_IN_WEB is set.
+  // 3. If runtime is 'web', block unless ALLOW_SYSTEM_IN_WEB is set.
+  const isWorker = rawRuntime === 'worker';
+  const isExplicitWeb = rawRuntime === 'web';
+  const isImplicitWeb = rawRuntime === '';
+
+  if (!isWorker && (isExplicitWeb || isImplicitWeb) && !process.env.ALLOW_SYSTEM_IN_WEB) {
+    console.error(`❌ [ISOLATION_VIOLATION] Runtime: "${rawRuntime}", isWorker: ${isWorker}, isWeb: ${isExplicitWeb || isImplicitWeb}`);
     throw new BBSNSEnforcementError('ISOLATION_VIOLATION: System context structural forbidden');
   }
 

@@ -164,6 +164,22 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${stat.color === 'primary' ? 'bg-primary/10 text-primary border-primary/20' : colorMap[stat.color as keyof typeof colorMap]}`}>
                                             <Icon size={24} />
                                         </div>
+                                        {stat.label === "NTK Balance" && (
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8 w-8 p-0 text-muted-foreground hover:text-primary"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const ntkAddress = config.contracts.ntk;
+                                                    navigator.clipboard.writeText(ntkAddress);
+                                                    toast.success("NTK Contract Address copied! Import it as a Custom Token in your wallet.");
+                                                }}
+                                                title="Copy NTK Contract Address"
+                                            >
+                                                <Plus size={16} />
+                                            </Button>
+                                        )}
                                     </div>
                                     <div>
                                         <h2 className="text-2xl font-bold text-foreground mb-1">{stat.value}</h2>

@@ -1542,6 +1542,7 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
                     );
 
                     // Fire Reputation
+                    console.log(`[AUTH_RELAY] Triggering reputation event for Notary ID: ${userId} | Status: ${payload.status === 1 ? 'APPROVE' : 'REJECT'}`);
                     await reputationService.handleEvent(userId, payload.status === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(err => {
                         console.warn(`[AUTH_RELAY_WARN] Reputation update failed: ${err.message}`);
                     });

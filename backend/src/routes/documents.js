@@ -397,11 +397,13 @@ router.post('/confirm', withDomain('DOCS'), requireUnpaused, requirePrivilege({ 
 
     await client.query('COMMIT');
     
-    // Non-blocking notary assignment
+    /* 
+    // Non-blocking notary assignment (Disabled for Public Pool Model)
     setImmediate(async () => {
       try { await reputationService.assignNotary(newDoc.id); }
       catch (e) { console.error(`[ASSIGNMENT] ${e.message}`); }
     });
+    */
 
     res.status(201).json({ message: 'Success.', document: sanitizeDocument(newDoc), tx_hash });
 
@@ -481,7 +483,7 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' })
                FROM documents d 
                LEFT JOIN users u ON d.notary_id = u.id 
                LEFT JOIN users u2 ON d.user_id = u2.id
-               WHERE (d.notary_id=$1 OR d.notary_id IS NULL) 
+               WHERE ((d.submission_state = 'pending' AND d.notary_id IS NULL) OR d.notary_id = $1) 
                AND d.is_deleted=false 
                ORDER BY d.created_at DESC`;
       params = [req.actor.id];
@@ -599,9 +601,20 @@ router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ capa
     const notaryId = Number(req.actor.id);
     const notaryWallet = req.actor.address;
 
-    // 🛡️ [DEADLOCK_RECOVERY] Allow if assigned to THIS notary OR if document is unassigned (and requester is notary/admin)
+    // 🛡️ [ATOMIC_CLAIM] Implement Public Pool "First-to-Claim" logic
     if (doc.notary_id && Number(doc.notary_id) !== notaryId && Number(req.actor.role) !== ROLES.ADMIN) {
-      return res.status(403).json({ error: 'Not authorized for this document' });
+      return res.status(403).json({ error: 'This document has already been claimed by another notary.' });
+    }
+
+    if (!doc.notary_id) {
+        console.log(`[PUBLIC_POOL] Notary ${notaryId} is claiming document ${paramId}`);
+        const claimRes = await pool.query(
+            "UPDATE documents SET notary_id = $1 WHERE id = $2 AND notary_id IS NULL RETURNING id",
+            [notaryId, paramId]
+        );
+        if (claimRes.rowCount === 0) {
+            return res.status(403).json({ error: 'Document was just claimed by another notary. Please refresh your list.' });
+        }
     }
 
     if (!notaryWallet) {
@@ -721,8 +734,9 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
     const isOwner = userId === docUserId;
     const isAssignedNotary = docNotaryId !== null && userId === docNotaryId;
     const isUnassignedNotary = role === ROLES.NOTARY && docNotaryId === null;
+    const isPublicPending = role === ROLES.NOTARY && doc.submission_state === 'pending';
 
-    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary && !isPublicPending) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const mappedDoc = mapToDetailedDoc(doc);
@@ -749,8 +763,9 @@ router.get('/:id/preview', withDomain('DOCS'), requirePrivilege({ capability: 'D
     const isOwner = Number(doc.user_id) === userId;
     const isAssignedNotary = Number(doc.notary_id) === userId;
     const isUnassignedNotary = role === ROLES.NOTARY && !doc.notary_id;
+    const isPublicPending = role === ROLES.NOTARY && doc.submission_state === 'pending';
 
-    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary && !isPublicPending) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -784,8 +799,9 @@ router.get('/:id/file', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_
     const isOwner = Number(doc.user_id) === userId;
     const isAssignedNotary = Number(doc.notary_id) === userId;
     const isUnassignedNotary = role === ROLES.NOTARY && !doc.notary_id;
+    const isPublicPending = role === ROLES.NOTARY && doc.submission_state === 'pending';
 
-    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
+    if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary && !isPublicPending) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 

@@ -87,8 +87,15 @@ async function handleEvent(userId, type, documentId = null, meta = {}) {
       const userRes = await pool.query("SELECT wallet_address FROM users WHERE id = $1", [userId]);
       if (userRes.rows.length > 0 && userRes.rows[0].wallet_address) {
         const ntkService = require('./ntk.service');
-        // Fire-and-forget
-        ntkService.burnNTKForAction(userRes.rows[0].wallet_address);
+        const walletAddress = userRes.rows[0].wallet_address;
+        console.log(`[REPUTATION] Triggering NTK burn for notary ${walletAddress} (userId: ${userId})`);
+        
+        // Fire-and-forget but with tracking
+        ntkService.burnNTKForAction(walletAddress).catch(burnErr => {
+            console.error(`[REPUTATION_BURN_CRITICAL] Failed to burn NTK for ${walletAddress}: ${burnErr.message}`);
+        });
+      } else {
+          console.warn(`[REPUTATION_WARN] Could not trigger NTK burn: No wallet found for userId ${userId}`);
       }
     }
   } catch (err) {
@@ -109,12 +116,15 @@ async function handleEvent(userId, type, documentId = null, meta = {}) {
 async function assignNotary(documentId) {
   try {
     const notaryRes = await pool.query(
-      `SELECT id, effective_reputation 
-       FROM users 
-       WHERE role = 'notary' 
-         AND (is_active IS NULL OR is_active = true)
-         AND (is_banned IS NULL OR is_banned = false)
-       ORDER BY id ASC`
+      `SELECT u.id, u.effective_reputation, 
+              COUNT(d.id) FILTER (WHERE d.submission_state = 'pending') as workload
+       FROM users u
+       LEFT JOIN documents d ON d.notary_id = u.id
+       WHERE u.role = 'notary' 
+         AND (u.is_active IS NULL OR u.is_active = true)
+         AND (u.is_banned IS NULL OR u.is_banned = false)
+       GROUP BY u.id, u.effective_reputation
+       ORDER BY u.id ASC`
     );
 
     const notaries = notaryRes.rows;
@@ -128,9 +138,16 @@ async function assignNotary(documentId) {
 
     if (notaries.length < 3) {
       selectedNotary = notaries[Math.floor(Math.random() * notaries.length)];
-      console.log(`[ASSIGNMENT] Bootstrap mode | selected=${selectedNotary.id} | docId=${documentId}`);
+      console.log(`[ASSIGNMENT] Bootstrap mode | selected=${selectedNotary.id} | docId=${documentId} | workload=${selectedNotary.workload}`);
     } else {
-      const weights = notaries.map(n => Math.max(0, parseFloat(n.effective_reputation) || 0));
+      // ⚖️ WORKLOAD-BALANCED WEIGHTING (Fairness Fix)
+      // Weight = Reputation / (1 + Workload)
+      const weights = notaries.map(n => {
+          const rep = Math.max(0, parseFloat(n.effective_reputation) || 0);
+          const workload = parseInt(n.workload) || 0;
+          return rep / (1 + workload);
+      });
+      
       const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
       if (totalWeight === 0) {
