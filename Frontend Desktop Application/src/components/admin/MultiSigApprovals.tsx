@@ -341,7 +341,7 @@ export function MultiSigApprovals() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden min-h-0">
       {/* Header */}
       <div className="flex-none p-8 pt-10 pb-8 border-b border-border bg-background">
         <div className="flex justify-between items-end">
@@ -488,7 +488,7 @@ export function MultiSigApprovals() {
     </div>
 
       <Dialog open={detailsDialog.open} onOpenChange={(open) => setDetailsDialog({ ...detailsDialog, open })}>
-        <DialogContent className="max-w-7xl w-[98vw] bg-card border-border shadow-2xl overflow-hidden p-0 rounded-3xl flex flex-col max-h-[65vh] select-none outline-none">
+        <DialogContent className="max-w-7xl w-[98vw] bg-[#0b101f] border-border shadow-2xl overflow-hidden p-0 rounded-3xl flex flex-col max-h-[65vh] select-none outline-none !opacity-100">
           <DialogHeader className="bg-primary/5 p-4 border-b border-border/50 text-left">
             <div className="space-y-1.5 pr-8">
               <div className="flex items-center gap-2 flex-wrap">

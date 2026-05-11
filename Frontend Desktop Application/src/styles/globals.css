@@ -187,3 +187,38 @@
 html {
   font-size: var(--font-size);
 }
+
+/* 🛡️ GLOBAL HARDENING: MODAL TRANSPARENCY & SCROLLING */
+[data-slot="dialog-content"] {
+  background-color: #0b101f !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-slot="dialog-overlay"] {
+  backdrop-filter: blur(8px) !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+.flex-1.overflow-y-auto {
+  min-height: 0;
+  height: 100%;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

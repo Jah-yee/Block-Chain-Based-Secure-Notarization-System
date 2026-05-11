@@ -91,7 +91,7 @@ export function SystemLogs() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden min-h-0" style={{ height: '100%' }}>
       {/* Header */}
       <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
         <div className="space-y-8">
@@ -138,9 +138,8 @@ export function SystemLogs() {
         </div>
       </div>
 
-      {/* Logs Table */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-        <div className="p-8 pb-32">
+      {/* Logs Table Area */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-8" style={{ height: '0px', flex: '1 1 0%', minHeight: '0px' }}>
         {isLoading && logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 bg-card border border-border rounded-3xl">
             <Loader2 className="h-10 w-10 animate-spin text-primary/40 mb-4" />
@@ -152,9 +151,9 @@ export function SystemLogs() {
             <p className="text-muted-foreground font-medium uppercase tracking-widest text-[10px]">No logs found in this query</p>
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-card border border-border rounded-xl overflow-x-auto shadow-sm">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-background shadow-sm">
+              <TableHeader className="sticky top-0 z-20 bg-card shadow-sm">
                 <TableRow className="border-border hover:bg-transparent bg-muted/10">
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[160px] pl-6">Timestamp</TableHead>
                   <TableHead className="py-3 text-muted-foreground uppercase text-[10px] font-black tracking-widest w-[180px]">Actor</TableHead>
@@ -198,10 +197,12 @@ export function SystemLogs() {
             </Table>
           </div>
         )}
+        
+        </div>
 
-        {/* Summary Footer */}
-        {!isLoading && (
-          <div className="mt-6 flex items-center justify-between text-[10px] text-muted-foreground uppercase font-black tracking-widest px-1">
+        {/* Summary Footer - Pinned to bottom of the content area */}
+        {!isLoading && logs.length > 0 && (
+          <div className="flex-none py-4 px-8 border-t border-border/50 bg-background/80 backdrop-blur-md flex items-center justify-between text-[10px] text-muted-foreground uppercase font-black tracking-widest">
             <span>Showing {filteredLogs.length} of {logs.length} indexed records</span>
             <span className="text-primary/40 italic flex items-center gap-1">
               <Shield className="w-3 h-3" />
@@ -209,8 +210,7 @@ export function SystemLogs() {
             </span>
           </div>
         )}
-      </div>
-    </div>
+
 
       {/* Details Modal */}
       <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>

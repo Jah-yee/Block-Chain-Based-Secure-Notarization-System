@@ -147,13 +147,19 @@ export default function App() {
     console.log("[SESSION] Initializing resilient recovery flow...");
     try {
       const systemStatus = await api.request("/api/auth/system-status");
-      if (systemStatus) {
-        const canProceed = systemStatus.activated === true || systemStatus.hasUsers === true;
-        if (!canProceed) {
+      console.log("[STARTUP] System Status:", systemStatus);
+
+      const canProceed = systemStatus.activated === true || systemStatus.hasUsers === true;
+
+      if (!canProceed) {
+          console.log("[STARTUP] System not initialized. Redirecting to Genesis...");
+          // 🛡️ [HARDENING] Clear any stale session data if system is uninitialized
+          if (typeof window !== 'undefined' && (window as any).electronAPI) {
+              await (window as any).electronAPI.auth.logout();
+          }
           setAppState("initialize-system");
           setIsRecovering(false);
           return;
-        }
       }
 
       const session = await (window as any).electronAPI.auth.getSession();
@@ -340,8 +346,8 @@ export default function App() {
             </aside>
 
             {/* 📊 RIGHT: INTEGRATED WORKSPACE */}
-            <main className="flex-1 flex flex-col min-w-0 py-8 justify-between h-full">
-              <div className="flex flex-col gap-16">
+            <main className="flex-1 flex flex-col min-w-0 py-8 h-full overflow-y-auto custom-scrollbar pr-4">
+              <div className="flex flex-col gap-16 min-h-full">
                 {/* 🏆 Refined Header */}
                 <div className="flex items-center justify-between px-4">
                   <div className="space-y-3">
@@ -371,7 +377,7 @@ export default function App() {
                       <h3 className="text-[14px] font-black text-slate-500 uppercase tracking-[0.6em]">Registry Module Integrity</h3>
                       <div className="w-20 h-1.5 bg-blue-600/30 rounded-full shadow-[0_0_15px_rgba(37,99,235,0.2)]" />
                    </div>
-                   <div className="max-h-[380px] overflow-y-auto custom-scrollbar bg-black/20 rounded-[3rem] border border-white/5 p-8 shadow-2xl">
+                   <div className="flex-1 min-h-[300px] bg-black/20 rounded-[3rem] border border-white/5 p-8 shadow-2xl overflow-y-auto custom-scrollbar">
                       <DeploymentChecklist config={config} />
                    </div>
                 </div>
@@ -415,9 +421,9 @@ export default function App() {
         {appState === "notary-login" && <NotaryLogin onLogin={recoverSession} onBack={() => setAppState("role-selection")} />}
 
         {appState === "admin-app" && (
-          <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex min-h-0 h-full overflow-hidden" style={{ height: 'calc(100vh - 48px)' }}>
             <Sidebar role="admin" user={user} activeScreen={adminScreen} onNavigate={(s) => setAdminScreen(s as AdminScreen)} onLogout={() => setLogoutDialogOpen(true)} alertCount={alertCount} isCollapsed={isSidebarCollapsed} onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />
-            <main className="flex-1 bg-background overflow-hidden flex flex-col">
+            <main className="flex-1 bg-background overflow-hidden flex flex-col h-full min-h-0" style={{ height: '100%' }}>
               {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
               {adminScreen === "manage-notaries" && <ManageNotaries />}
               {adminScreen === "governance" && <Governance role="admin" user={user} />}

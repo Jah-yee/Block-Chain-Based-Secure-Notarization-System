@@ -13,8 +13,8 @@ const REGEX = {
     EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
     // Enforces: Exactly 10 digits
     PHONE: /^[0-9]{10}$/,
-    // Enforces: 6-30 alphanumeric characters and spaces
-    ALPHA_NUMERIC: /^[A-Za-z0-9 ]{6,30}$/,
+    // Enforces: 6-30 alphanumeric characters, spaces, dots, and hyphens
+    ALPHA_NUMERIC: /^[A-Za-z0-9 .\-]{6,30}$/,
     // Enforces: Ethereum format
     WALLET: /^0x[a-fA-F0-9]{40}$/
 };

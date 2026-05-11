@@ -246,11 +246,13 @@ export function ManageNotaries() {
         await api.approveNotaryApplication(targetId);
         toast.success("Application approved in database");
 
-        // 🛡️ [GOVERNANCE_SYNC] Trigger On-Chain Promotion Dialog
-        setPromotionDialog({
-          open: true,
-          application: targetApp
-        });
+        // 🛡️ [GOVERNANCE_SYNC] Trigger On-Chain Promotion Dialog with small delay to avoid modal collision
+        setTimeout(() => {
+          setPromotionDialog({
+            open: true,
+            application: targetApp
+          });
+        }, 100);
       } else {
         await api.rejectNotaryApplication(targetId);
         toast.success("Application rejected");
@@ -339,7 +341,8 @@ export function ManageNotaries() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
+    <>
+    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden min-h-0">
       <div className="flex-none p-8 pt-10 pb-8 border-b border-border/50 bg-background">
         <h1 className="text-3xl font-bold text-foreground tracking-tight leading-none mb-2">Notary Management</h1>
         <p className="text-sm text-muted-foreground font-medium">
@@ -347,7 +350,7 @@ export function ManageNotaries() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+      <div className="flex-1 overflow-y-auto custom-scrollbar relative" style={{ height: '0px', flex: '1 1 0%', minHeight: '0px' }}>
         <div className="p-8 pb-32">
 
           {syncError && (
@@ -501,9 +504,15 @@ export function ManageNotaries() {
           </div>
         </div>
 
-        {/* Confirmation Dialog */}
-        <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
-          <DialogContent className="bg-card border-border text-foreground">
+      </div>
+    </div>
+
+    {/* ── Dialogs rendered at root level so backdrop covers the full window ── */}
+
+    {/* Confirmation Dialog */}
+    <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
+      <DialogContent className="bg-[#0b101f] border-border text-foreground !opacity-100 shadow-2xl">
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#0b101f', zIndex: -1, borderRadius: 'inherit' }} />
             <DialogHeader>
               <DialogTitle>Confirm {confirmDialog.action === "approve" ? "Approval" : "Rejection"}</DialogTitle>
               <DialogDescription className="text-muted-foreground">
@@ -531,12 +540,13 @@ export function ManageNotaries() {
                 Confirm
               </Button>
             </DialogFooter>
-          </DialogContent>
-        </Dialog>
+      </DialogContent>
+    </Dialog>
 
-        {/* View Details Dialog */}
-        <Dialog open={viewDialog.open} onOpenChange={(open) => setViewDialog({ ...viewDialog, open })}>
-          <DialogContent className="bg-card border-border text-foreground max-w-2xl">
+    {/* View Details Dialog */}
+    <Dialog open={viewDialog.open} onOpenChange={(open) => setViewDialog({ ...viewDialog, open })}>
+      <DialogContent className="bg-[#0b101f] border-border text-foreground max-w-2xl !opacity-100 shadow-2xl">
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#0b101f', zIndex: -1, borderRadius: 'inherit' }} />
             <DialogHeader>
               <DialogTitle>Application Details</DialogTitle>
               <DialogDescription className="text-muted-foreground">
@@ -670,18 +680,20 @@ export function ManageNotaries() {
                 return null;
               })()}
             </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        {/* 🛡️ Direct Sync Dialog (Post-Approval) */}
-        <Dialog open={promotionDialog.open} onOpenChange={(open) => setPromotionDialog({ ...promotionDialog, open })}>
-          <DialogContent className="bg-[#0d1425] border-amber-500/30 text-white max-w-md rounded-2xl shadow-2xl">
+      </DialogContent>
+    </Dialog>
+
+    {/* 🛡️ Direct Sync Dialog (Post-Approval) */}
+    <Dialog open={promotionDialog.open} onOpenChange={(open) => setPromotionDialog({ ...promotionDialog, open })}>
+      <DialogContent className="bg-[#0d1425] border-amber-500/30 text-white max-w-md rounded-2xl shadow-2xl !opacity-100">
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#0d1425', zIndex: -1, borderRadius: 'inherit' }} />
             <DialogHeader>
               <div className="flex justify-center mb-6">
                 <div className="p-4 bg-amber-500/10 rounded-2xl border border-amber-500/20 shadow-inner">
                   <ShieldCheck size={48} className="text-amber-500 animate-pulse" />
                 </div>
               </div>
-              <DialogTitle className="text-center text-2xl font-bold tracking-tight text-foreground">Activation Complete</DialogTitle>
+              <DialogTitle className="text-center text-2xl font-bold tracking-tight text-white">Activation Complete</DialogTitle>
               <DialogDescription className="text-center text-slate-400 mt-2 px-4">
                 The application for <span className="text-amber-400 font-bold">{promotionDialog.application?.name || promotionDialog.application?.full_name}</span> is now approved.
                 <br /><br />
@@ -728,10 +740,9 @@ export function ManageNotaries() {
                 I'll Sync Later
               </Button>
             </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

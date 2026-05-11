@@ -911,7 +911,7 @@ export function Governance({ role, user }: GovernanceProps) {
                         </Card>
                     ) : (
                         <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-                            <div className="max-h-[420px] overflow-y-auto divide-y divide-border/30 scrollbar-thin scrollbar-thumb-primary/10">
+                            <div className="divide-y divide-border/30">
                                 {proposals
                                     .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected')
                                     .map((prop) => (

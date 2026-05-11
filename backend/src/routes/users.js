@@ -107,16 +107,15 @@ router.post("/register", withDomain('USERS'), allowPublic, requirePrivilege({ ca
         throw sigErr;
       }
 
-      // Step 2: Check duplicates
-      const existing = await auditClient.query(
-        'SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(wallet_address) = $2',
-        [email, normalizedWalletAddress]
-      );
-      if (existing.rows.length > 0) {
-        const err = new Error('Email or wallet address already registered');
-        err.statusCode = 409;
-        throw err;
-      }
+      // Step 2: Global Identity Check (Cross-table uniqueness)
+      // 🛡️ [Hardening] This prevents users from registering with emails/wallets already used in 
+      // pending notary applications, ensuring a clean identity map.
+      await UserService.checkGlobalUniqueness({
+        email,
+        walletAddress: normalizedWalletAddress,
+        nationalIdHash: national_id_hash,
+        nationalIdNumber: normalizedNationalId
+      }, auditClient);
 
       // Step 3: Create user (USERS INSERT)
       const newUser = await UserService.createUser({
