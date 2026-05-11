@@ -66,9 +66,26 @@ function ActivationForm() {
     }
 
     const handleSignAndFinalize = async () => {
-        if (!token || !appInfo || !connectedWallet) return
+        console.log("🚀 [ACTIVATION] Starting finalization...", {
+            token: !!token,
+            appInfo: !!appInfo,
+            connectedWallet
+        });
+
+        if (!token || !appInfo || !connectedWallet) {
+            toast({ 
+                title: "Incomplete Setup", 
+                description: "Please ensure your wallet is connected and the link is valid.", 
+                variant: "destructive" 
+            });
+            return;
+        }
 
         if (connectedWallet.toLowerCase() !== appInfo.wallet.toLowerCase()) {
+            console.error("❌ [ACTIVATION] Wallet mismatch", {
+                expected: appInfo.wallet,
+                actual: connectedWallet
+            });
             toast({ 
                 title: "Wrong Wallet", 
                 description: `Please switch MetaMask to: ${appInfo.wallet.substring(0, 8)}...`, 
@@ -89,20 +106,26 @@ function ActivationForm() {
 
         setIsLoading(true)
         try {
+            console.log("🛰️ [ACTIVATION] Requesting nonce...");
             // 1. Fetch Nonce
             const nonceData = await apiClient.post("/auth/nonce", {
                 wallet_address: connectedWallet,
                 purpose: 'NOTARY_ACTIVATE'
             });
             const { nonce: receivedNonce, message_template } = nonceData;
+            console.log("✅ [ACTIVATION] Nonce received:", receivedNonce);
 
             // 2. Sign custom message
             if (!window.ethereum) throw new Error("Ethereum provider not found");
             const provider = new ethers.BrowserProvider(window.ethereum as any);
             const signer = await provider.getSigner();
+            
+            console.log("✍️ [ACTIVATION] Requesting signature...");
             const sig = await signer.signMessage(message_template);
+            console.log("✅ [ACTIVATION] Signature captured.");
 
             // 3. Finalize Activation
+            console.log("🔥 [ACTIVATION] Submitting final payload...");
             await apiClient.post("/auth/activate", {
                 token,
                 password,
@@ -114,7 +137,8 @@ function ActivationForm() {
             setStep('SUCCESS')
             toast({ title: "Account Activated", description: "Your notary profile is now live." })
         } catch (err: any) {
-            toast({ title: "Activation Failed", description: err.message, variant: "destructive" })
+            console.error("❌ [ACTIVATION_ERROR]", err);
+            toast({ title: "Activation Failed", description: err.message || "An unexpected error occurred during activation.", variant: "destructive" })
         } finally {
             setIsLoading(false)
         }

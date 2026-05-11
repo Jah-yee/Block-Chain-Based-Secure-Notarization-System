@@ -379,8 +379,8 @@ export function FaceLivenessScan({ onPassed }: FaceLivenessScanProps) {
     const getTaskInstruction = (task: LivenessTask) => {
         switch (task) {
             case "smile": return "Please smile for the camera"
-            case "turnLeft": return "Turn your head slightly LEFT"
-            case "turnRight": return "Turn your head slightly RIGHT"
+            case "turnLeft": return "Turn your head slightly RIGHT"
+            case "turnRight": return "Turn your head slightly LEFT"
             default: return "Verification in progress..."
         }
     }

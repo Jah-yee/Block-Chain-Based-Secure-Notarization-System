@@ -506,6 +506,75 @@ router.get('/', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_LIST' })
   }
 });
 
+// ─── GET /api/documents/:id/certificate ───────────────────────────────────────
+// Returns structured on-chain proof data for a notarized document.
+// Only accessible by the document owner.
+router.get('/:id/certificate', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ' }), withAction('DOC_READ'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const actor = req.actor;
+
+    const query = `
+      SELECT d.id, d.filename, d.title, d.file_hash, d.submission_state, d.chain_confirmed,
+             d.approval_tx_hash, d.tx_hash, d.tx_status, d.notary_id, d.created_at,
+             d.status_updated_at, d.updated_at,
+             u.wallet_address as notary_wallet, u.name as notary_name
+      FROM documents d
+      LEFT JOIN users u ON d.notary_id = u.id
+      WHERE d.id = $1 AND d.user_id = $2 AND d.is_deleted = false
+    `;
+
+    const r = await pool.query(query, [id, actor.id]);
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found or access denied' });
+    }
+
+    const doc = r.rows[0];
+
+    // Only issue a certificate for notarized documents
+    const isNotarized = doc.submission_state === 'completed' ||
+                        doc.submission_state === 'submitted_to_blockchain' ||
+                        doc.chain_confirmed === true;
+
+    if (!isNotarized) {
+      return res.status(422).json({ error: 'Document has not been notarized yet' });
+    }
+
+    // Fetch contract address from config for the certificate
+    const config = await ConfigService.getConfig();
+    const chainId = Number(config.chainId);
+    const contractAddress = config.contracts.documentRegistry;
+
+    // Derive block explorer URL from chainId
+    const explorerBase = chainId === 56
+      ? 'https://bscscan.com'
+      : 'https://testnet.bscscan.com';
+
+    const approvalTxHash = doc.approval_tx_hash || doc.tx_hash || null;
+
+    res.json({
+      document_id: doc.id,
+      filename: doc.filename,
+      title: doc.title || doc.filename,
+      file_hash: doc.file_hash,
+      submission_state: doc.submission_state,
+      chain_confirmed: doc.chain_confirmed,
+      approval_tx_hash: approvalTxHash,
+      notarized_at: doc.status_updated_at || doc.updated_at,
+      notary_wallet: doc.notary_wallet || null,
+      notary_name: doc.notary_name || null,
+      contract_address: contractAddress,
+      chain_id: chainId,
+      block_explorer_url: approvalTxHash ? `${explorerBase}/tx/${approvalTxHash}` : null,
+      contract_explorer_url: `${explorerBase}/address/${contractAddress}`
+    });
+
+  } catch (err) {
+    console.error('[CERTIFICATE_ERROR]', err);
+    res.status(500).json({ error: 'Failed to generate certificate' });
+  }
+});
+
 // GET /api/documents/:id/signature-payload
 // Provides the EIP-712 payload for a notary to sign
 router.get('/:id/signature-payload', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_SIGNATURE_PAYLOAD' }), withAction('DOC_SIGNATURE_PAYLOAD'), async (req, res) => {
@@ -656,7 +725,8 @@ router.get('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_READ'
     if (role !== ROLES.ADMIN && !isOwner && !isAssignedNotary && !isUnassignedNotary) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    res.json(sanitizeDocument(doc, req.actor));
+    const mappedDoc = mapToDetailedDoc(doc);
+    res.json(sanitizeDocument(mappedDoc, req.actor));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch document' });

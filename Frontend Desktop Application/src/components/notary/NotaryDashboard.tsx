@@ -112,7 +112,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     return (
         <div className="h-full flex flex-col min-h-0 bg-[#07090e]">
             {/* Header */}
-            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm p-8 pt-12 pb-6">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-foreground mb-1">
@@ -136,7 +136,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
 
             {/* Content area with Admin-grade constraints */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                <div className="max-w-7xl mx-auto p-8 space-y-8 pb-24">
+                <div className="max-w-7xl mx-auto p-4 lg:p-6 space-y-6 pb-24">
                 {error && (
                     <div className="p-4 bg-destructive/10 border border-destructive/50 rounded-xl text-destructive text-sm">
                         {error}

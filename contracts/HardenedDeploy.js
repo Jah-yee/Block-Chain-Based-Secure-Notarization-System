@@ -28,16 +28,17 @@ async function main() {
     const deployerWallet = new ethers.Wallet(process.env.BNB_SYSTEM_PRIVATE_KEY, provider);
 
     // Role Separation Simulation
-    const relayerWallet = ethers.Wallet.createRandom().connect(provider);
+    // We use the known KMS address as the initial relayer so the backend can distribute NTK.
+    const KMS_RELAYER_ADDRESS = "0x11FBDd7F0895526a6945C114e0fBaDF4Bf6159b3";
     const unauthorizedWallet = ethers.Wallet.createRandom().connect(provider);
 
     const founder = deployerWallet.address;
-    const GENESIS_TARGET_WALLET = "0x02252Db03aF7CD8C8d3eC6CFd3AE5f6dab69ACd0";
+    const GENESIS_TARGET_WALLET = "0xa2E179f85B1efd03e8c12a7751928653977f7ad2";
 
     console.log(`\n====================================================`);
     console.log(`🚀 BBSNS HARDENED DEPLOYMENT SEQUENCE STARTED`);
     console.log(`👤 Deployer/Founder: ${founder}`);
-    console.log(`👤 Relayer (Temp):   ${relayerWallet.address}`);
+    console.log(`👤 Relayer (KMS):   ${KMS_RELAYER_ADDRESS}`);
     console.log(`🌐 Network:         ${process.env.BNB_TESTNET_RPC_URL}`);
     console.log(`====================================================\n`);
 
@@ -103,13 +104,13 @@ async function main() {
 
     try {
         // STEP 0.1: Fund Auxiliary Wallets
-        console.log(`\n[STEP 0.1] Funding Relayer Wallet for Gas...`);
+        console.log(`\n[STEP 0.1] Funding Unauthorized Wallet for Negative Tests...`);
         const fundTx = await deployerWallet.sendTransaction({
-            to: relayerWallet.address,
-            value: ethers.parseEther("0.05") // 0.05 BNB
+            to: unauthorizedWallet.address,
+            value: ethers.parseEther("0.01") // 0.01 BNB
         });
         await fundTx.wait();
-        console.log(`   ✅ Relayer funded: 0.05 BNB\n`);
+        console.log(`   ✅ Test wallet funded: 0.01 BNB\n`);
 
         // STEP 1: Buy-In (MultiSig)
         console.log(`[STEP 1] Deploying BBSNSMultiSig...`);
@@ -145,7 +146,7 @@ async function main() {
 
         // STEP 4: Token and Registry
         console.log(`\n[STEP 4] Deploying NTKToken & NotaryRegistry...`);
-        const ntk = await deploy("NTKToken", "NTK", relayerWallet.address); // Bound to relayer initially
+        const ntk = await deploy("NTKToken", "NTK", KMS_RELAYER_ADDRESS); // Bound to KMS relayer initially
         
         // Deploy NotaryRegistry pointing to GenesisActivation as initial governance
         const notaryRegistry = await deploy("NotaryRegistry", "NotaryRegistry", await genesisActivation.getAddress());
@@ -157,6 +158,11 @@ async function main() {
         // STEP 5: DocumentRegistry
         console.log(`\n[STEP 5] Deploying DocumentRegistry...`);
         const docRegistry = await deploy("DocumentRegistry", "DocumentRegistry", await notaryRegistry.getAddress(), await ntk.getAddress());
+
+        console.log(`\n[STEP 5.1] Granting RELAYER_ROLE to DocumentRegistry...`);
+        const RELAYER_ROLE = ethers.keccak256(ethers.toUtf8Bytes("RELAYER_ROLE"));
+        await (await ntk.grantRole(RELAYER_ROLE, await docRegistry.getAddress())).wait();
+        console.log(`   ✅ DocumentRegistry authorized to burn NTK.`);
 
         // STEP 6: Execute Genesis NFT Minting
         console.log(`\n[STEP 6] Minting GenesisNFT to Target Admin...`);

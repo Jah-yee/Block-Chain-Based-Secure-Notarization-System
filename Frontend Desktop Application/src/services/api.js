@@ -135,6 +135,10 @@ const api = {
     return this.request(`/api/documents/${id}`);
   },
 
+  async getCertificate(id) {
+    return this.request(`/api/documents/${id}/certificate`);
+  },
+
   async getDocumentFile(id, mimetype = 'application/pdf') {
     await ensureConfig();
     const endpoint = `/api/documents/${id}/file`;

@@ -383,7 +383,60 @@ function App() {
         return;
       }
 
-      if (parsedPayload && isDirect) {
+      if (notarizeMetadata && !isDirect) {
+        // 🛡️ [Step B] Notarize-Mode EIP-712 Signing (GASLESS)
+        console.log(`[AUTH] Initiating Gasless Notarization Signing for doc: ${notarizeMetadata.docHash}`);
+        
+        const domain = {
+          name: "BBSNS_Protocol",
+          version: "1",
+          chainId: config.chainId,
+          verifyingContract: config.contracts.documentRegistry
+        };
+
+        const types = {
+          Notarize: [
+            { name: 'docHash', type: 'bytes32' },
+            { name: 'ownerAddress', type: 'address' },
+            { name: 'status', type: 'uint8' },
+            { name: 'summaryHash', type: 'bytes32' },
+            { name: 'rejectionReasonHash', type: 'bytes32' },
+            { name: 'timestamp', type: 'uint256' },
+            { name: 'nonce', type: 'uint256' }
+          ]
+        };
+
+        const message = {
+          ...notarizeMetadata,
+          status: Number(notarizeMetadata.status),
+          timestamp: Number(notarizeMetadata.timestamp),
+          nonce: BigInt(notarizeMetadata.nonce).toString()
+        };
+
+        console.log("[AUTH] Signing Notarize Payload (Gasless):", { domain, types, message });
+        
+        const signature = await signer.signTypedData(domain, types, message);
+        console.log("[AUTH] Notarization signature obtained. Relaying to authority via atomic-bind...");
+
+        const bindRes = await fetch(`${BACKEND_URL}/auth/remote/atomic-bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            signature,
+            walletAddress: address,
+            timestamp: notarizeMetadata.timestamp
+          })
+        });
+
+        if (!bindRes.ok) {
+          const data = await bindRes.json().catch(() => ({}));
+          throw new Error(data.error || "Notarization Relay Failed");
+        }
+
+        setStatus("authorized");
+        setTimeout(() => window.close(), 10000);
+      } else if (parsedPayload && isDirect) {
         // DIRECT TRANSACTION (Self-Paid)
         const contractAddr = parsedPayload.domain.verifyingContract;
         const abi = [
@@ -444,59 +497,6 @@ function App() {
 
         setStatus("authorized");
         setTimeout(() => window.close(), 10000);
-      } else if (notarizeMetadata) {
-        // 🛡️ [Step B] Notarize-Mode EIP-712 Signing
-        console.log(`[AUTH] Initiating Notarization Signing for doc: ${notarizeMetadata.docHash}`);
-        
-        const domain = {
-          name: "BBSNS_Protocol",
-          version: "1",
-          chainId: config.chainId,
-          verifyingContract: config.contracts.documentRegistry
-        };
-
-        const types = {
-          Notarize: [
-            { name: 'docHash', type: 'bytes32' },
-            { name: 'ownerAddress', type: 'address' },
-            { name: 'status', type: 'uint8' },
-            { name: 'summaryHash', type: 'bytes32' },
-            { name: 'rejectionReasonHash', type: 'bytes32' },
-            { name: 'timestamp', type: 'uint256' },
-            { name: 'nonce', type: 'uint256' }
-          ]
-        };
-
-        const message = {
-          ...notarizeMetadata,
-          status: Number(notarizeMetadata.status),
-          timestamp: Number(notarizeMetadata.timestamp),
-          nonce: BigInt(notarizeMetadata.nonce).toString()
-        };
-
-        console.log("[AUTH] Signing Notarize Payload:", { domain, types, message });
-        
-        const signature = await signer.signTypedData(domain, types, message);
-        console.log("[AUTH] Notarization signature obtained. Relaying to authority...");
-
-        const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            signature,
-            walletAddress: address,
-            timestamp: notarizeMetadata.timestamp
-          })
-        });
-
-        if (!bindRes.ok) {
-          const data = await bindRes.json().catch(() => ({}));
-          throw new Error(data.error || "Notarization Relay Failed");
-        }
-
-        setStatus("authorized");
-        setTimeout(() => window.close(), 10000);
       } else if (handshakeDomain && handshakeTypes) {
         // 🛡️ [Hardening 11.3] Atomic Single-Signature Handshake
         console.log(`[AUTH] Initiating Atomic Handshake for sessionId: ${sessionId}`);
@@ -520,7 +520,7 @@ function App() {
           return;
         }
 
-        const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
+        const bindRes = await fetch(`${BACKEND_URL}/auth/remote/atomic-bind`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -801,10 +801,16 @@ function App() {
             <>
               <div className="address-chip" style={{ marginBottom: "1rem" }}>{walletAddress}</div>
               {challenge?.includes('"domain"') ? (
-                  <button className="button" onClick={() => handleAuthorize(true)} style={{ width: '100%' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                  <button className="button" onClick={() => handleAuthorize(false)} style={{ width: '100%' }}>
                     <Shield size={18} style={{ marginRight: "10px" }} />
-                    Approve & Pay Gas
+                    Approve (Gasless)
                   </button>
+                  <button className="button" style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }} onClick={() => handleAuthorize(true)}>
+                    <Wallet size={18} style={{ marginRight: "10px" }} />
+                    Approve & Pay Gas (Direct)
+                  </button>
+                </div>
               ) : (
                 <button className="button" onClick={() => handleAuthorize(false)}>
                   <LogIn size={18} style={{ marginRight: "10px" }} />

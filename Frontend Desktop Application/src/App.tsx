@@ -461,7 +461,12 @@ export default function App() {
 
       <Dialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
         <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-2xl">
-          <DialogHeader><DialogTitle className="text-xl font-bold uppercase">Terminate Session?</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold uppercase">Terminate Session?</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Are you sure you want to log out? Any unsaved changes may be lost.
+            </DialogDescription>
+          </DialogHeader>
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => setLogoutDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleLogoutConfirm} className="bg-red-500 hover:bg-red-600 font-bold">Log Out</Button>

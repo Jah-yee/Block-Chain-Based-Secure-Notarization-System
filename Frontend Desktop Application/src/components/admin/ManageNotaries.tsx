@@ -60,6 +60,7 @@ export function ManageNotaries() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeProposals, setActiveProposals] = useState<any[]>([]);
   const [adminSettings, setAdminSettings] = useState<{ threshold: number; signers: string[] } | null>(null);
+  const [inFlightPromotions, setInFlightPromotions] = useState<Record<string, boolean>>({});
 
   // ===============================
   // BLOCKCHAIN AUDIT LOGIC
@@ -273,11 +274,10 @@ export function ManageNotaries() {
 
   const handleDirectOnChainPromotion = async (app: any) => {
     try {
+      const wallet = app.wallet_address.toLowerCase();
       const configRes = await api.getSystemConfig();
       const baseAuthUrl = configRes.remoteAuthUrl.replace(/\/$/, "");
       
-      // 🛡️ [REMOTE_HANDSHAKE] Open Remote Auth portal in "promote" mode
-      // This mode doesn't require a sessionId as it uses direct wallet execution
       const remoteUrl = `${baseAuthUrl}/?mode=promote&targetAddress=${app.wallet_address}`;
 
       toast.info("Opening secure authorization portal in your browser...");
@@ -290,11 +290,36 @@ export function ManageNotaries() {
         window.open(remoteUrl, "_blank");
       }
 
-      // 🛡️ [UI_SYNC] Update view dialog
-      setViewDialog({ ...viewDialog, open: false });
+      // 🛡️ [STATE_LOCK] Mark as in-flight
+      setInFlightPromotions(prev => ({ ...prev, [wallet]: true }));
       
-      // Periodically refresh to catch the on-chain status update
-      setTimeout(() => loadApplications(), 15000);
+      // 🛡️ [INTELLIGENT_POLLING] Poll every 5s for 2 minutes or until verified
+      let attempts = 0;
+      const maxAttempts = 24; // 24 * 5s = 120s
+      
+      const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+          console.log(`📡 [POLL_${attempts}] Checking on-chain status for ${wallet}...`);
+          const res = await api.getOnChainRole(wallet);
+          
+          if (res.data.isOnChain) {
+            console.log(`✅ [POLL_SUCCESS] ${wallet} is now verified on-chain!`);
+            setOnChainStatuses(prev => ({ ...prev, [wallet]: true }));
+            setInFlightPromotions(prev => ({ ...prev, [wallet]: false }));
+            toast.success(`Blockchain role finalized for ${app.full_name || app.name}`);
+            clearInterval(pollInterval);
+            loadApplications(); // Full refresh
+          } else if (attempts >= maxAttempts) {
+            console.warn(`⏳ [POLL_TIMEOUT] ${wallet} promotion still pending after 2m.`);
+            setInFlightPromotions(prev => ({ ...prev, [wallet]: false }));
+            clearInterval(pollInterval);
+          }
+        } catch (err) {
+          console.error(`❌ [POLL_ERROR] ${wallet}:`, err);
+        }
+      }, 5000);
+
     } catch (err: any) {
       console.error("[PROMOTION_FAIL]", err);
       toast.error(err.message || "Failed to initiate remote promotion.");
@@ -666,14 +691,26 @@ export function ManageNotaries() {
                 if (viewDialog.application?.wallet_address &&
                   (normalizeStatus(viewDialog.application.status) === 'APPROVED' || normalizeStatus(viewDialog.application.status) === 'ACTIVATED') &&
                   !isVerified) {
+                  
+                  const isInFlight = inFlightPromotions[wallet || ""];
 
                   return (
                     <Button
                       onClick={() => handleDirectOnChainPromotion(viewDialog.application)}
-                      className="bg-amber-600 hover:bg-amber-700 hover:scale-[1.02] active:scale-[0.98] text-white px-8 h-12 rounded-xl font-bold shadow-lg shadow-amber-900/40 transition-all border border-amber-500/30 flex items-center gap-2 group"
+                      disabled={isInFlight}
+                      className={`${isInFlight ? 'bg-slate-700 opacity-50 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 hover:scale-[1.02]'} text-white px-8 h-12 rounded-xl font-bold shadow-lg shadow-amber-900/40 transition-all border border-amber-500/30 flex items-center gap-2 group`}
                     >
-                      <ShieldCheck size={18} className="group-hover:rotate-12 transition-transform" />
-                      Finalize Blockchain Role
+                      {isInFlight ? (
+                        <>
+                          <RotateCw size={18} className="animate-spin" />
+                          Finalizing on Blockchain...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={18} className="group-hover:rotate-12 transition-transform" />
+                          Finalize Blockchain Role
+                        </>
+                      )}
                     </Button>
                   );
                 }

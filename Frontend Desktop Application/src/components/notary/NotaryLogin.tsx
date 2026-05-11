@@ -56,7 +56,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
     setError("");
 
     try {
-      const res = await fetch(`${api.baseUrl}/auth/verify-password`, {
+      const res = await fetch(`${api.baseUrl}/api/auth/verify-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -92,7 +92,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
     setError("");
 
     try {
-      const res = await fetch(`${api.baseUrl}/auth/verify-identity`, {
+      const res = await fetch(`${api.baseUrl}/api/auth/verify-identity`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

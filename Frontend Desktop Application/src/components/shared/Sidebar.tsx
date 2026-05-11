@@ -66,21 +66,21 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
       </div>
 
       {/* Brand Header & Toggle Consolidation */}
-      <div className={`flex items-center transition-all ${isCollapsed ? "py-4 flex-col gap-4" : "p-4 border-b border-border/50 justify-between"}`}>
-        <div className={`flex items-center ${isCollapsed ? "flex-col gap-4" : "gap-3"}`}>
-          <div className="relative group">
-              <div className="absolute inset-0 bg-primary/20 blur-lg rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className={`relative bg-primary rounded-xl border border-white/10 shadow-[0_0_15px_rgba(16,185,129,0.3)] transform group-hover:rotate-6 transition-transform flex items-center justify-center ${isCollapsed ? 'w-10 h-10' : 'w-8 h-8'}`}>
-                  <Shield size={isCollapsed ? 20 : 16} className="text-primary-foreground" />
+      <div className={`flex items-center transition-all duration-500 ${isCollapsed ? "py-6 flex-col gap-6" : "p-5 border-b border-border/50 justify-between"}`}>
+        <div className={`flex items-center ${isCollapsed ? "flex-col gap-4" : "gap-4"}`}>
+          <div className="relative group cursor-pointer" onClick={onToggleCollapse}>
+              <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div className={`relative bg-primary rounded-2xl border border-white/20 shadow-[0_0_20px_rgba(16,185,129,0.4)] transform group-hover:rotate-12 transition-all duration-500 flex items-center justify-center ${isCollapsed ? 'w-10 h-10' : 'w-10 h-10'}`}>
+                  <Shield size={20} className="text-primary-foreground drop-shadow-md" />
               </div>
           </div>
           {!isCollapsed && (
-            <div className="animate-in fade-in slide-in-from-left-2 duration-500 flex flex-col justify-center">
-              <h2 className="text-[14px] font-black italic tracking-tighter text-foreground leading-none mb-0.5">BBSNS</h2>
-              <div className="flex items-center gap-1.5">
-                  <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                  <p className="text-[7px] text-emerald-500 font-black uppercase tracking-[0.2em]">
-                      {role === "admin" ? "Administrator" : (role === "notary" ? "Notary" : "Owner")}
+            <div className="animate-in fade-in slide-in-from-left-4 duration-700 flex flex-col justify-center">
+              <h2 className="text-[16px] font-black italic tracking-tighter text-foreground leading-none mb-1">BBSNS</h2>
+              <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                  <p className="text-[8px] text-emerald-500 font-black uppercase tracking-[0.3em]">
+                      {role === "admin" ? "Authority" : (role === "notary" ? "Notary" : "Owner")}
                   </p>
               </div>
             </div>
@@ -140,7 +140,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
 
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 mt-6 space-y-1.5 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 min-h-0 p-4 mt-6 space-y-1.5 overflow-y-auto custom-scrollbar">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeScreen === item.id;
@@ -155,11 +155,14 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
                 }`}
             >
               {isActive && (
-                <div className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-emerald-500 rounded-r-full shadow-[0_0_10px_#10b981]" />
+                <div className="absolute inset-0 bg-emerald-500/5 backdrop-blur-md z-0" />
+              )}
+              {isActive && (
+                <div className="absolute left-0 top-2 bottom-2 w-1 bg-emerald-500 rounded-r-full shadow-[0_0_15px_#10b981]" />
               )}
               
-              <div className="relative">
-                <Icon size={18} className={`${isActive ? "text-emerald-400" : "group-hover:text-white"} transition-colors`} />
+              <div className="relative z-10">
+                <Icon size={18} className={`${isActive ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "group-hover:text-white"} transition-colors`} />
                 {isCollapsed && item.badge && item.badge > 0 ? (
                   <span className="absolute -top-2 -right-2 bg-primary text-primary-foreground text-[7px] font-black w-3.5 h-3.5 flex items-center justify-center rounded-full border border-card shadow-[0_0_10px_rgba(16,185,129,0.5)]">
                     {item.badge}
@@ -168,13 +171,13 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
               </div>
               
               {!isCollapsed && (
-                <span className={`relative z-10 flex-1 text-left text-sm font-medium ${isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}`}>
+                <span className={`relative z-10 flex-1 text-left text-[13px] font-black uppercase tracking-tight ${isActive ? "text-emerald-400" : "text-slate-500 group-hover:text-slate-200"}`}>
                     {item.label}
                 </span>
               )}
 
               {!isCollapsed && item.badge && item.badge > 0 ? (
-                <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[18px] text-center shadow-[0_0_10px_rgba(16,185,129,0.3)] animate-pulse">
+                <span className="relative z-10 bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[18px] text-center shadow-[0_0_10px_rgba(16,185,129,0.3)] animate-pulse">
                    {item.badge}
                 </span>
               ) : null}

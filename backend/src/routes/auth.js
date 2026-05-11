@@ -1507,7 +1507,7 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
             let targetStatus = 'completed';
 
             if (session.document_id) {
-                console.log(`[AUTH_RELAY] Relaying notarization for doc: ${session.document_id}`);
+                console.log(`[AUTH_RELAY] Initiating notarization relay for document: ${session.document_id} by Notary: ${userId}`);
                 const payload = JSON.parse(session.challenge);
                 targetStatus = 'authorized'; // Maintain 'authorized' so Desktop App polling picks it up
                 
@@ -1523,6 +1523,7 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
                         recoveredAddress
                     );
                     txHash = txResult.txHash;
+                    console.log(`[AUTH_RELAY] Transaction broadcasted: ${txHash}`);
 
                     // Update Document Status in DB
                     const dbStatus = payload.status === 1 ? 'submitted_to_blockchain' : 'rejected';
@@ -1532,15 +1533,24 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
                         'pending',
                         0, // Opportunistic revision
                         dbStatus,
-                        { tx_hash: txHash, tx_status: "'pending'" }
+                        { 
+                            tx_hash: txHash, 
+                            tx_status: "'pending'",
+                            notary_id: userId,
+                            status_updated_at: 'NOW()'
+                        }
                     );
 
                     // Fire Reputation
-                    await reputationService.handleEvent(userId, payload.status === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(() => {});
+                    await reputationService.handleEvent(userId, payload.status === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(err => {
+                        console.warn(`[AUTH_RELAY_WARN] Reputation update failed: ${err.message}`);
+                    });
 
                 } catch (relayErr) {
                     console.error("[AUTH_RELAY_FAIL]", relayErr);
-                    await auditClient.query('ROLLBACK');
+                    // 🛡️ [Hardening] Explicitly mark session as failed so poller stops
+                    await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                    await auditClient.query('COMMIT'); 
                     return { error: `Blockchain Relay Failed: ${relayErr.message}`, status: 502 };
                 }
             }

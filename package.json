@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "docx": "^9.5.3",
+    "marked": "^18.0.3",
     "pptxgenjs": "^4.0.1"
   }
 }

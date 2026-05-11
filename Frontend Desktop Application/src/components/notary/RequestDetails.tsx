@@ -187,9 +187,21 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
 
             toast.info("Remote Signing Initiated. Please approve the request in your browser.");
 
-            // 4. Poll for status
+            // 4. Poll for status (Increased frequency to 2s for better UX)
+            const startTime = Date.now();
+            const TIMEOUT = 5 * 60 * 1000; // 5 minutes
+
             pollInterval = setInterval(async () => {
                 try {
+                    // Check for timeout
+                    if (Date.now() - startTime > TIMEOUT) {
+                        clearInterval(pollInterval);
+                        toast.error("Signing session timed out. Please try again.");
+                        setSubmitting(false);
+                        return;
+                    }
+
+                    // Check session status
                     const statusRes = await api.getRemoteSessionStatus(session.sessionId, deviceId, session.sessionSecret);
                     
                     if (statusRes.status === 'authorized' && statusRes.signature) {
@@ -209,21 +221,39 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             finalPayload.rejection_reason = rejectionReason;
                         }
 
+                        // This call will finish the local workflow (and handles 'already approved' cases gracefully)
                         await api.approveDocument(requestId, finalPayload);
                         toast.success(`Request ${status} successfully (via Remote Auth).`);
                         setConfirmDialog({ open: false, action: null });
                         setDocumentSummary("");
                         setRejectionReason("");
                         onBack();
-                    } else if (statusRes.status === 'failed' || statusRes.status === 'expired') {
+                        return;
+                    } 
+                    
+                    if (statusRes.status === 'failed' || statusRes.status === 'expired') {
                         clearInterval(pollInterval);
-                        toast.error(`Remote signing ${statusRes.status}.`);
+                        toast.error(`Remote signing ${statusRes.status}. Check your browser for details.`);
                         setSubmitting(false);
+                        return;
                     }
+
+                    // Secondary safety check: check if document is already approved on-chain
+                    // This handles cases where atomic-bind succeeded but session status lag occurred
+                    const docCheck = await api.getDocument(requestId);
+                    if (docCheck.status === 'approved' || docCheck.submission_state === 'submitted_to_blockchain') {
+                        console.log("[POLL] Document already finalized on-chain. Ending remote session.");
+                        clearInterval(pollInterval);
+                        toast.success(`Request finalized successfully (Detected on-chain).`);
+                        setConfirmDialog({ open: false, action: null });
+                        onBack();
+                        return;
+                    }
+
                 } catch (err) {
                     console.error("Polling error:", err);
                 }
-            }, 3000);
+            }, 2000);
 
         } catch (err: any) {
             console.error("[REMOTE_SIGN_ERROR]", err);
@@ -250,7 +280,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
     return (
         <div className="flex-1 flex flex-col min-h-0 bg-[#07090e] overflow-hidden">
             {/* Header */}
-            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm px-4 py-2">
+            <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm px-4 py-3">
                 <div className="flex items-center justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
@@ -268,8 +298,13 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             </h1>
                         </div>
                         <p className="text-sm text-muted-foreground">Document ID: #{request.id} • Review and process notarization request</p>
-                        <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-500/20 dark:text-yellow-400 dark:border-yellow-500/30">
-                            {request.status}
+                        <Badge className={`uppercase tracking-widest text-[9px] font-black px-3 py-1 rounded-full ${
+                            request.submission_state === 'submitted_to_blockchain' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
+                            request.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                            request.status === 'rejected' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                            'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                        }`}>
+                            {request.submission_state === 'submitted_to_blockchain' ? 'Processing' : request.status}
                         </Badge>
                     </div>
                 </div>
@@ -381,7 +416,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                 {/* Right Panel - Information & Actions */}
                 <div className="w-96 bg-card flex flex-col border-l border-border h-full overflow-hidden">
                     {/* Scrollable Information Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto p-4 py-6 space-y-6 custom-scrollbar">
                         {/* Client Information */}
                         <div>
                             <h3 className="text-[12px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
@@ -435,18 +470,23 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                     </div>
 
                     {/* Sticky Action Footer */}
-                    <div className="flex-none p-3 pb-6 border-t border-border bg-background/95 backdrop-blur-md z-30 shadow-[0_-4px_12px_rgba(0,0,0,0.1)]">
-                        {request.status === 'pending' ? (
+                    <div className="flex-none p-4 pb-8 border-t border-border bg-background/95 backdrop-blur-md z-30 shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
+                        {request.status === 'pending' && request.submission_state === 'pending' ? (
                             <div className="flex gap-2">
-                                <Button
-                                    onClick={() => handleAction("approve")}
-                                    disabled={submitting}
-                                    variant="default"
-                                    className="flex-1 rounded-xl h-10 shadow-lg shadow-primary/20 text-[11px] font-black uppercase tracking-wider"
-                                >
-                                    <CheckCircle size={14} className="mr-1.5" />
-                                    Approve
-                                </Button>
+                                <div className="flex-1 flex flex-col gap-1">
+                                    <Button
+                                        onClick={() => handleAction("approve")}
+                                        disabled={submitting || (ntkBalance !== '...' && parseFloat(ntkBalance) < 1.0)}
+                                        variant="default"
+                                        className="w-full rounded-xl h-10 shadow-lg shadow-primary/20 text-[11px] font-black uppercase tracking-wider disabled:opacity-50"
+                                    >
+                                        <CheckCircle size={14} className="mr-1.5" />
+                                        Approve
+                                    </Button>
+                                    {(ntkBalance !== '...' && parseFloat(ntkBalance) < 1.0) && (
+                                        <p className="text-[9px] text-red-400 text-center font-bold animate-pulse">Insufficient NTK Balance</p>
+                                    )}
+                                </div>
                                 <Button
                                     onClick={() => handleAction("reject")}
                                     disabled={submitting}
@@ -459,8 +499,14 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             </div>
                         ) : (
                             <div className="text-center">
-                                <Badge variant="outline" className="text-muted-foreground border-border w-full justify-center py-2 rounded-xl">
-                                    {request.status === 'approved' ? 'Transaction Completed' : 'Transaction Rejected'}
+                                <Badge variant="outline" className={`w-full justify-center py-2 rounded-xl border-border font-bold uppercase tracking-widest text-[10px] ${
+                                    request.submission_state === 'submitted_to_blockchain' ? 'text-blue-400 border-blue-500/20 bg-blue-500/5' :
+                                    request.status === 'approved' ? 'text-green-400 border-green-500/20 bg-green-500/5' : 
+                                    'text-red-400 border-red-500/20 bg-red-500/5'
+                                }`}>
+                                    {request.submission_state === 'submitted_to_blockchain' ? 'Processing Transaction...' : 
+                                     request.status === 'approved' ? 'Transaction Completed' : 
+                                     'Transaction Rejected'}
                                 </Badge>
                             </div>
                         )}

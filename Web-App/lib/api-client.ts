@@ -177,6 +177,11 @@ async function apiRequest(endpoint: string, options: RequestOptions = {}) {
         credentials: 'include', // CRITICAL: REQUIRED FOR HTTPONLY COOKIES
     };
 
+    // 🛡️ [PHASE 1] Body Serialization
+    if (data) {
+        config.body = data instanceof FormData ? data : JSON.stringify(data);
+    }
+
     const requestTs = Date.now();
     const requestId = Math.random().toString(36).substring(2, 9);
 

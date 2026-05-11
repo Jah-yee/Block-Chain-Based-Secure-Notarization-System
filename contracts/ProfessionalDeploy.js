@@ -60,6 +60,10 @@ async function main() {
         const { addr: notaryRegistryAddr } = await deploy("NotaryRegistry", "NotaryRegistry", multiSigAddr);
         const { addr: docRegistryAddr } = await deploy("DocumentRegistry", "DocumentRegistry", multiSigAddr, notaryRegistryAddr, ntkAddr);
 
+        console.log(`\n🔒 Granting DocumentRegistry authority to burn NTK...`);
+        await (await ntk.grantRole(RELAYER_ROLE, docRegistryAddr)).wait();
+        console.log(`   ✅ DocumentRegistry authorized.`);
+
         // 4. Consolidate Authority (Tokens -> MultiSig)
         console.log(`\n🔒 Consolidating token authority to MultiSig...`);
 

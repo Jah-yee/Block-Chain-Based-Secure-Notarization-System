@@ -108,22 +108,10 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePr
       requestId: req.requestId || 'UNKNOWN',
       service: 'NOTARY_SERVICE'
     }, async (auditClient) => {
-      // 🛡️ [Hardening] 1. Check if wallet already registered as a document owner (separate accounts required)
-      if (walletAddress) {
-        const walletInUse = await auditClient.query(
-          "SELECT id, role FROM users WHERE wallet_address = $1",
-          [walletAddress.toLowerCase()]
-        );
-        if (walletInUse.rows.length > 0) {
-          const err = new Error("This wallet is already registered as a document owner. Notaries must use a separate wallet address.");
-          err.statusCode = 409;
-          throw err;
-        }
-      }
-
       const normalizedId = normalizeNationalId(nationalId);
+      const nationalIdHash = normalizedId ? crypto.createHash('sha256').update(normalizedId).digest('hex') : null;
 
-      // 🛡️ [Hardening] 2. Check if wallet, email, or national ID already has a pending/approved application
+      // 🛡️ [Hardening] 1. Check if application already exists in notary_applications (for resume logic)
       const queryParts = ["email = $1"];
       const queryParams = [email.toLowerCase()];
 
@@ -161,9 +149,9 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePr
 
           await auditClient.query(`
             UPDATE notary_applications 
-            SET phone = $1, experience = $2, nationality = $3, national_id_number = $4, updated_at = NOW()
-            WHERE id = $5
-          `, [phone, experience, nationality, nationalId, app.id]);
+            SET phone = $1, experience = $2, nationality = $3, national_id_number = $4, national_id_hash = $5, updated_at = NOW()
+            WHERE id = $6
+          `, [phone, experience, nationality, normalizedId, nationalIdHash, app.id]);
 
           res.status(200).json({
             status: "ok",
@@ -185,8 +173,16 @@ router.post("/applications/public", withDomain('NOTARY'), allowPublic, requirePr
         throw err;
       }
 
-      const nationalIdHash = normalizedId ? crypto.createHash('sha256').update(normalizedId).digest('hex') : null;
-      
+      // 🛡️ [Hardening] 2. Global Identity Check (Cross-table uniqueness)
+      // This is a NEW application, so it must be unique across USERS and APPLICATIONS.
+      const UserService = require('../services/UserService');
+      await UserService.checkGlobalUniqueness({
+        email,
+        walletAddress,
+        nationalIdHash,
+        nationalIdNumber: normalizedId
+      }, auditClient);
+
       // Generate BBSNS-REG-XXXX reference
       const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
       const referenceId = `BBSNS-REG-${suffix}`;
@@ -402,7 +398,7 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
     // 🛡️ [Hardening FIX A] PRE-FLIGHT EMAIL VALIDATION
     // We attempt to send the email BEFORE committing the status change to the DB.
     const activationToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000); // 🛡️ Extended to 12 hours for UX resilience
 
     const emailAttempt = await emailService.sendActivationEmail(app.email, activationToken);
     
@@ -452,9 +448,46 @@ router.post("/applications/:id/approve", withDomain('NOTARY'), requirePrivilege(
       };
 
       const UserService = require('../services/UserService');
-      const userRecord = await UserService.createUser(userData, client);
+      
+      // 🛡️ [Hardening FIX] Upgrade existing user OR Create new
+      // This prevents the "duplicate key" crash if the applicant was already an Owner.
+      const existingUserRes = await client.query("SELECT id FROM users WHERE LOWER(email) = LOWER($1)", [app.email]);
+      let userRecord;
 
-      // Link application to the new user
+      if (existingUserRes.rowCount > 0) {
+        userRecord = existingUserRes.rows[0];
+        
+        // 🛡️ [Hardening] Fetch current role to determine state transition
+        const roleCheck = await client.query("SELECT role, identity_state FROM users WHERE id = $1", [userRecord.id]);
+        const currentRole = roleCheck.rows[0].role;
+        const currentState = roleCheck.rows[0].identity_state;
+        
+        // Only reset to PENDING if they were a basic 'user' (Owner)
+        const newState = currentRole === 'user' ? 'PENDING' : currentState;
+
+        // Upgrade existing user to Notary
+        await client.query(
+          `UPDATE users SET 
+             role = 'notary',
+             name = $1,
+             wallet_address = $2,
+             national_id_hash = $3,
+             role_tx_status = 'initiated',
+             role_retry_count = 0,
+             identity_state = $4,
+             is_human_verified = true,
+             kyc_verified = true,
+             updated_at = NOW()
+           WHERE id = $5`,
+          [app.full_name, app.wallet_address.toLowerCase(), nationalIdHash, newState, userRecord.id]
+        );
+        userRecord = { id: userRecord.id };
+      } else {
+        // Create new user record
+        userRecord = await UserService.createUser(userData, client);
+      }
+
+      // Link application to the user record (new or upgraded)
       await client.query(
         "UPDATE notary_applications SET user_id = $1 WHERE id = $2",
         [userRecord.id, app.id]
@@ -494,7 +527,7 @@ router.post("/applications/:id/resend-activation", withDomain('NOTARY'), require
     }
 
     const activationToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000); // 🛡️ Extended to 12 hours
 
     const emailAttempt = await emailService.sendActivationEmail(app.email, activationToken);
     if (!emailAttempt.success) {

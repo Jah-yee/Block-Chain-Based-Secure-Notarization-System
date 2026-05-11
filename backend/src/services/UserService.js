@@ -2,12 +2,54 @@ const pool = require('../db');
 const { Logger } = require('./logger.service');
 const logger = new Logger('UserService');
 const ntkService = require('./ntk.service');
+const crypto = require('crypto');
 
 /**
  * UserService: Hardened Identity Lifecycle Authority
  * Centralizes all user creations and state transitions to ensure auditability and FSM compliance.
  */
 class UserService {
+  /**
+   * checkGlobalUniqueness: Verify identity availability across siloed tables (users vs notary_applications)
+   * @param {Object} identifiers - { email, walletAddress, nationalIdHash, nationalIdNumber }
+   * @param {Object} client - DB client for atomic checks
+   */
+  async checkGlobalUniqueness(identifiers, client = pool) {
+    const { email, walletAddress, nationalIdHash, nationalIdNumber } = identifiers;
+    
+    // 🛡️ [Hardening] Cross-table check for shared core identifiers
+    // This prevents an owner from applying as a notary with a different account using the same email/wallet,
+    // and prevents new registrations from stealing IDs used in pending notary applications.
+    const query = `
+      WITH conflicts AS (
+        SELECT 'user' as source, email, wallet_address, national_id_hash 
+        FROM users 
+        WHERE (LOWER(email) = LOWER($1) OR LOWER(wallet_address) = LOWER($2) OR national_id_hash = $3)
+        UNION ALL
+        SELECT 'notary_application' as source, email, wallet_address, national_id_hash 
+        FROM notary_applications 
+        WHERE (LOWER(email) = LOWER($1) OR LOWER(wallet_address) = LOWER($2) OR national_id_hash = $3 OR national_id_number = $4)
+        AND status != 'rejected'
+      )
+      SELECT * FROM conflicts LIMIT 1
+    `;
+
+    const res = await client.query(query, [email, walletAddress, nationalIdHash, nationalIdNumber]);
+    
+    if (res.rowCount > 0) {
+      const conflict = res.rows[0];
+      let field = 'Identity';
+      if (conflict.email?.toLowerCase() === email?.toLowerCase()) field = 'Email';
+      else if (conflict.wallet_address?.toLowerCase() === walletAddress?.toLowerCase()) field = 'Wallet Address';
+      else field = 'National ID';
+
+      const error = new Error(`${field} is already in use by an existing ${conflict.source === 'user' ? 'account' : 'notary application'}.`);
+      error.statusCode = 409;
+      throw error;
+    }
+    return true;
+  }
+
   /**
    * createUser: Atomic Creation with Initial Audit Entry
    * @param {Object} userData - User metadata (email, name, wallet, password_hash, role)
