@@ -16,7 +16,7 @@ graph TD
     subgraph "☁️ Application Layer"
         API[Node.js Orchestrator]
         Workers[Background Workers]
-        S3[(AWS S3 Vault)]
+        S3[AWS S3 Vault]
     end
     subgraph "⛓️ Blockchain Layer"
         Registry[DocumentRegistry.sol]
@@ -32,7 +32,31 @@ graph TD
 
 ---
 
-## 📂 2. Document State Machine (Authoritative)
+## 🔐 2. Configuration & Secrets
+
+Before deployment, populate the following environment variables in your `.env` files. **Never share these production values.**
+
+### **Backend Configuration (`backend/.env`)**
+| Key | Description | Placeholder Value |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | PostgreSQL Connection String | `postgresql://user:password@localhost:5432/bbsns_db` |
+| `JWT_SECRET` | Secret key for session encryption | `[GENERATE_A_64_CHAR_RANDOM_STRING]` |
+| `AWS_ACCESS_KEY_ID` | AWS IAM User Key | `[YOUR_AWS_ACCESS_KEY]` |
+| `AWS_SECRET_ACCESS_KEY` | AWS IAM Secret | `[YOUR_AWS_SECRET_KEY]` |
+| `AWS_S3_BUCKET` | Target S3 Bucket Name | `bbsns-production-vault` |
+| `BNB_SYSTEM_PRIVATE_KEY` | Protocol Relayer Authority | `[0x_YOUR_RELAYER_PRIVATE_KEY]` |
+
+### **Smart Contract Directory**
+| Contract | Description | Deployment Address |
+| :--- | :--- | :--- |
+| **DocumentRegistry** | Master Record Store | `0x0000000000000000000000000000000000000000` |
+| **NotaryRegistry** | Identity & Role Store | `0x0000000000000000000000000000000000000000` |
+| **NTKR Token** | Reputation & Access Token | `0x0000000000000000000000000000000000000000` |
+| **BBSNSMultiSig** | Governance Threshold | `0x0000000000000000000000000000000000000000` |
+
+---
+
+## 📂 3. Document State Machine (Authoritative)
 Tracking every document from initial intent to permanent on-chain finalization.
 
 ```mermaid
@@ -44,20 +68,6 @@ stateDiagram-v2
     NOTARY_ASSIGNMENT_PENDING --> CHAIN_TX_PENDING: Notary Signature
     CHAIN_TX_PENDING --> CHAIN_TX_CONFIRMED: On-Chain Confirmed
     CHAIN_TX_CONFIRMED --> [*]
-```
-
----
-
-## 🔐 3. Forensic Identity Invariants
-The normalization engine that prevents identity fraud and collision attacks.
-
-```mermaid
-graph LR
-    A[Input ID] --> B(Trim)
-    B --> C(Remove Spaces)
-    C --> D(To Uppercase)
-    D --> E{SHA-256 Hash}
-    E --> F[Identity Invariant]
 ```
 
 ---
@@ -83,37 +93,22 @@ sequenceDiagram
 
 ---
 
-## 🏛️ 5. Multi-Sig Governance Chain
-How the administrative committee manages protocol updates and roles.
+## 🚀 5. System Requirements
 
-```mermaid
-graph TD
-    A[Admin 1] -->|Propose| P(Proposal)
-    B[Admin 2] -->|Sign| P
-    C[Admin 3] -->|Sign| P
-    P -->|Threshold Met| E{Execute}
-    E -->|Update| Registry[NotaryRegistry.sol]
-```
+### **API Server (Backend)**
+- **OS**: Linux (Ubuntu 22.04 recommended) or Windows Server.
+- **CPU**: 2+ Cores (optimized for bcrypt & crypto).
+- **RAM**: 4GB Minimum (8GB recommended for concurrent worker threads).
+- **Node.js**: v18.17.0 or higher.
 
----
-
-## 💸 6. The Upload-Payment Atomic Loop
-The precise sequence ensuring files are paid for before becoming visible.
-
-```mermaid
-graph LR
-    A[Client] -->|POST /initiate| B[API]
-    B -->|Upload| S3[AWS S3]
-    B -->|Intent ID| A
-    A -->|burnForUpload| BC[Blockchain]
-    BC -->|Event| API
-    API -->|POST /confirm| D[DB: documents]
-```
+### **Desktop Console (Notary)**
+- **OS**: Windows 10/11 (64-bit).
+- **RAM**: 4GB Minimum.
+- **Dependency**: Microsoft Edge (for Remote Auth Bridge).
 
 ---
 
-## 📊 7. Database Entity Architecture
-The relational map connecting Users, Documents, and Blockchain Intents.
+## 📊 6. Database Entity Architecture
 
 ```mermaid
 erDiagram
@@ -125,82 +120,32 @@ erDiagram
 
 ---
 
-## 🚀 8. Self-Healing Worker Lifecycle
-The timing and triggers for the system's background resilience workers.
+## 🛡️ 7. Forensic Audit Log Schema
+Every request through the `actor.js` middleware generates a correlated audit trail in the following format:
 
-```mermaid
-graph TD
-    T[Timer] -->|Every 5m| Rec[Reconciliation Worker]
-    T -->|Every 24h| Scav[Scavenger Worker]
-    Rec -->|Check| BC[Blockchain State]
-    Scav -->|Purge| S3[Orphaned Files]
+```json
+{
+  "requestId": "UUID-V4",
+  "actorId": "101",
+  "role": "NOTARY",
+  "capability": "DOC_SIGNATURE_PAYLOAD",
+  "env": "VERIFIED",
+  "chainId": "97",
+  "timestamp": "2024-05-12T10:00:00Z"
+}
 ```
 
 ---
 
-## 🛡️ 9. Request Execution Trace
-The multi-layer protection applied to every API request via `actor.js`.
+## 🚀 8. Production Hardening Guide
 
-```mermaid
-graph TD
-    R[Incoming Request] --> A[Token Firewall]
-    A --> B[Role Normalization]
-    B --> C[Environment Check]
-    C --> D[Identity State Gate]
-    D --> E{Logic Execution}
-```
-
----
-
-## 💎 10. The Tokenomics Flywheel
-Incentive alignment between Document Owners (Users) and Officials (Notaries).
-
-```mermaid
-graph LR
-    U[User] -->|Burn NTKR| BC[Blockchain]
-    BC -->|Proof| N[Notary]
-    N -->|Record Action| BC
-    BC -->|Reward NTKR| N
-```
-
----
-
-## ☁️ 11. Secure Storage Hierarchy
-Logical partitioning of the Encrypted S3 Vault for maximum isolation.
-
-```mermaid
-graph TD
-    Root[/BBSNS-Bucket/] --> Intents[/intents/]
-    Intents --> UserID[/{userId}/]
-    UserID --> IntentID[/{intentId}/]
-    IntentID --> FileID[/{fileId}.pdf]
-```
-
----
-
-## 🛑 12. Circuit Breaker Protocol
-The system response to an emergency on-chain `pause()` command.
-
-```mermaid
-graph LR
-    G[Governance] -->|pause| BC[Blockchain]
-    BC -->|state=Paused| API[Backend]
-    API -->|403 Forbidden| User[All Mutations]
-```
-
----
-
-## 📖 13. Deep Technical Documentation
-
-### **Cryptographic Primitives**
-- **Hashing**: SHA-256 for files, Keccak-256 for on-chain proof.
-- **Signing**: EIP-712 (Typed Data) and EIP-191 (Personal Sign).
-- **Communication**: TLS 1.3 (API) and WSS (Remote Auth).
-
-### **Production Deployment Strategy**
-1. **API**: Managed via PM2 with `max_memory_restart: 1G`.
-2. **Database**: PostgreSQL with row-level security and `context-rebinder` audit trails.
-3. **Storage**: AWS S3 with **Versioning** enabled to prevent accidental deletion.
+1. **Process Management**: Use **PM2** with clustering.
+   ```bash
+   pm2 start src/index.js --name "bbsns-api" -i max
+   ```
+2. **Reverse Proxy**: Setup **Nginx** with TLS 1.3 encryption.
+3. **Database Security**: Enforce **SSL-only** connections to PostgreSQL.
+4. **S3 Hygiene**: Enable **Object Lock** and **Versioning** on your production bucket.
 
 ---
 
