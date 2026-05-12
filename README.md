@@ -1,108 +1,171 @@
-# 🛡️ BBSNS: Block-Chain Based Secure Notarization System
+# 🛡️ BBSNS: The Global Secure Notarization Protocol
 
-**BBSNS** is a production-grade, decentralized notarization protocol designed to bridge the gap between secure local document management and permanent on-chain verification.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Node.js](https://img.shields.io/badge/Node.js-v18+-green.svg)
-![Solidity](https://img.shields.io/badge/Solidity-0.8.20-blue.svg)
-![Electron](https://img.shields.io/badge/Electron-Desktop-blueviolet.svg)
+**BBSNS (Block-Chain Based Secure Notarization System)** is a decentralized infrastructure designed to provide absolute cryptographic certainty for document authenticity. By combining local desktop security with global blockchain finality, BBSNS eliminates the risk of document tampering and centralized identity fraud.
 
 ---
 
-## 🏗️ System Architecture
+## 🏛️ 1. High-Level System Architecture
 
-The BBSNS ecosystem is built on a **Three-Tier Secure Architecture**:
+BBSNS operates across three distinct domains to ensure maximum security and scalability.
 
 ```mermaid
 graph TD
-    User((Document Owner)) -->|Upload File| S3[Encrypted AWS S3 Storage]
-    User -->|burnForUpload| BC[BSC Testnet Blockchain]
+    subgraph "🌐 Client Domain"
+        Web[Web Application - Next.js]
+        Desktop[Desktop Application - Electron]
+    end
+
+    subgraph "☁️ Cloud Infrastructure"
+        API[Backend API - Node.js]
+        S3[Object Storage - AWS S3]
+        DB[(PostgreSQL)]
+    end
+
+    subgraph "⛓️ Blockchain Layer"
+        BC[BSC Testnet]
+        Registry[Document Registry Contract]
+        NotaryReg[Notary Registry Contract]
+    end
+
+    Web -->|Upload| API
+    Desktop -->|Review| API
+    API -->|Metadata| DB
+    API -->|Signed URLs| S3
+    API -->|Relay| Registry
+    Registry -->|Status| BC
+```
+
+### **How it Works:**
+- **Client Domain**: Users interact with the lightweight Web App for uploads, while Notaries use the Hardened Desktop App for high-security review.
+- **Cloud Infrastructure**: The Backend acts as a stateless orchestrator, managing encrypted storage in S3 and state persistence in PostgreSQL.
+- **Blockchain Layer**: The ultimate source of truth. It stores hashes (not files) to ensure privacy while providing immutable proof of existence.
+
+---
+
+## 📂 2. The Document Lifecycle (State Machine)
+
+A document in BBSNS moves through a series of atomic states to prevent race conditions or unauthorized modification.
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT: Upload Intent Created
+    DRAFT --> PENDING_COMMIT: S3 Upload Complete
+    PENDING_COMMIT --> PENDING_NOTARIZATION: burnForUpload (On-Chain)
+    PENDING_NOTARIZATION --> IN_REVIEW: Notary Assigned
+    IN_REVIEW --> APPROVED: Notary Signature Verified
+    IN_REVIEW --> REJECTED: Rejection Reason Recorded
+    APPROVED --> [*]
+    REJECTED --> [*]
+```
+
+### **The Integrity Guarantee:**
+1. **Commitment**: A user must "burn" NTK tokens on-chain before a document is even visible to the Notary pool. This prevents spam.
+2. **Immutability**: Once a document hash is recorded in the `PENDING_NOTARIZATION` state, it can never be altered.
+3. **Auditability**: Every transition is timestamped and signed by the responsible actor.
+
+---
+
+## 🔐 3. Forensic Identity & Security
+
+BBSNS replaces traditional passwords with a **Zero-Trust Identity Invariant** system based on wallet signatures and National ID normalization.
+
+```mermaid
+graph LR
+    A[Raw Input: ID Number] --> B(Normalization Engine)
+    B --> C{Identity Invariant}
+    C -->|Match| D[Access Granted]
+    C -->|Mismatch| E[Forensic Lockout]
     
-    Notary((Notary)) -->|Review File| Desktop[Desktop App]
-    Desktop -->|signedPayload| Bridge[Remote Signing Bridge]
-    Bridge -->|Signature| Backend[Node.js Backend]
-    
-    Backend -->|recordAction| Registry[DocumentRegistry Contract]
-    Registry -->|Finalized| BC
-    
-    Admin((System Admin)) -->|Govern| Backend
-    Admin -->|Multi-Sig| Registry
+    subgraph "Normalization Process"
+        B1[Trim Whitespace]
+        B2[Remove Special Chars]
+        B3[Convert to Uppercase]
+    end
 ```
 
----
-
-## ✨ Key Features
-
-*   **🔒 Zero-Trust Identity**: Mandatory verification of actor context for every database mutation.
-*   **🖋️ EIP-712 Signing**: Secure, off-chain document signing with on-chain relay (Gasless for Notaries).
-*   **📂 Forensic Auditing**: Real-time logging of all security events with correlation IDs.
-*   **⚖️ Decentralized Governance**: Multi-sig proposal system for protocol updates.
-*   **🚀 Automated Reconciliation**: Background workers to fix state discrepancies between DB and Blockchain.
+### **Technical Deep-Dive:**
+- **ID Normalization**: To prevent collision attacks (e.g., `ABC-123` vs `abc 123`), the system enforces a strict normalization pipeline (`trim` → `remove spaces` → `uppercase`).
+- **Domain Separation**: The system enforces a "Hard Lock" between user types. A Document Owner can **never** access Notary-only endpoints, even if they compromise a session token.
 
 ---
 
-## 🛠️ Tech Stack
+## 🖋️ 4. EIP-712 Remote Signing Bridge
 
-*   **Backend**: Node.js, Express, PostgreSQL, AWS S3/KMS.
-*   **Frontend**: 
-    *   **Desktop**: Electron, Vite, React, TypeScript.
-    *   **Web**: Next.js, Tailwind CSS, Shadcn UI.
-*   **Blockchain**: Solidity (0.8.20), Hardhat, Ethers.js.
+To keep private keys secure, BBSNS uses a specialized bridge that allows Notaries to sign documents in a secure browser wallet while reviewing them in the isolated Desktop App.
 
----
+```mermaid
+sequenceDiagram
+    participant D as Desktop App
+    participant B as Backend API
+    participant W as Browser Wallet (Remote Auth)
+    participant BC as Blockchain
 
-## 📂 Directory Structure
-
-```text
-BBSNS_Deliverables/
-├── web_deliverable/                 # Next.js Web Application
-├── desktop_deliverable/             # Electron Desktop Application
-└── backend_and_blockchain_deliverable/
-    ├── backend/                     # Node.js API Server
-    ├── contracts/                   # Solidity Smart Contracts
-    └── database/                    # SQL Schema & Migrations
+    D->>B: Request Signing Payload
+    B-->>D: Return Session ID + Payload
+    D->>W: Push Notification (Web Socket)
+    W->>W: User Signs EIP-712 Message
+    W->>B: Submit Signature
+    B->>BC: relay(recordAction)
+    BC-->>B: txHash
+    B-->>D: Finalized
 ```
 
+### **Why this matters:**
+- **Security**: The private key never leaves the Notary's browser wallet (MetaMask).
+- **Efficiency**: The Notary doesn't pay for gas. The system Relayer handles the transaction costs.
+- **Compliance**: EIP-712 provides a human-readable summary of what is being signed.
+
 ---
 
-## 🚀 Quick Start (Production)
+## 🏛️ 5. Multi-Sig Governance Model
 
-### **1. Backend & Database**
-```bash
-cd backend_and_blockchain_deliverable/backend
-npm install
-psql -d [DB_NAME] -f ../database/final_schema.sql
-npm start
+The protocol is not controlled by one person. Changes require a consensus from the administrative committee.
+
+```mermaid
+graph TD
+    A[Admin A] -->|Create Proposal| P(Proposal: Update Registry)
+    B[Admin B] -->|Sign| P
+    C[Admin C] -->|Sign| P
+    P -->|Threshold Reached| X{Execute}
+    X -->|Update| Registry[Document Registry]
 ```
 
-### **2. Desktop Console**
-```bash
-cd desktop_deliverable
-npm install
-npm run dev
-```
-
-### **3. Smart Contracts**
-```bash
-cd backend_and_blockchain_deliverable/contracts
-npx hardhat compile
-npx hardhat run scripts/deploy.js --network bnbTestnet
-```
+### **Governance Logic:**
+- **Transparency**: Every proposal is visible to all admins.
+- **Finality**: Once a threshold (e.g., 2-of-3) is met, the change is applied atomically to the smart contracts.
 
 ---
 
-## 🛡️ Security Forensics
+## 💎 6. Tokenomics (NTK & NTKR)
 
-BBSNS implements a **Hardened Identity Invariant** system:
-- **Identity State Lock**: Users with `identity_state = ACTIVE` are guaranteed system access regardless of sync lag.
-- **Atomic State Machine**: Document transitions follow a strict `Pending` → `Review` → `Approved/Rejected` path, enforced by the `DocumentStatusService`.
+The system uses a dual-token model to align incentives between Users and Notaries.
 
----
-
-## 📜 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
+| Token | Type | Purpose | How to Get |
+| :--- | :--- | :--- | :--- |
+| **NTK** | ERC-20 (Utility) | Used to pay for notarization and notary fees. | Purchased or earned by Notaries. |
+| **NTKR** | ERC-20 (Reputation) | Non-transferable "Social Capital". | Granted after successful, high-quality notarizations. |
 
 ---
 
-**Built with ❤️ by the BBSNS Core Team.**
+## 🛠️ 7. Resilience & Background Workers
+
+BBSNS is "Self-Healing." It uses background workers to ensure the system remains responsive and consistent.
+
+- **Scavenger Worker**: Scans S3 every 24h. If a document intent was created but never paid for, it purges the file to save storage costs.
+- **Reconciliation Worker**: Compares the database with the blockchain. If a transaction was confirmed on-chain but the DB missed the event, it automatically heals the record.
+- **Role Sync Worker**: Ensures that if a user's role is revoked on-chain, their access is immediately blocked in the API.
+
+---
+
+## 🚀 8. Getting Started
+
+Detailed installation instructions for developers can be found in the [DEVELOPER_MASTER_GUIDE.md](./DEVELOPER_MASTER_GUIDE.md).
+
+1. **Clone the Repository**.
+2. **Setup your .env files** using the provided `.env.example` blueprints.
+3. **Initialize the Database** using `final_schema.sql`.
+4. **Deploy the Contracts** to BSC Testnet using Hardhat.
+
+---
+
+**BBSNS: Bridging Trust in the Digital Age.**
