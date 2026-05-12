@@ -1,95 +1,206 @@
-# 🛡️ BBSNS: The Global Secure Notarization Protocol
+# 🛡️ BBSNS: The Visual Technical Encyclopedia
 
-**BBSNS (Block-Chain Based Secure Notarization System)** is an enterprise-grade, decentralized infrastructure designed to provide absolute cryptographic certainty for document authenticity.
+**BBSNS (Block-Chain Based Secure Notarization System)** is an enterprise-grade decentralized infrastructure. This document provides a granular technical map of the protocol's engineering, security, and cryptographic foundations.
 
 ---
 
-## 🏛️ 1. Infrastructure Deep-Dive
+## 🏗️ 1. Global Ecosystem Blueprint
+The relationship between Client applications, Cloud infrastructure, and the Blockchain source-of-truth.
 
-### **The Three-Tier Architecture**
 ```mermaid
 graph TD
-    subgraph "🌐 Client Tier"
-        Web[Next.js - User Upload Portal]
-        Desktop[Electron - Notary Forensic Console]
+    subgraph "🌐 Frontend Layer"
+        Web[Next.js Portal]
+        Desktop[Electron Console]
     end
-
-    subgraph "☁️ Application Tier (Node.js)"
-        API[Express API - Stateless Orchestrator]
-        Worker1[Scavenger - S3 Cleanup]
-        Worker2[Reconciliation - BC Sync]
-        Audit[Forensic Logger - Audit Trail]
+    subgraph "☁️ Application Layer"
+        API[Node.js Orchestrator]
+        Workers[Background Workers]
+        S3[(AWS S3 Vault)]
     end
-
-    subgraph "⛓️ Blockchain Tier (BSC Testnet)"
+    subgraph "⛓️ Blockchain Layer"
         Registry[DocumentRegistry.sol]
-        NotaryReg[NotaryRegistry.sol]
-        NTKR[NTKR Token - Access Control]
-        MultiSig[BBSNSMultiSig - Governance]
+        NTKR[NTKR.sol]
+        MultiSig[BBSNSMultiSig.sol]
     end
-
-    Web -->|Upload Intent| API
-    API -->|Signed S3 URL| S3[(AWS S3 Storage)]
-    Desktop -->|Review & Sign| API
+    Web -->|Upload| API
+    Desktop -->|Verify| API
+    API -->|Signed URL| S3
     API -->|EIP-712 Relay| Registry
+    Registry -->|Status| NTKR
 ```
 
 ---
 
-## ⛓️ 2. Smart Contract Logic
+## 📂 2. Document State Machine (Authoritative)
+Tracking every document from initial intent to permanent on-chain finalization.
 
-### **A. The Document Registry (`DocumentRegistry.sol`)**
-The heart of the protocol. It stores document existence proof via cryptographic hashes.
-- **`recordAction(bytes32 docHash, ...)`**: The primary write function. It requires an **EIP-712 signature** from an authorized, non-banned Notary.
-- **Integrity Check**: Enforces that `recoveredNotary != ownerAddress` to prevent self-notarization.
-- **Gasless Model**: Uses a **Relayer Pattern** where the system pays gas fees for Notaries, ensuring zero-friction for officials.
-
-### **B. Tokenomics & Access (`NTKR.sol`)**
-- **Burn-to-Commit**: Users call `burnForUpload(uint256 amount, bytes32 intentId)` to pay for a notarization.
-- **Intent Binding**: The `intentId` (UUID) is etched into the blockchain event, allowing the Backend to atomically link payments to specific files.
-- **Daily Caps**: Enforces `dailySubmissionCount` to prevent DDoS attacks on the Notary pool.
-
----
-
-## 🔐 3. Security & Forensic Audit
-
-### **A. Identity Invariants (`actor.js`)**
-The backend implements a **Multi-Layer Token Firewall**:
-1. **Normalization**: Roles are standardized (`admin` → `3`, `notary` → `2`) to prevent bypass via string-case manipulation.
-2. **Environment Recomputation**: Every high-risk request re-verifies the blockchain state (Chain ID, Block Staleness) to ensure the session hasn't "drifted" from reality.
-3. **Identity State Lock**: Users are strictly gated by their `identity_state` (`ACTIVE`, `REJECTED`, `DEACTIVATED`).
-
-### **B. National ID Forensic Bridge**
-National IDs are processed through an authoritative normalization pipeline:
-`trim()` → `replace(/\s+/g, '')` → `toUpperCase()` → `SHA-256 Hashing`.
-This ensures that `ABC 123` and `abc-123` resolve to the same cryptographic identity, preventing double-identity fraud.
+```mermaid
+stateDiagram-v2
+    [*] --> INTENT_CREATED: Initiate
+    INTENT_CREATED --> INTENT_PAYMENT_PENDING: S3 Uploaded
+    INTENT_PAYMENT_PENDING --> INTENT_PAYMENT_VERIFIED: NTKR Burn
+    INTENT_PAYMENT_VERIFIED --> NOTARY_ASSIGNMENT_PENDING: DB Sync
+    NOTARY_ASSIGNMENT_PENDING --> CHAIN_TX_PENDING: Notary Signature
+    CHAIN_TX_PENDING --> CHAIN_TX_CONFIRMED: On-Chain Confirmed
+    CHAIN_TX_CONFIRMED --> [*]
+```
 
 ---
 
-## 📂 4. Data Vault (AWS S3 & PostgreSQL)
+## 🔐 3. Forensic Identity Invariants
+The normalization engine that prevents identity fraud and collision attacks.
 
-- **Storage Strategy**: Files are stored in a hierarchical structure: `intents/{userId}/{intentId}/{fileId}`.
-- **Immutability**: Once a document is moved to the `STORED` state, its `file_hash` is locked and used as the primary key for all future blockchain interactions.
-- **Signed URL Lifecycle**: Pre-signed URLs for document review expire after **120 seconds** to minimize exposure risks.
-
----
-
-## 🏛️ 5. Governance Architecture
-
-Changes to the protocol require **Consensus Governance**:
-- **BBSNSMultiSig**: A custom multi-signature wallet where a threshold (e.g., 2-of-3) of Admins must approve any registry update.
-- **Notary Management**: Admins use the `NotaryRegistry` to promote users, revoke roles, or ban malicious actors across the entire network.
+```mermaid
+graph LR
+    A[Input ID] --> B(Trim)
+    B --> C(Remove Spaces)
+    C --> D(To Uppercase)
+    D --> E{SHA-256 Hash}
+    E --> F[Identity Invariant]
+```
 
 ---
 
-## 🚀 6. Operational Readiness
+## 🖋️ 4. Cryptographic Bridge (EIP-712)
+Step-by-step sequence of the gasless remote signing protocol.
 
-### **Background Workers**
-| Worker | Responsibility | Frequency |
-| :--- | :--- | :--- |
-| **Scavenger** | Deletes S3 files for unpaid `upload_intents`. | Every 24h |
-| **Reconciliation** | Fixes database states if blockchain transactions were confirmed. | Every 5 min |
-| **Reputation** | Updates Notary `NTKR` balances based on action quality. | Continuous |
+```mermaid
+sequenceDiagram
+    participant D as Desktop App
+    participant B as Backend API
+    participant W as Remote Wallet
+    participant BC as Blockchain
+    D->>B: Request Payload
+    B->>BC: Fetch Nonce
+    BC-->>B: Nonce
+    B-->>D: Payload (EIP-712)
+    D->>W: Push Challenge
+    W->>W: Sign (MetaMask)
+    W->>B: Submit Signature
+    B->>BC: relay(recordAction)
+```
+
+---
+
+## 🏛️ 5. Multi-Sig Governance Chain
+How the administrative committee manages protocol updates and roles.
+
+```mermaid
+graph TD
+    A[Admin 1] -->|Propose| P(Proposal)
+    B[Admin 2] -->|Sign| P
+    C[Admin 3] -->|Sign| P
+    P -->|Threshold Met| E{Execute}
+    E -->|Update| Registry[NotaryRegistry.sol]
+```
+
+---
+
+## 💸 6. The Upload-Payment Atomic Loop
+The precise sequence ensuring files are paid for before becoming visible.
+
+```mermaid
+graph LR
+    A[Client] -->|POST /initiate| B[API]
+    B -->|Upload| S3[AWS S3]
+    B -->|Intent ID| A
+    A -->|burnForUpload| BC[Blockchain]
+    BC -->|Event| API
+    API -->|POST /confirm| D[DB: documents]
+```
+
+---
+
+## 📊 7. Database Entity Architecture
+The relational map connecting Users, Documents, and Blockchain Intents.
+
+```mermaid
+erDiagram
+    USERS ||--o{ DOCUMENTS : "owns"
+    USERS ||--o{ UPLOAD_INTENTS : "initiates"
+    DOCUMENTS ||--o{ NTKR_TRANSACTIONS : "logs"
+    UPLOAD_INTENTS ||--|| DOCUMENTS : "finalizes"
+```
+
+---
+
+## 🚀 8. Self-Healing Worker Lifecycle
+The timing and triggers for the system's background resilience workers.
+
+```mermaid
+graph TD
+    T[Timer] -->|Every 5m| Rec[Reconciliation Worker]
+    T -->|Every 24h| Scav[Scavenger Worker]
+    Rec -->|Check| BC[Blockchain State]
+    Scav -->|Purge| S3[Orphaned Files]
+```
+
+---
+
+## 🛡️ 9. Request Execution Trace
+The multi-layer protection applied to every API request via `actor.js`.
+
+```mermaid
+graph TD
+    R[Incoming Request] --> A[Token Firewall]
+    A --> B[Role Normalization]
+    B --> C[Environment Check]
+    C --> D[Identity State Gate]
+    D --> E{Logic Execution}
+```
+
+---
+
+## 💎 10. The Tokenomics Flywheel
+Incentive alignment between Document Owners (Users) and Officials (Notaries).
+
+```mermaid
+graph LR
+    U[User] -->|Burn NTKR| BC[Blockchain]
+    BC -->|Proof| N[Notary]
+    N -->|Record Action| BC
+    BC -->|Reward NTKR| N
+```
+
+---
+
+## ☁️ 11. Secure Storage Hierarchy
+Logical partitioning of the Encrypted S3 Vault for maximum isolation.
+
+```mermaid
+graph TD
+    Root[/BBSNS-Bucket/] --> Intents[/intents/]
+    Intents --> UserID[/{userId}/]
+    UserID --> IntentID[/{intentId}/]
+    IntentID --> FileID[/{fileId}.pdf]
+```
+
+---
+
+## 🛑 12. Circuit Breaker Protocol
+The system response to an emergency on-chain `pause()` command.
+
+```mermaid
+graph LR
+    G[Governance] -->|pause| BC[Blockchain]
+    BC -->|state=Paused| API[Backend]
+    API -->|403 Forbidden| User[All Mutations]
+```
+
+---
+
+## 📖 13. Deep Technical Documentation
+
+### **Cryptographic Primitives**
+- **Hashing**: SHA-256 for files, Keccak-256 for on-chain proof.
+- **Signing**: EIP-712 (Typed Data) and EIP-191 (Personal Sign).
+- **Communication**: TLS 1.3 (API) and WSS (Remote Auth).
+
+### **Production Deployment Strategy**
+1. **API**: Managed via PM2 with `max_memory_restart: 1G`.
+2. **Database**: PostgreSQL with row-level security and `context-rebinder` audit trails.
+3. **Storage**: AWS S3 with **Versioning** enabled to prevent accidental deletion.
 
 ---
 
