@@ -238,10 +238,15 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         return;
                     }
 
-                    // Secondary safety check: check if document is already approved on-chain
+                    // Secondary safety check: check if document is already finalized on-chain
                     // This handles cases where atomic-bind succeeded but session status lag occurred
                     const docCheck = await api.getDocument(requestId);
-                    if (docCheck.status === 'approved' || docCheck.submission_state === 'submitted_to_blockchain') {
+                    const isFinalized = docCheck.status === 'approved' || 
+                                      docCheck.status === 'rejected' || 
+                                      docCheck.submission_state === 'submitted_to_blockchain' ||
+                                      docCheck.submission_state === 'rejected';
+
+                    if (isFinalized) {
                         console.log("[POLL] Document already finalized on-chain. Ending remote session.");
                         clearInterval(pollInterval);
                         toast.success(`Request finalized successfully (Detected on-chain).`);

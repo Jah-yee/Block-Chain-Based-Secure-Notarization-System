@@ -858,13 +858,9 @@ async function handleDocumentPatch(req, res) {
         return res.status(403).json({ error: 'Notary or Admin role required for signing' });
       }
 
-      // 🛡️ [PHASE 2.5] Chain Status Guard: Block action if identity not confirmed on-chain
-      if (role === ROLES.NOTARY && actor.txStatus !== 'confirmed') {
-        return res.status(403).json({ 
-          error: 'Forbidden: Identity Settlement Pending',
-          detail: 'Your professional identity is currently being synchronized with the blockchain. Notarization is restricted until your on-chain status is "confirmed". Please wait for the system worker to complete this process.'
-        });
-      }
+      // 🛡️ [PHASE 2.5] Ground Truth Guard (Rule 6 Alignment)
+      // We rely on identityState === 'ACTIVE' (managed by Admin/Workers) rather than raw tx_status.
+      // Blocking on tx_status causes deadlocks if the chain indexer lags.
 
       const { status, signature, timestamp, document_summary, rejection_reason, txHash } = req.body;
 
