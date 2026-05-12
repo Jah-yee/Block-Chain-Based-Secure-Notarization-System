@@ -24,7 +24,7 @@ graph TD
     subgraph "⛓️ Blockchain Layer"
         BC[BSC Testnet]
         Registry[Document Registry Contract]
-        NotaryReg[Notary Registry Contract]
+        NTKR[NTKR Reputation Contract]
     end
 
     Web -->|Upload| API
@@ -32,140 +32,90 @@ graph TD
     API -->|Metadata| DB
     API -->|Signed URLs| S3
     API -->|Relay| Registry
-    Registry -->|Status| BC
+    NTKR -->|BurnedForUpload| BC
 ```
 
-### **How it Works:**
-- **Client Domain**: Users interact with the lightweight Web App for uploads, while Notaries use the Hardened Desktop App for high-security review.
-- **Cloud Infrastructure**: The Backend acts as a stateless orchestrator, managing encrypted storage in S3 and state persistence in PostgreSQL.
-- **Blockchain Layer**: The ultimate source of truth. It stores hashes (not files) to ensure privacy while providing immutable proof of existence.
+### **The Technical Reality:**
+- **NTKR Integration**: The system utilizes the **NTKR (Reputation Token)** contract for upload commitments. Users must trigger a `BurnedForUpload` event before the document enters the notary queue.
+- **AWS S3 Lock**: Storage is strictly managed via AWS S3 with **Signed URL** generation for secure, temporary document access.
+- **Stateless Orchestration**: The Backend API manages the bridge between cryptographic identity and permanent file storage.
 
 ---
 
-## 📂 2. The Document Lifecycle (State Machine)
+## 📂 2. The Document Lifecycle (UX State Contract)
 
-A document in BBSNS moves through a series of atomic states to prevent race conditions or unauthorized modification.
+BBSNS uses a **State Perception Model** to track documents from intent to on-chain finality.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFT: Upload Intent Created
-    DRAFT --> PENDING_COMMIT: S3 Upload Complete
-    PENDING_COMMIT --> PENDING_NOTARIZATION: burnForUpload (On-Chain)
-    PENDING_NOTARIZATION --> IN_REVIEW: Notary Assigned
-    IN_REVIEW --> APPROVED: Notary Signature Verified
-    IN_REVIEW --> REJECTED: Rejection Reason Recorded
-    APPROVED --> [*]
-    REJECTED --> [*]
+    [*] --> INTENT_CREATED: Initiate Upload
+    INTENT_CREATED --> INTENT_PAYMENT_PENDING: File Uploaded to S3
+    INTENT_PAYMENT_PENDING --> INTENT_PAYMENT_VERIFIED: BurnedForUpload (NTKR)
+    INTENT_PAYMENT_VERIFIED --> NOTARY_ASSIGNMENT_PENDING: DB Sync
+    NOTARY_ASSIGNMENT_PENDING --> CHAIN_TX_PENDING: Notary Signed
+    CHAIN_TX_PENDING --> CHAIN_TX_CONFIRMED: Block Confirmation
+    CHAIN_TX_CONFIRMED --> [*]
 ```
 
-### **The Integrity Guarantee:**
-1. **Commitment**: A user must "burn" NTK tokens on-chain before a document is even visible to the Notary pool. This prevents spam.
-2. **Immutability**: Once a document hash is recorded in the `PENDING_NOTARIZATION` state, it can never be altered.
-3. **Auditability**: Every transition is timestamped and signed by the responsible actor.
+### **Authoritative States:**
+- **INTENT_PAYMENT_PENDING**: The file is safe in S3, waiting for the blockchain commitment.
+- **NOTARY_ASSIGNMENT_PENDING**: The document is visible in the Public Notary Pool for claiming.
+- **CHAIN_TX_CONFIRMED**: The document hash and notary signature are permanently etched into the BSC Testnet.
 
 ---
 
-## 🔐 3. Forensic Identity & Security
+## 🔐 3. Forensic Identity & Invariants
 
-BBSNS replaces traditional passwords with a **Zero-Trust Identity Invariant** system based on wallet signatures and National ID normalization.
+BBSNS implements a **Zero-Trust Identity Invariant** system that normalizes sensitive identifiers to prevent collision attacks.
 
 ```mermaid
 graph LR
-    A[Raw Input: ID Number] --> B(Normalization Engine)
-    B --> C{Identity Invariant}
+    A[Input: National ID] --> B(Normalization Engine)
+    B --> C{Identity Invariant Check}
     C -->|Match| D[Access Granted]
-    C -->|Mismatch| E[Forensic Lockout]
+    C -->|Mismatch| E[Access Denied]
     
-    subgraph "Normalization Process"
+    subgraph "Normalization Engine"
         B1[Trim Whitespace]
-        B2[Remove Special Chars]
-        B3[Convert to Uppercase]
+        B2[Remove All Spaces]
+        B3[To Uppercase]
     end
 ```
 
-### **Technical Deep-Dive:**
-- **ID Normalization**: To prevent collision attacks (e.g., `ABC-123` vs `abc 123`), the system enforces a strict normalization pipeline (`trim` → `remove spaces` → `uppercase`).
-- **Domain Separation**: The system enforces a "Hard Lock" between user types. A Document Owner can **never** access Notary-only endpoints, even if they compromise a session token.
+### **Security Invariants:**
+- **ID Normalization**: National IDs are processed through a `replace(/\s+/g, '').toUpperCase()` pipeline before hashing.
+- **Identity State Gate**: Only users with `identity_state === 'ACTIVE'` can bypass the `requirePrivilege` middleware. **REJECTED** or **DEACTIVATED** states result in an immediate forensic lockout.
 
 ---
 
 ## 🖋️ 4. EIP-712 Remote Signing Bridge
 
-To keep private keys secure, BBSNS uses a specialized bridge that allows Notaries to sign documents in a secure browser wallet while reviewing them in the isolated Desktop App.
+The system utilizes **EIP-712 Typed Data Signing** to ensure that Notaries can verify the exact contents of the payload (Doc Hash, Owner Address, Status) before signing.
 
-```mermaid
-sequenceDiagram
-    participant D as Desktop App
-    participant B as Backend API
-    participant W as Browser Wallet (Remote Auth)
-    participant BC as Blockchain
-
-    D->>B: Request Signing Payload
-    B-->>D: Return Session ID + Payload
-    D->>W: Push Notification (Web Socket)
-    W->>W: User Signs EIP-712 Message
-    W->>B: Submit Signature
-    B->>BC: relay(recordAction)
-    BC-->>B: txHash
-    B-->>D: Finalized
-```
-
-### **Why this matters:**
-- **Security**: The private key never leaves the Notary's browser wallet (MetaMask).
-- **Efficiency**: The Notary doesn't pay for gas. The system Relayer handles the transaction costs.
-- **Compliance**: EIP-712 provides a human-readable summary of what is being signed.
+### **The Handshake Protocol:**
+1. **Desktop App**: Requests an atomic signature payload from the Backend.
+2. **Remote Auth Bridge**: Renders the document preview via a signed S3 URL.
+3. **Wallet Signing**: The Notary signs the EIP-712 message.
+4. **Relay**: The Backend submits the signature to the `recordAction` function on the `DocumentRegistry` contract.
 
 ---
 
-## 🏛️ 5. Multi-Sig Governance Model
+## 🏛️ 5. Governance & Resilience
 
-The protocol is not controlled by one person. Changes require a consensus from the administrative committee.
-
-```mermaid
-graph TD
-    A[Admin A] -->|Create Proposal| P(Proposal: Update Registry)
-    B[Admin B] -->|Sign| P
-    C[Admin C] -->|Sign| P
-    P -->|Threshold Reached| X{Execute}
-    X -->|Update| Registry[Document Registry]
-```
-
-### **Governance Logic:**
-- **Transparency**: Every proposal is visible to all admins.
-- **Finality**: Once a threshold (e.g., 2-of-3) is met, the change is applied atomically to the smart contracts.
+- **Multi-Sig Control**: Protocol updates are managed via a threshold-based governance model in the `NotaryRegistry` contract.
+- **Self-Healing Workers**: 
+    - **Reconciliation**: Heals the "Sync Gap" for documents confirmed on-chain but pending in the DB.
+    - **Scavenger**: Purges orphaned S3 intents to maintain storage hygiene.
+- **Circuit Breaker**: The `requireUnpaused` middleware can freeze all mutations during protocol upgrades.
 
 ---
 
-## 💎 6. Tokenomics (NTK & NTKR)
-
-The system uses a dual-token model to align incentives between Users and Notaries.
-
-| Token | Type | Purpose | How to Get |
-| :--- | :--- | :--- | :--- |
-| **NTK** | ERC-20 (Utility) | Used to pay for notarization and notary fees. | Purchased or earned by Notaries. |
-| **NTKR** | ERC-20 (Reputation) | Non-transferable "Social Capital". | Granted after successful, high-quality notarizations. |
+## 📜 Verified Stack
+- **Node.js v18+** (Backend API)
+- **Solidity 0.8.20** (Smart Contracts)
+- **PostgreSQL 14+** (State Management)
+- **AWS S3 / KMS** (Storage & Encryption)
 
 ---
 
-## 🛠️ 7. Resilience & Background Workers
-
-BBSNS is "Self-Healing." It uses background workers to ensure the system remains responsive and consistent.
-
-- **Scavenger Worker**: Scans S3 every 24h. If a document intent was created but never paid for, it purges the file to save storage costs.
-- **Reconciliation Worker**: Compares the database with the blockchain. If a transaction was confirmed on-chain but the DB missed the event, it automatically heals the record.
-- **Role Sync Worker**: Ensures that if a user's role is revoked on-chain, their access is immediately blocked in the API.
-
----
-
-## 🚀 8. Getting Started
-
-Detailed installation instructions for developers can be found in the [DEVELOPER_MASTER_GUIDE.md](./DEVELOPER_MASTER_GUIDE.md).
-
-1. **Clone the Repository**.
-2. **Setup your .env files** using the provided `.env.example` blueprints.
-3. **Initialize the Database** using `final_schema.sql`.
-4. **Deploy the Contracts** to BSC Testnet using Hardhat.
-
----
-
-**BBSNS: Bridging Trust in the Digital Age.**
+**BBSNS: Authenticity through Cryptographic Finality.**
