@@ -69,7 +69,8 @@ function mapToDetailedDoc(doc) {
     uxCode = UX_CODES.CHAIN_SYNC_DELAYED;
   }
 
-  const derivedStatus = (doc.submission_state === 'submitted_to_blockchain' || doc.chain_confirmed) ? 'approved' : doc.submission_state;
+  const isRejected = doc.submission_state === 'rejected' || (doc.submission_state === 'submitted_to_blockchain' && doc.rejection_reason);
+  const derivedStatus = isRejected ? 'rejected' : (doc.submission_state === 'submitted_to_blockchain' || doc.chain_confirmed) ? 'approved' : doc.submission_state;
 
   return {
     id: doc.id,

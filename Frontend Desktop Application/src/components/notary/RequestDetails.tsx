@@ -117,15 +117,15 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
             }
 
             // 🔐 PHASE 2: Fetch Deterministic Payload from Backend
-            const status = confirmDialog.action === "approve" ? "approved" : "rejected";
+            const actionStatus = confirmDialog.action === "approve" ? "approved" : "rejected";
             const payloadData = await api.getSignaturePayload(
               requestId, 
-              status, 
+              actionStatus, 
               documentSummary, 
               rejectionReason
             );
 
-            console.log("Signing EIP-712 Payload from Backend:", payloadData.message);
+            console.log(`Signing EIP-712 Payload from Backend [${actionStatus}]:`, payloadData.message);
             const signature = await signer.signTypedData(
               payloadData.domain, 
               payloadData.types, 
@@ -133,12 +133,12 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
             );
 
             const finalPayload: any = {
-                status,
+                status: actionStatus,
                 signature,
                 timestamp: payloadData.message.timestamp.toString()
             };
 
-            if (status === "approved") {
+            if (actionStatus === "approved") {
                 finalPayload.document_summary = documentSummary;
                 finalPayload.notary_notes = documentSummary;
             } else {
@@ -209,7 +209,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         
                         // 5. Complete approval with captured signature
                         const finalPayload: any = {
-                            status,
+                            status: status, // Use the parameter passed to initiateRemoteSigning
                             signature: statusRes.signature,
                             timestamp: payloadData.message.timestamp.toString()
                         };
@@ -221,7 +221,7 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                             finalPayload.rejection_reason = rejectionReason;
                         }
 
-                        // This call will finish the local workflow (and handles 'already approved' cases gracefully)
+                        // This call will finish the local workflow
                         await api.approveDocument(requestId, finalPayload);
                         toast.success(`Request ${status} successfully (via Remote Auth).`);
                         setConfirmDialog({ open: false, action: null });
