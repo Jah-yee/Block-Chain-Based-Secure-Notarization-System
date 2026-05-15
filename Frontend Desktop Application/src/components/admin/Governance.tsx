@@ -136,6 +136,7 @@ interface SystemSettings {
     threshold: number
     timelockDelay: number
     signers: string[]
+    adminCount?: number
 }
 
 function TimelockCountdown({ submissionTime, delay, currentTime }: { submissionTime: number, delay: number, currentTime: number }) {
