@@ -121,30 +121,49 @@ function RemoteLoginContent() {
         setStatus("signing")
         
         try {
-            // 🛡️ [SECURITY] Hardened Wallet Re-Connection Insurance
             if (typeof window === "undefined" || !(window as any).ethereum) throw new Error("MetaMask not found.")
             
             const { ethers } = await import("ethers")
             const provider = new ethers.BrowserProvider((window as any).ethereum)
-            console.log("🚀 [RemoteAuth] Step 2: Requesting Accounts...")
             await provider.send("eth_requestAccounts", [])
             
             const signer = await provider.getSigner()
             const connectedAddress = await signer.getAddress()
-            console.log(`🚀 [RemoteAuth] Step 3: Connected to ${connectedAddress}`)
+            
+            let signature;
+            let isNotarize = false;
 
-            console.log("🚀 [RemoteAuth] Step 4: Signing Challenge...")
-            const signature = await signer.signMessage(challenge)
-            console.log("🚀 [RemoteAuth] Step 5: Signature obtained. Sending to server...")
+            // 🛡️ [Hardening] Detect and Handle Notarization Mode (EIP-712)
+            try {
+                const parsed = JSON.parse(challenge);
+                if (parsed.domain && parsed.types && parsed.message) {
+                    console.log("🚀 [RemoteAuth] Notarization Mode Detected. Using EIP-712 Structured Signing.");
+                    isNotarize = true;
+                    // Sign using EIP-712
+                    signature = await (signer as any).signTypedData(
+                        parsed.domain,
+                        parsed.types,
+                        parsed.message
+                    );
+                } else {
+                    signature = await signer.signMessage(challenge);
+                }
+            } catch (e) {
+                // Not JSON, use standard message sign
+                signature = await signer.signMessage(challenge);
+            }
 
-            const API_BASE = "https://api.bbsns.online"
-            const authResponse = await fetch(`${API_BASE}/api/auth/remote/authorize`, {
+            console.log("🚀 [RemoteAuth] Signature obtained. Sending to authority...");
+
+            const API_BASE = BACKEND_URL || "https://api.bbsns.online"
+            const authResponse = await fetch(`${API_BASE}/api/auth/remote/atomic-bind`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     sessionId,
                     walletAddress: connectedAddress,
-                    signature
+                    signature,
+                    timestamp: Math.floor(Date.now() / 1000).toString()
                 })
             })
 
@@ -153,17 +172,16 @@ function RemoteLoginContent() {
                 throw new Error(errorData.error || "Authorization failed on server")
             }
 
-            console.log("🚀 [RemoteAuth] Step 6: Authorization SUCCESS!")
             toast({
-                title: "Desktop Session Authorized",
-                description: "Your desktop app is now logged in. This window will close in 10 seconds."
+                title: isNotarize ? "Notarization Signed" : "Desktop Session Authorized",
+                description: isNotarize ? "The document notarization has been submitted to the blockchain." : "Your desktop app is now logged in.",
             })
             setStatus("authorized")
             setTimeout(() => { if (typeof window !== "undefined") window.close() }, 10000)
         } catch (err: any) {
             console.error("[RemoteLogin] Authorize error:", err)
             setError(err.message || "Authorization failed. Please try again.")
-            setStatus("ready") // go back to ready so they can retry
+            setStatus("ready")
             toast({ title: "Authorization Failed", description: err.message, variant: "destructive" })
         }
     }

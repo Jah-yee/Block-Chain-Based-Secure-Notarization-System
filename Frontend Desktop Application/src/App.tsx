@@ -440,7 +440,7 @@ export default function App() {
             <main className="flex-1 bg-background overflow-hidden flex flex-col">
               {notaryScreen === "dashboard" && <NotaryDashboard onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
               {notaryScreen === "pending" && <NotaryDashboard filterStatus="pending" onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
-              {notaryScreen === "approved" && <NotaryDashboard filterStatus="approved" onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
+              {notaryScreen === "approved" && <NotaryDashboard filterStatus="processed" onViewRequest={(id) => { setSelectedRequestId(String(id)); setNotaryScreen("request-details"); }} />}
               {notaryScreen === "request-details" && selectedRequestId && <RequestDetails requestId={selectedRequestId} onBack={() => { setNotaryScreen("dashboard"); setSelectedRequestId(null); }} />}
               {notaryScreen === "governance" && <Governance role="notary" user={user} />}
               {notaryScreen === "profile" && <Profile user={user} />}

@@ -1508,25 +1508,28 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
 
             if (session.document_id) {
                 console.log(`[AUTH_RELAY] Initiating notarization relay for document: ${session.document_id} by Notary: ${userId}`);
-                const payload = JSON.parse(session.challenge);
-                targetStatus = 'authorized'; // Maintain 'authorized' so Desktop App polling picks it up
+                const fullPayload = JSON.parse(session.challenge);
+                const message = fullPayload.message;
+                const metadata = fullPayload.metadata || {};
+                
+                targetStatus = 'authorized'; 
                 
                 try {
                     const txResult = await sendApprovalTx(
-                        payload.docHash,
-                        payload.ownerAddress,
-                        payload.status === 1 ? 'approved' : 'rejected',
+                        message.docHash,
+                        message.ownerAddress,
+                        Number(message.status) === 1 ? 'approved' : 'rejected',
                         signature,
-                        payload.timestamp,
-                        payload.summaryHash,
-                        payload.rejectionReasonHash,
+                        Number(message.timestamp),
+                        message.summaryHash,
+                        message.rejectionReasonHash,
                         recoveredAddress
                     );
                     txHash = txResult.txHash;
                     console.log(`[AUTH_RELAY] Transaction broadcasted: ${txHash}`);
 
                     // Update Document Status in DB
-                    const dbStatus = payload.status === 1 ? 'submitted_to_blockchain' : 'rejected';
+                    const dbStatus = Number(message.status) === 1 ? 'submitted_to_blockchain' : 'rejected';
                     await DocumentStatusService.updateStatus(
                         auditClient,
                         session.document_id,
@@ -1537,13 +1540,15 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
                             tx_hash: txHash, 
                             tx_status: "'pending'",
                             notary_id: userId,
+                            document_summary: metadata.summary_used ? `'${metadata.summary_used.replace(/'/g, "''")}'` : 'NULL',
+                            rejection_reason: metadata.reason_used ? `'${metadata.reason_used.replace(/'/g, "''")}'` : 'NULL',
                             status_updated_at: 'NOW()'
                         }
                     );
 
                     // Fire Reputation
-                    console.log(`[AUTH_RELAY] Triggering reputation event for Notary ID: ${userId} | Status: ${payload.status === 1 ? 'APPROVE' : 'REJECT'}`);
-                    await reputationService.handleEvent(userId, payload.status === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(err => {
+                    console.log(`[AUTH_RELAY] Triggering reputation event for Notary ID: ${userId} | Status: ${Number(message.status) === 1 ? 'APPROVE' : 'REJECT'}`);
+                    await reputationService.handleEvent(userId, Number(message.status) === 1 ? 'APPROVE' : 'REJECT', session.document_id).catch(err => {
                         console.warn(`[AUTH_RELAY_WARN] Reputation update failed: ${err.message}`);
                     });
 

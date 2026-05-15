@@ -10,7 +10,7 @@ import { useConfig } from "../../contexts/ConfigAuthority";
 
 interface NotaryDashboardProps {
     onViewRequest: (requestId: string | number) => void;
-    filterStatus?: "pending" | "approved" | "rejected";
+    filterStatus?: "pending" | "approved" | "rejected" | "processed";
 }
 
 interface Document {
@@ -105,8 +105,11 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
     };
 
     // Filter requests based on prop
-    const displayedRequests = (Array.isArray(requests) ? requests : []).filter(r => 
-        filterStatus ? r.status === filterStatus : true
+    // 'processed' mode shows both approved AND rejected (all terminal non-pending states)
+    const displayedRequests = (Array.isArray(requests) ? requests : []).filter(r =>
+        filterStatus === 'processed'
+            ? (r.status === 'approved' || r.status === 'rejected')
+            : filterStatus ? r.status === filterStatus : true
     );
 
     return (
@@ -116,10 +119,10 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-foreground mb-1">
-                            {filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Notary Dashboard"}
+                            {filterStatus === 'processed' ? 'Processed Requests' : filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Notary Dashboard"}
                         </h1>
                         <p className="text-sm text-muted-foreground">
-                            {filterStatus ? `Viewing all ${filterStatus} notarization requests` : "Welcome back, review and process notarization requests"}
+                            {filterStatus === 'processed' ? 'Viewing all approved and rejected notarization requests' : filterStatus ? `Viewing all ${filterStatus} notarization requests` : "Welcome back, review and process notarization requests"}
                         </p>
                     </div>
                     <Button
@@ -194,7 +197,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                 {/* Requests Table */}
                 <Card className="bg-card/50 border-border rounded-xl p-6 overflow-hidden">
                     <h3 className="text-foreground mb-4 font-semibold">
-                        {filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Recent Requests"}
+                        {filterStatus === 'processed' ? 'Processed Requests' : filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Recent Requests"}
                     </h3>
 
                     <div className="border border-border rounded-xl overflow-x-auto">
@@ -219,7 +222,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                                 ) : displayedRequests.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
-                                            No {filterStatus || ""} requests found.
+                                            No {filterStatus === 'processed' ? 'processed' : filterStatus || ''} requests found.
                                         </TableCell>
                                     </TableRow>
                                 ) : displayedRequests.map((request) => (

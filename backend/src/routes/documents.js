@@ -69,8 +69,15 @@ function mapToDetailedDoc(doc) {
     uxCode = UX_CODES.CHAIN_SYNC_DELAYED;
   }
 
-  const isRejected = doc.submission_state === 'rejected' || (doc.submission_state === 'submitted_to_blockchain' && doc.rejection_reason);
-  const derivedStatus = isRejected ? 'rejected' : (doc.submission_state === 'submitted_to_blockchain' || doc.chain_confirmed) ? 'approved' : doc.submission_state;
+  const isRejected = doc.submission_state === 'rejected' || (doc.submission_state === 'submitted_to_blockchain' && doc.rejection_reason) || doc.status === 'rejected';
+  
+  // 🛡️ [Hardening] Priority: Rejected > Confirmed (Approved) > In-Flight
+  let derivedStatus = doc.submission_state;
+  if (isRejected) {
+    derivedStatus = 'rejected';
+  } else if (doc.chain_confirmed || doc.submission_state === 'submitted_to_blockchain') {
+    derivedStatus = 'approved';
+  }
 
   return {
     id: doc.id,
@@ -94,7 +101,7 @@ function mapToDetailedDoc(doc) {
     chain_confirmed: doc.chain_confirmed,
     notary_id: doc.notary_id,
     notary_wallet: doc.notary_wallet || null,
-    approval_tx_hash: doc.approval_tx_hash || null,
+    approval_tx_hash: doc.approval_tx_hash || doc.tx_hash || null,
     rejection_reason: doc.rejection_reason,
     created_at: doc.created_at,
     updated_at: doc.updated_at,
@@ -958,15 +965,41 @@ async function handleDocumentPatch(req, res) {
       
       if (onChainData.exists && Number(onChainData.status) > 0) {
         logger.info('DUPLICATE_PREVENTED', { id, correlation_id: correlationId, reason: 'Already on-chain' });
-        const targetSyncState = onChainData.status === 1n ? 'submitted_to_blockchain' : 'rejected';
+        const targetSyncState = Number(onChainData.status) === 2 ? 'rejected' : 'submitted_to_blockchain';
         
+        // 🛡️ [Fix] Attempt to recover tx_hash from blockchain logs for certificate display
+        let recoveredTxHash = doc.tx_hash || doc.approval_tx_hash || null;
+        if (!recoveredTxHash) {
+            try {
+                const currentBlock = await provider.getBlockNumber();
+                const fromBlock = Math.max(0, currentBlock - 50000);
+                const logs = await provider.getLogs({
+                    address: (await ConfigService.getConfig()).contracts.documentRegistry,
+                    fromBlock,
+                    toBlock: 'latest'
+                });
+                const matchingLog = logs.find(log =>
+                    log.topics && log.topics.some(t => t && t.toLowerCase().includes(docHashBytes.slice(2).toLowerCase()))
+                );
+                if (matchingLog) recoveredTxHash = matchingLog.transactionHash;
+            } catch (logErr) {
+                logger.warn('TX_HASH_RECOVERY_WARN', { id, error: logErr.message });
+            }
+        }
+
+        const extraMeta = { chain_confirmed: true, tx_status: 'confirmed' };
+        if (recoveredTxHash) {
+            extraMeta.tx_hash = recoveredTxHash;
+            extraMeta.approval_tx_hash = recoveredTxHash;
+        }
+
         const statusResult = await DocumentStatusService.updateStatus(
           client, 
           id, 
           doc.submission_state, 
           doc.revision, 
           targetSyncState, 
-          { chain_confirmed: true, tx_status: 'confirmed' }
+          extraMeta
         );
 
         if (statusResult.error === 'STATE_CONFLICT') {

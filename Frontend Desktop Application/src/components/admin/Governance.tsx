@@ -393,7 +393,7 @@ export function Governance({ role, user }: GovernanceProps) {
 
                 // Get Config and Open Browser
                 const configRes = await api.getSystemConfig();
-                const baseAuthUrl = configRes.remoteAuthUrl.replace(/\/$/, "");
+                const baseAuthUrl = (configRes.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
                 const webAppUrl = `${baseAuthUrl}/?mode=gov-submit&sessionId=${session.sessionId}`;
 
                 // @ts-ignore

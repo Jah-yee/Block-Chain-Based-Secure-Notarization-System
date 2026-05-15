@@ -602,7 +602,19 @@ router.get('/remote/submit/status/:sessionId', withDomain('GOVERNANCE'), allowPu
         if (!isValidUUID(sessionId)) {
             return res.status(400).json({ error: 'Invalid session ID format' });
         }
-        const result = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'SUBMIT'", [sessionId]);
+        
+        const query = `
+            SELECT s.*, 
+                   p.title as proposal_title, 
+                   p.target_id as proposal_target, 
+                   p.description as proposal_description,
+                   p.on_chain_data as proposal_data,
+                   p.on_chain_target as proposal_contract
+            FROM remote_gov_sessions s
+            LEFT JOIN governance_proposals p ON s.proposal_id = p.id
+            WHERE s.id = $1 AND s.type = 'SUBMIT'
+        `;
+        const result = await pool.query(query, [sessionId]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Session not found' });
@@ -616,10 +628,23 @@ router.get('/remote/submit/status/:sessionId', withDomain('GOVERNANCE'), allowPu
             return res.json({ status: 'expired' });
         }
 
+        const config = await ConfigService.getConfig();
+
         res.json({
             status: session.status,
             challenge: session.challenge,
             proposalId: session.proposal_id,
+            proposal: {
+                title: session.proposal_title,
+                target_id: session.proposal_target,
+                description: session.proposal_description,
+                data: session.proposal_data,
+                to: session.proposal_contract,
+                value: "0", // Currently all promotions are 0 value
+                proposalHash: session.proposal_hash
+            },
+            multisigAddress: config.contracts.multisig,
+            type: session.type,
             wallet_address: session.wallet_address,
             txHash: session.tx_hash
         });
@@ -691,6 +716,75 @@ router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, r
         res.json({ success: true, txHash: receipt.hash });
     } catch (error) {
         console.error('Remote submit authorize error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+// POST /api/governance/remote/submit/sync-manual - Confirm direct blockchain transaction by Admin
+router.post('/remote/submit/sync-manual', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
+    try {
+        const { sessionId, txHash, walletAddress } = req.body;
+
+        if (!sessionId || !txHash || !walletAddress) {
+            return res.status(400).json({ error: 'sessionId, txHash, and walletAddress are required' });
+        }
+
+        // 1. Verify Session
+        const sessionResult = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'SUBMIT'", [sessionId]);
+        if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const session = sessionResult.rows[0];
+
+        if (session.status !== 'pending') {
+            // If already authorized, just return success
+            if (session.status === 'authorized') return res.json({ success: true, txHash: session.tx_hash });
+            return res.status(400).json({ error: `Session is already ${session.status}` });
+        }
+
+        // 2. Verify Transaction on Chain
+        const provider = await ProviderService.getProvider();
+        const receipt = await provider.getTransactionReceipt(txHash);
+
+        if (!receipt) {
+            return res.status(400).json({ error: 'Transaction receipt not found. Please wait for confirmation.' });
+        }
+
+        if (receipt.status !== 1) {
+            return res.status(400).json({ error: 'Blockchain transaction failed on-chain.' });
+        }
+
+        // 3. Extract txIndex from logs
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
+        const iface = new ethers.Interface(artifact.abi);
+        let txIndex;
+        for (const log of receipt.logs) {
+            try {
+                const parsed = iface.parseLog(log);
+                if (parsed.name === 'TransactionSubmitted') {
+                    txIndex = Number(parsed.args.txIndex);
+                    break;
+                }
+            } catch (e) { }
+        }
+
+        if (txIndex === undefined) {
+            return res.status(400).json({ error: 'TransactionSubmitted event not found in logs. Wrong transaction?' });
+        }
+
+        // 4. Update DB
+        const proposalId = session.proposal_id;
+        await pool.query(
+            "UPDATE governance_proposals SET on_chain_tx_index = $1, status = 'active' WHERE id = $2",
+            [txIndex, proposalId]
+        );
+
+        await pool.query(
+            "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, tx_hash = $2, authorized_at = NOW() WHERE id = $3",
+            [walletAddress.toLowerCase(), txHash, sessionId]
+        );
+
+        res.json({ success: true, txIndex, txHash });
+    } catch (error) {
+        console.error('Remote submit manual sync error:', error);
         res.status(500).json({ error: error.message || 'Internal server error' });
     }
 });

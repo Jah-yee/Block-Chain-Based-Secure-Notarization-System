@@ -18,6 +18,7 @@ function App() {
   const [handshakeDomain, setHandshakeDomain] = useState<any>(null);
   const [handshakeTypes, setHandshakeTypes] = useState<any>(null);
   const [notarizeMetadata, setNotarizeMetadata] = useState<any>(null);
+  const [governanceMetadata, setGovernanceMetadata] = useState<any>(null);
   const [targetAddress, setTargetAddress] = useState<string | null>(null);
   const [isPromoting, setIsPromoting] = useState(false);
 
@@ -192,6 +193,13 @@ function App() {
 
         if (data.handshakeDomain) setHandshakeDomain(data.handshakeDomain);
         if (data.handshakeTypes) setHandshakeTypes(data.handshakeTypes);
+        
+        // Capture Governance Submission Metadata
+        if (currentMode === "gov-submit" && data.proposal) {
+          setGovernanceMetadata(data.proposal);
+          console.log("[AUTH] Governance submission metadata detected:", data.proposal);
+        }
+        
         setStatus("ready");
       }
     } catch (err: any) {
@@ -353,6 +361,49 @@ function App() {
 
       if (activeMode === "gov-vote" || activeMode === "gov-submit" || activeMode === "multisig") {
         let authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/vote/authorize`;
+        
+        // 🛡️ [Direct-Path] If this is a SUBMIT session and we have on-chain metadata, trigger direct transaction
+        if (activeMode === "gov-submit" && governanceMetadata) {
+           console.log("[AUTH] Initiating Direct MultiSig Submission...");
+           try {
+              const abi = ["function submitTransaction(address,uint256,bytes) external returns (uint256)"];
+              const multisig = new ethers.Contract(governanceMetadata.multisigAddress, abi, signer);
+              
+              const tx = await multisig.submitTransaction(
+                governanceMetadata.to,
+                governanceMetadata.value,
+                governanceMetadata.data
+              );
+              
+              console.log("[AUTH] MultiSig Transaction Submitted:", tx.hash);
+              const receipt = await tx.wait();
+              console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+
+              // Step 2: Manual Sync with Backend
+              const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/submit/sync-manual`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                  sessionId, 
+                  txHash: tx.hash,
+                  walletAddress: address 
+                })
+              });
+
+              if (!syncRes.ok) {
+                 const syncData = await syncRes.json().catch(() => ({}));
+                 throw new Error(syncData.error || "Blockchain transaction succeeded, but backend sync failed.");
+              }
+
+              setStatus("authorized");
+              setTimeout(() => window.close(), 10000);
+              return;
+           } catch (err: any) {
+              console.error("[AUTH_ERR] Direct submission failed:", err);
+              throw new Error(err.reason || err.message || "On-chain submission failed. Ensure you have gas and the correct wallet.");
+           }
+        }
+
         if (activeMode === "gov-submit") authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/submit/authorize`;
         else if (activeMode === "multisig") authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/confirm/authorize`;
 
@@ -385,8 +436,10 @@ function App() {
 
       if (notarizeMetadata && !isDirect) {
         // 🛡️ [Step B] Notarize-Mode EIP-712 Signing (GASLESS)
-        console.log(`[AUTH] Initiating Gasless Notarization Signing for doc: ${notarizeMetadata.docHash}`);
+        console.log(`[AUTH] Initiating Gasless Notarization Signing for doc: ${notarizeMetadata.message?.docHash || notarizeMetadata.docHash}`);
         
+        const payloadMessage = notarizeMetadata.message || notarizeMetadata;
+
         const domain = {
           name: "BBSNS_Protocol",
           version: "1",
@@ -407,10 +460,10 @@ function App() {
         };
 
         const message = {
-          ...notarizeMetadata,
-          status: Number(notarizeMetadata.status),
-          timestamp: Number(notarizeMetadata.timestamp),
-          nonce: BigInt(notarizeMetadata.nonce).toString()
+          ...payloadMessage,
+          status: Number(payloadMessage.status),
+          timestamp: Number(payloadMessage.timestamp),
+          nonce: BigInt(payloadMessage.nonce).toString()
         };
 
         console.log("[AUTH] Signing Notarize Payload (Gasless):", { domain, types, message });
@@ -418,14 +471,14 @@ function App() {
         const signature = await signer.signTypedData(domain, types, message);
         console.log("[AUTH] Notarization signature obtained. Relaying to authority via atomic-bind...");
 
-        const bindRes = await fetch(`${BACKEND_URL}/auth/remote/atomic-bind`, {
+        const bindRes = await fetch(`${BACKEND_URL}/api/auth/remote/atomic-bind`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sessionId,
             signature,
             walletAddress: address,
-            timestamp: notarizeMetadata.timestamp
+            timestamp: payloadMessage.timestamp.toString()
           })
         });
 

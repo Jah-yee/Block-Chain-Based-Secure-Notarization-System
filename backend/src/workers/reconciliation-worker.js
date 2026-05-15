@@ -67,13 +67,42 @@ async function reconcile() {
                     // 1. BLIND ON-CHAIN CHECK (Self-Heal)
                     const onChainData = await contract.getDocument(docHashBytes);
                     if (onChainData.exists && Number(onChainData.status) > 0) {
+                        const onChainStatus = Number(onChainData.status);
+                        const targetState = onChainStatus === 2 ? 'rejected' : 'submitted_to_blockchain';
+                        
+                        // 🛡️ [Fix] Try to recover tx_hash from blockchain logs if not already stored
+                        let recoveredTxHash = doc.tx_hash || null;
+                        if (!recoveredTxHash) {
+                            try {
+                                const currentBlock = await provider.getBlockNumber();
+                                const fromBlock = Math.max(0, currentBlock - 50000);
+                                const logs = await provider.getLogs({
+                                    address: config.contracts.documentRegistry,
+                                    fromBlock,
+                                    toBlock: 'latest'
+                                });
+                                // Find the log that matches this document hash
+                                const matchingLog = logs.find(log => 
+                                    log.topics && log.topics.some(t => t && t.toLowerCase().includes(docHashBytes.slice(2).toLowerCase()))
+                                );
+                                if (matchingLog) recoveredTxHash = matchingLog.transactionHash;
+                            } catch (logErr) {
+                                console.warn(`[RECON_LOG_WARN] Could not recover tx_hash for doc ${doc.id}: ${logErr.message}`);
+                            }
+                        }
+
+                        const updateFields = recoveredTxHash
+                            ? "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, tx_hash = $3, approval_tx_hash = $3, updated_at = NOW(), status_updated_at = NOW()"
+                            : "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, updated_at = NOW(), status_updated_at = NOW()";
+                        const updateParams = recoveredTxHash ? [targetState, doc.id, recoveredTxHash] : [targetState, doc.id];
+
                         await pool.query(
-                            "UPDATE documents SET chain_confirmed = true, tx_status = 'confirmed', submission_state = 'submitted_to_blockchain', updated_at = NOW(), status_updated_at = NOW() WHERE id = $1",
-                            [doc.id]
+                            `UPDATE documents SET ${updateFields} WHERE id = $2`,
+                            updateParams
                         );
                         await SyncLogger.logEvent({
                             userId: doc.id, syncType: 'notarization', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
-                            statusBefore: doc.tx_status, statusAfter: 'confirmed', metadata: { reason: 'onchain_match' }
+                            statusBefore: doc.tx_status, statusAfter: 'confirmed', metadata: { reason: 'onchain_match', txHash: recoveredTxHash }
                         });
                         // await cleanupStorage(doc);
                         continue;
@@ -84,10 +113,24 @@ async function reconcile() {
                         const receipt = await provider.getTransactionReceipt(doc.tx_hash);
                         if (receipt) {
                             const isSuccess = receipt.status === 1;
-                            const statusAfter = isSuccess ? 'confirmed' : 'failed';
+                            let statusAfter = isSuccess ? 'confirmed' : 'failed';
+                            
+                            // 🛡️ [Hardening] If success, check the internal contract status (1=Approved, 2=Rejected)
+                            let submissionStateUpdate = doc.submission_state;
+                            if (isSuccess) {
+                                try {
+                                    const onChainData = await contract.getDocument(docHashBytes);
+                                    if (onChainData.exists) {
+                                        submissionStateUpdate = Number(onChainData.status) === 2 ? 'rejected' : 'submitted_to_blockchain';
+                                    }
+                                } catch (e) {
+                                    console.warn(`[RECON_SYNC_ERR] Failed to verify internal status for doc ${doc.id}:`, e.message);
+                                }
+                            }
+
                             await pool.query(
-                                "UPDATE documents SET chain_confirmed = $1, tx_status = $2, updated_at = NOW(), status_updated_at = NOW() WHERE id = $3",
-                                [isSuccess, statusAfter, doc.id]
+                                "UPDATE documents SET chain_confirmed = $1, tx_status = $2, submission_state = $3, tx_hash = COALESCE(NULLIF(tx_hash,''), $5), approval_tx_hash = COALESCE(NULLIF(approval_tx_hash,''), $5), updated_at = NOW(), status_updated_at = NOW() WHERE id = $4",
+                                [isSuccess, statusAfter, submissionStateUpdate, doc.id, doc.tx_hash || null]
                             );
                             await SyncLogger.logEvent({
                                 userId: doc.id, syncType: 'notarization', 
