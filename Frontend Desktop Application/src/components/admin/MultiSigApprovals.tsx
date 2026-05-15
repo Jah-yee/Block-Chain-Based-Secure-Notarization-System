@@ -197,7 +197,7 @@ export function MultiSigApprovals() {
         // --- REMOTE SIGNING FLOW ---
         const session = await api.initRemoteMultiSigSession(tx.index);
         const baseAuthUrl = (config?.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
-        const link = `${baseAuthUrl}/?mode=multisig&sessionId=${session.sessionId}`;
+        const link = `${baseAuthUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
         setRemoteSessionLink(link);
 
         // Open automatically if possible

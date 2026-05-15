@@ -166,7 +166,7 @@ function GovernanceHealthWidget({ settings }: { settings: SystemSettings | null 
     if (!settings) return null;
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
             <div className="bg-primary/5 border border-primary/10 rounded-2xl p-4 group hover:bg-primary/10 transition-all">
                 <div className="flex items-center justify-between mb-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-primary/40">Network Quorum</p>
@@ -230,7 +230,12 @@ export function Governance({ role, user }: GovernanceProps) {
     const [copiedId, setCopiedId] = useState<string | null>(null)
     const { config } = useConfig();
 
-    const isSingleAdmin = systemSettings && systemSettings.threshold === 1 && systemSettings.signers && systemSettings.signers.length === 1;
+    // Use DB adminCount from backend (if available) for accuracy; fallback to on-chain signers
+    const isSingleAdmin = systemSettings &&
+        systemSettings.threshold === 1 &&
+        (systemSettings.adminCount !== undefined
+            ? systemSettings.adminCount === 1
+            : systemSettings.signers && systemSettings.signers.length === 1);
 
     const handleCopy = (text: string, id: string) => {
         navigator.clipboard.writeText(text);
@@ -910,63 +915,71 @@ export function Governance({ role, user }: GovernanceProps) {
                             </CardContent>
                         </Card>
                     ) : (
-                        <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-                            <div className="divide-y divide-border/30">
-                                {proposals
-                                    .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected')
-                                    .map((prop) => (
-                                    <div
-                                        key={prop.id}
-                                        className={`p-3.5 transition-all cursor-pointer group flex items-center justify-between ${selectedProposalId === prop.id
-                                            ? 'bg-primary/5'
-                                            : 'bg-transparent hover:bg-muted/30'
-                                            }`}
-                                        onClick={() => setSelectedProposalId(prop.id)}
-                                    >
-                                        <div className="flex items-center space-x-4 min-w-0">
-                                            <div className={`h-10 w-10 rounded-full flex items-center justify-center border ${selectedProposalId === prop.id
-                                                ? 'bg-primary/20 border-primary/30 text-primary'
-                                                : 'bg-muted/30 border-border/50 text-muted-foreground'
-                                                }`}>
-                                                <Gavel className="h-5 w-5" />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="flex items-center space-x-2">
-                                                    <span className="text-[10px] font-black text-primary/40">#P{prop.id}</span>
-                                                    <h4 className="text-sm font-bold text-foreground truncate max-w-[200px] tracking-tight">{prop.title}</h4>
+                        <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm flex flex-col">
+                            {/* Sticky column headers */}
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/50 border-b border-border/30">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Proposal</span>
+                                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground hidden sm:block">Approvals</span>
+                            </div>
+                            {/* Scrollable list */}
+                            <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: '400px' }}>
+                                <div className="divide-y divide-border/30">
+                                    {proposals
+                                        .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected')
+                                        .map((prop) => (
+                                        <div
+                                            key={prop.id}
+                                            className={`p-3.5 transition-all cursor-pointer group flex items-center justify-between ${selectedProposalId === prop.id
+                                                ? 'bg-primary/5'
+                                                : 'bg-transparent hover:bg-muted/30'
+                                                }`}
+                                            onClick={() => setSelectedProposalId(prop.id)}
+                                        >
+                                            <div className="flex items-center space-x-4 min-w-0">
+                                                <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${selectedProposalId === prop.id
+                                                    ? 'bg-primary/20 border-primary/30 text-primary'
+                                                    : 'bg-muted/30 border-border/50 text-muted-foreground'
+                                                    }`}>
+                                                    <Gavel className="h-5 w-5" />
                                                 </div>
-                                                <div className="flex items-center space-x-3 mt-1">
-                                                    <span className="text-[10px] font-bold text-muted-foreground/60 uppercase">
-                                                        {prop.type.replace('_', ' ')}
-                                                    </span>
-                                                    <span className="h-1 w-1 rounded-full bg-border" />
-                                                    <span className="text-[10px] font-medium text-muted-foreground/40">
-                                                        {new Date(prop.created_at).toLocaleDateString()}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center space-x-6">
-                                            <div className="hidden sm:flex flex-col items-end space-y-1">
-                                                <div className="flex items-center text-[11px] font-black text-foreground/80">
-                                                    <Users2 className="h-3 w-3 mr-1.5 text-primary/60" />
-                                                    {prop.approvals} <span className="mx-1 text-muted-foreground/30">/</span> {systemSettings?.threshold || prop.threshold || 2}
-                                                </div>
-                                                {prop.status === 'active' && (
-                                                    <div className="h-1 w-12 bg-muted rounded-full overflow-hidden">
-                                                        <div 
-                                                            className="h-full bg-primary transition-all duration-500" 
-                                                            style={{ width: `${Math.min(100, (prop.approvals / (systemSettings?.threshold || prop.threshold || 2)) * 100)}%` }}
-                                                        />
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center space-x-2">
+                                                        <span className="text-[10px] font-black text-primary/40 shrink-0">#P{prop.id}</span>
+                                                        <h4 className="text-sm font-bold text-foreground truncate max-w-[300px] tracking-tight">{prop.title}</h4>
                                                     </div>
-                                                )}
+                                                    <div className="flex items-center space-x-3 mt-1">
+                                                        <span className="text-[10px] font-bold text-muted-foreground/60 uppercase">
+                                                            {prop.type.replace('_', ' ')}
+                                                        </span>
+                                                        <span className="h-1 w-1 rounded-full bg-border" />
+                                                        <span className="text-[10px] font-medium text-muted-foreground/40">
+                                                            {new Date(prop.created_at).toLocaleDateString()}
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </div>
 
-                                            <ChevronRight className={`h-5 w-5 transition-transform ${selectedProposalId === prop.id ? 'text-primary translate-x-1' : 'text-muted-foreground/20 group-hover:text-muted-foreground/50'}`} />
+                                            <div className="flex items-center space-x-6 shrink-0">
+                                                <div className="hidden sm:flex flex-col items-end space-y-1">
+                                                    <div className="flex items-center text-[11px] font-black text-foreground/80">
+                                                        <Users2 className="h-3 w-3 mr-1.5 text-primary/60" />
+                                                        {prop.approvals} <span className="mx-1 text-muted-foreground/30">/</span> {systemSettings?.threshold || prop.threshold || 2}
+                                                    </div>
+                                                    {prop.status === 'active' && (
+                                                        <div className="h-1 w-12 bg-muted rounded-full overflow-hidden">
+                                                            <div 
+                                                                className="h-full bg-primary transition-all duration-500" 
+                                                                style={{ width: `${Math.min(100, (prop.approvals / (systemSettings?.threshold || prop.threshold || 2)) * 100)}%` }}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <ChevronRight className={`h-5 w-5 transition-transform ${selectedProposalId === prop.id ? 'text-primary translate-x-1' : 'text-muted-foreground/20 group-hover:text-muted-foreground/50'}`} />
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     )}

@@ -180,11 +180,17 @@ router.get(
             const config = await ConfigService.getConfig();
             const contractAddress = config?.contracts?.multisig;
 
+            // Fetch DB admin count in parallel
+            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
+            const adminCount = parseInt(dbAdminRes.rows[0].count);
+
             if (!contractAddress) {
                 return res.json({
                     address: "0x0",
                     threshold: 0,
+                    timelockDelay: 0,
                     signers: [],
+                    adminCount,
                     status: "degraded",
                     error: "Multisig address not configured"
                 });
@@ -195,31 +201,39 @@ router.get(
             const artifact = require(artifactPath);
             const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
 
-            const [threshold, signers] = await Promise.all([
+            const [threshold, delay, signers] = await Promise.all([
                 contract.threshold(),
+                contract.timelockDelay(),
                 contract.getSigners()
             ]);
 
             res.json({
                 address: contractAddress,
                 threshold: Number(threshold),
+                timelockDelay: Number(delay),
                 signers: signers,
+                adminCount,
                 status: "active"
             });
         } catch (error) {
             console.error("Fetch multisig settings error:", error);
             // 🛡️ [RESILIENCE] Fallback to safe state
             const config = await ConfigService.getConfig();
+            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]).catch(() => ({ rows: [{ count: 0 }] }));
+            const adminCount = parseInt(dbAdminRes.rows[0].count);
             res.json({ 
                 address: config?.contracts?.multisig || "0x0",
                 threshold: 0,
+                timelockDelay: 0,
                 signers: [],
+                adminCount,
                 status: "degraded",
                 error: "Failed to fetch multisig settings from blockchain" 
             });
         }
     }
 );
+
 
 router.get(
     "/multisig/stats",
@@ -281,40 +295,116 @@ router.get(
 // GET /api/governance/multisig/transactions
 router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }), async (req, res) => {
     try {
-        // Returns recent multisig transactions associated with proposals
-        // Matches the structure expected by the frontend enrichment logic
+        const config = await ConfigService.getConfig();
+        const contractAddress = config?.contracts?.multisig;
+
+        // Fetch proposals that have been submitted on-chain
         const result = await pool.query(`
             SELECT 
-                p.id as index, 
-                p.created_at as submissionTime, 
-                COUNT(v.id) as numConfirmations, 
-                CASE WHEN p.status = 'executed' THEN true ELSE false END as executed
+                p.id,
+                p.on_chain_tx_index,
+                p.created_at as submissionTime,
+                p.status,
+                p.on_chain_data,
+                p.title,
+                p.type,
+                p.target_id,
+                COUNT(v.id) as numConfirmations
             FROM governance_proposals p
             LEFT JOIN governance_votes v ON p.id = v.proposal_id AND v.decision = 'approve'
+            WHERE p.on_chain_tx_index IS NOT NULL
             GROUP BY p.id
             ORDER BY p.created_at DESC
             LIMIT 20
         `);
 
-        // Map database fields to the expected blockchain-like format
-        const transactions = (result.rows || []).map(row => ({
-            index: row.index,
-            submissionTime: Math.floor(new Date(row.submissionTime).getTime() / 1000),
-            numConfirmations: row.numConfirmations || 0,
-            executed: row.executed
-        }));
+        let contractThreshold = 0;
+        let contractTimelockDelay = 0;
+        let contractSigners = [];
+        let txEnrichments = {};
 
-        res.json({ transactions });
+        // Try to fetch live blockchain data to enrich transactions
+        if (contractAddress) {
+            try {
+                const provider = await ProviderService.getProvider();
+                const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
+                const artifact = require(artifactPath);
+                const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
+
+                const [threshold, delay, signers] = await Promise.all([
+                    contract.threshold(),
+                    contract.timelockDelay(),
+                    contract.getSigners()
+                ]);
+                contractThreshold = Number(threshold);
+                contractTimelockDelay = Number(delay);
+                contractSigners = signers;
+
+                // Enrich each on-chain transaction with live confirmations
+                await Promise.all(result.rows.map(async (row) => {
+                    const txIdx = row.on_chain_tx_index;
+                    if (txIdx === null || txIdx === undefined) return;
+                    try {
+                        const [txData, confirmationStatuses] = await Promise.all([
+                            contract.getTransaction(txIdx).catch(() => null),
+                            Promise.all(signers.map(async (addr) => ({
+                                address: addr,
+                                confirmed: await contract.isConfirmed(txIdx, addr).catch(() => false)
+                            })))
+                        ]);
+                        txEnrichments[txIdx] = {
+                            to: txData?.to || contractAddress,
+                            value: txData?.value?.toString() || '0',
+                            data: txData?.data || (row.on_chain_data || '0x'),
+                            confirmations: confirmationStatuses
+                        };
+                    } catch (e) {
+                        console.warn(`[MULTISIG_TX_ENRICH] Could not enrich txIndex ${txIdx}:`, e.message);
+                    }
+                }));
+            } catch (chainErr) {
+                console.warn('[MULTISIG_TX_ENRICH] Blockchain enrichment failed, using DB-only data:', chainErr.message);
+            }
+        }
+
+        // Map database fields to the expected blockchain-like format
+        const transactions = (result.rows || []).map(row => {
+            const txIdx = row.on_chain_tx_index;
+            const enriched = txEnrichments[txIdx] || {};
+            const submissionTs = row.submissiontime || row.submissionTime;
+            const tsNum = submissionTs ? Math.floor(new Date(submissionTs).getTime() / 1000) : 0;
+            return {
+                index: txIdx !== null ? Number(txIdx) : row.id,
+                to: enriched.to || contractAddress || '',
+                value: enriched.value || '0',
+                data: enriched.data || row.on_chain_data || '0x',
+                submissionTime: tsNum,
+                numConfirmations: parseInt(row.numconfirmations || row.numConfirmations) || 0,
+                executed: row.status === 'executed',
+                confirmations: enriched.confirmations || []
+            };
+        });
+
+        res.json({ 
+            transactions,
+            address: contractAddress || '',
+            threshold: contractThreshold,
+            timelockDelay: contractTimelockDelay
+        });
     } catch (err) {
         console.error("[GOVERNANCE_TX_FAIL] Resilient failure fallback:", err.message);
         // 🛡️ [SECURITY] Return safe empty state instead of 500 to keep UI alive
         res.json({
             transactions: [],
+            address: '',
+            threshold: 0,
+            timelockDelay: 0,
             status: "degraded",
             error: "Telemetry stream interrupted"
         });
     }
 });
+
 
 // POST /api/governance/proposals/:id/prepare-on-chain
 router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
@@ -415,9 +505,12 @@ router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requireP
             } catch (e) { }
         }
 
-        // 3. Update DB
+        // 3. Update DB — preserve 'passed' status if it was already fast-tracked
         await pool.query(
-            "UPDATE governance_proposals SET on_chain_tx_index = $1, status = 'active' WHERE id = $2",
+            `UPDATE governance_proposals
+             SET on_chain_tx_index = $1,
+                 status = CASE WHEN status = 'passed' THEN 'passed' ELSE 'active' END
+             WHERE id = $2`,
             [txIndex, proposalId]
         );
 
@@ -552,14 +645,24 @@ router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, req
             [session.proposal_id]
         );
         const approvals = parseInt(voteCountRes.rows[0].count);
-        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", ['admin']);
+        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
         const adminCount = parseInt(adminRes.rows[0].count);
 
-        if (session.decision === 'approve' && (adminCount === 1 || approvals >= adminCount)) {
+        const isSingleAdmin = adminCount === 1;
+        if (session.decision === 'approve' && (isSingleAdmin || approvals >= adminCount)) {
             await pool.query("UPDATE governance_proposals SET status = 'passed' WHERE id = $1", [session.proposal_id]);
+            console.log(`✅ [GOV_REMOTE_VOTE] Proposal ${session.proposal_id} passed. isSingleAdmin=${isSingleAdmin}, approvals=${approvals}/${adminCount}`);
+            return res.json({
+                message: isSingleAdmin
+                    ? 'Vote authorized. Proposal PASSED (single-admin fast-track). Execute on-chain to apply changes.'
+                    : 'Vote authorized. Proposal PASSED — threshold met.',
+                proposalPassed: true,
+                isSingleAdmin,
+                status: 'passed'
+            });
         }
 
-        res.json({ message: 'Vote authorized successfully' });
+        res.json({ message: 'Vote authorized successfully', proposalPassed: false, status: 'active' });
     } catch (error) {
         console.error('Remote vote authorize error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -702,9 +805,12 @@ router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, r
             } catch (e) { }
         }
 
-        // 2. Update DB & Session
+        // 2. Update DB & Session — preserve 'passed' status if already fast-tracked
         await pool.query(
-            "UPDATE governance_proposals SET on_chain_tx_index = $1, status = 'active' WHERE id = $2",
+            `UPDATE governance_proposals
+             SET on_chain_tx_index = $1,
+                 status = CASE WHEN status = 'passed' THEN 'passed' ELSE 'active' END
+             WHERE id = $2`,
             [txIndex, proposalId]
         );
 

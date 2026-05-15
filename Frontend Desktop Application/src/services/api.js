@@ -273,15 +273,13 @@ const api = {
   },
 
   async getMultisigSettings() {
-    return this.request('/api/governance/multisig/settings');
+    // /multisig/stats is the canonical full-data endpoint that includes timelockDelay
+    return this.request('/api/governance/multisig/stats');
   },
 
-  async confirmMultiSigApprove(txIndex, signature) {
-    return this.request(`/api/governance/proposals/0/confirm-on-chain`, {
-      method: 'POST',
-      body: JSON.stringify({ txIndex, signature })
-    });
-  },
+  // confirmMultiSigApprove removed — confirmation now goes through
+  // the direct contract call (revokeAction/confirmAction in MultiSigApprovals.tsx)
+  // or the remote/confirm/authorize flow.
 
   async executeMultiSigTransaction(txIndex) {
     return this.request(`/api/governance/multisig/transactions/${txIndex}/execute`, { method: 'POST' });
@@ -292,14 +290,14 @@ const api = {
   },
 
   async initRemoteMultiSigSession(txIndex) {
-    return this.request('/api/governance/remote/multisig/session', {
+    return this.request('/api/governance/remote/confirm/session', {
       method: 'POST',
       body: JSON.stringify({ txIndex })
     });
   },
 
   async checkRemoteMultiSigStatus(sessionId) {
-    return this.request(`/api/governance/remote/vote/status/${sessionId}`);
+    return this.request(`/api/governance/remote/confirm/status/${sessionId}`);
   },
 
   async getSystemLogs() {

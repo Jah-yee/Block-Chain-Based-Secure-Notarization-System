@@ -493,7 +493,7 @@ export function ManageNotaries() {
                                 </>
                               )}
 
-                              {status === "approved" && (
+                              {status === "APPROVED" && (
                                 <>
                                   <Button
                                     size="sm"

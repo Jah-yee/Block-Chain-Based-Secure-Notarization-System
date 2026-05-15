@@ -46,15 +46,35 @@ function RemoteSignContent() {
 
         const fetchSession = async () => {
             try {
-                const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
+                // Try VOTE session first
+                let data: any = null;
+                try {
+                    data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
+                } catch (_) { data = null; }
+
+                // Try SUBMIT session if vote lookup failed
+                if (!data || data.error || !data.status) {
+                    try {
+                        data = await apiClient.get(`/api/governance/remote/submit/status/${sessionId}`)
+                    } catch (_) { data = null; }
+                }
+
+                // Try CONFIRM (MultiSig) session if both above failed
+                if (!data || data.error || !data.status) {
+                    try {
+                        data = await apiClient.get(`/api/governance/remote/confirm/status/${sessionId}`)
+                    } catch (_) { data = null; }
+                }
+
+                if (!data || (!data.status && !data.challenge)) {
+                    throw new Error("Session not found. It may have expired or been used already.")
+                }
 
                 if (data.status !== "pending") {
                     setStatus(data.status as any)
                     return
                 }
 
-                // Fetching the actual challenge and session info
-                // The status endpoint should ideally return more info
                 setSessionData(data)
                 setStatus("ready")
             } catch (err: any) {
@@ -65,6 +85,7 @@ function RemoteSignContent() {
 
         fetchSession()
     }, [sessionId])
+
 
     const handleSignVote = async () => {
         if (typeof window === "undefined" || !(window as any).ethereum) {
@@ -85,13 +106,20 @@ function RemoteSignContent() {
             const walletAddress = await signer.getAddress()
             setConnectedWallet(walletAddress)
 
-            // 1. Fetch Latest Session Data
-            const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
-            
-            // If the status endpoint above fails (because it's a SUBMIT session), try the SUBMIT endpoint
-            let session = data;
-            if (data.error || !data.type) {
-                session = await apiClient.get(`/api/governance/remote/submit/status/${sessionId}`);
+            // 1. Fetch Latest Session Data — try all three session types
+            let session: any = null;
+            try {
+                session = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
+            } catch (_) { session = null; }
+            if (!session || session.error || !session.type) {
+                try {
+                    session = await apiClient.get(`/api/governance/remote/submit/status/${sessionId}`)
+                } catch (_) { session = null; }
+            }
+            if (!session || session.error || !session.type) {
+                try {
+                    session = await apiClient.get(`/api/governance/remote/confirm/status/${sessionId}`)
+                } catch (_) { session = null; }
             }
 
             if (!session || !session.challenge) {
@@ -151,6 +179,23 @@ function RemoteSignContent() {
                     description: "The proposal has been successfully recorded on-chain. Window closing in 10s."
                 })
 
+            } else if (session.type === 'CONFIRM') {
+                // MultiSig confirmation — sign challenge and relay to confirm/authorize
+                console.log("🚀 [RemoteSign] Detected CONFIRM mode. Signing MultiSig confirmation.");
+                const signature = await signer.signMessage(session.challenge)
+
+                await apiClient.post("/api/governance/remote/confirm/authorize", {
+                    sessionId,
+                    walletAddress,
+                    signature
+                })
+
+                setStatus("authorized")
+                toast({
+                    title: "Confirmation Signed",
+                    description: "Your MultiSig confirmation has been recorded. This window will close automatically."
+                })
+
             } else {
                 // Standard VOTE logic (Signature-based)
                 console.log("🚀 [RemoteSign] Detected VOTE mode. Using Cryptographic Signing.");
@@ -168,6 +213,7 @@ function RemoteSignContent() {
                     description: "Your vote has been recorded. This window will close automatically."
                 })
             }
+
 
             // Auto-close after 10 seconds
             setTimeout(() => {

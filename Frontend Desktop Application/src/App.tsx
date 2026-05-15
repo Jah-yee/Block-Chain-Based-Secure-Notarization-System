@@ -423,7 +423,7 @@ export default function App() {
         {appState === "admin-app" && (
           <div className="flex-1 flex min-h-0 h-full overflow-hidden" style={{ height: 'calc(100vh - 48px)' }}>
             <Sidebar role="admin" user={user} activeScreen={adminScreen} onNavigate={(s) => setAdminScreen(s as AdminScreen)} onLogout={() => setLogoutDialogOpen(true)} alertCount={alertCount} isCollapsed={isSidebarCollapsed} onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />
-            <main className="flex-1 bg-background overflow-hidden flex flex-col h-full min-h-0" style={{ height: '100%' }}>
+            <main className="flex-1 bg-background flex flex-col h-full min-h-0" style={{ height: '100%' }}>
               {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
               {adminScreen === "manage-notaries" && <ManageNotaries />}
               {adminScreen === "governance" && <Governance role="admin" user={user} />}
