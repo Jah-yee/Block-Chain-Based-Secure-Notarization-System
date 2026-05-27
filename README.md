@@ -7,6 +7,10 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=flat&logo=postgresql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
+<div align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=500&size=22&duration=3000&pause=1000&color=2563EB&center=true&vCenter=true&width=800&lines=Zero-Trust+Notarization+Platform;Gasless+EIP-712+Remote+Signatures;Immutable+Document+Vault;Biometric+Identity+Verification" alt="Typing SVG" />
+</div>
+
 > **A zero-trust platform bridging off-chain identity with on-chain finality to digitize the notary public system.**
 
 **BBSNS** is an enterprise-grade decentralized infrastructure that securely modernizes remote notarizations. By combining biometric KYC, gasless EIP-712 remote signatures, AWS S3 storage vaults, and multi-signature smart contract governance, BBSNS provides irrefutable authenticity through cryptographic finality.
@@ -48,31 +52,7 @@ graph TD
 
 ---
 
-## 🔐 2. Configuration & Secrets
-
-Before deployment, populate the following environment variables in your `.env` files. **Never share these production values.**
-
-### **Backend Configuration (`backend/.env`)**
-| Key | Description | Placeholder Value |
-| :--- | :--- | :--- |
-| `DATABASE_URL` | PostgreSQL Connection String | `postgresql://user:password@localhost:5432/bbsns_db` |
-| `JWT_SECRET` | Secret key for session encryption | `[GENERATE_A_64_CHAR_RANDOM_STRING]` |
-| `AWS_ACCESS_KEY_ID` | AWS IAM User Key | `[YOUR_AWS_ACCESS_KEY]` |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM Secret | `[YOUR_AWS_SECRET_KEY]` |
-| `AWS_S3_BUCKET` | Target S3 Bucket Name | `bbsns-production-vault` |
-| `BNB_SYSTEM_PRIVATE_KEY` | Protocol Relayer Authority | `[0x_YOUR_RELAYER_PRIVATE_KEY]` |
-
-### **Smart Contract Directory**
-| Contract | Description | Deployment Address |
-| :--- | :--- | :--- |
-| **DocumentRegistry** | Master Record Store | `0x0000000000000000000000000000000000000000` |
-| **NotaryRegistry** | Identity & Role Store | `0x0000000000000000000000000000000000000000` |
-| **NTKR Token** | Reputation & Access Token | `0x0000000000000000000000000000000000000000` |
-| **BBSNSMultiSig** | Governance Threshold | `0x0000000000000000000000000000000000000000` |
-
----
-
-## 📂 3. Document State Machine (Authoritative)
+## 📂 2. Document State Machine (Authoritative)
 Tracking every document from initial intent to permanent on-chain finalization.
 
 ```mermaid
@@ -88,7 +68,7 @@ stateDiagram-v2
 
 ---
 
-## 🖋️ 4. Cryptographic Bridge (EIP-712)
+## 🖋️ 3. Cryptographic Bridge (EIP-712)
 Step-by-step sequence of the gasless remote signing protocol.
 
 ```mermaid
@@ -109,7 +89,7 @@ sequenceDiagram
 
 ---
 
-## 🚀 5. System Requirements
+## 🚀 4. System Requirements
 
 ### **API Server (Backend)**
 - **OS**: Linux (Ubuntu 22.04 recommended) or Windows Server.
@@ -124,7 +104,7 @@ sequenceDiagram
 
 ---
 
-## 📊 6. Database Entity Architecture
+## 📊 5. Database Entity Architecture
 
 ```mermaid
 erDiagram
@@ -136,7 +116,7 @@ erDiagram
 
 ---
 
-## 🛡️ 7. Forensic Audit Log Schema
+## 🛡️ 6. Forensic Audit Log Schema
 Every request through the `actor.js` middleware generates a correlated audit trail in the following format:
 
 ```json
@@ -153,7 +133,7 @@ Every request through the `actor.js` middleware generates a correlated audit tra
 
 ---
 
-## 🚀 8. Production Hardening Guide
+## 🚀 7. Production Hardening Guide
 
 1. **Process Management**: Use **PM2** with clustering.
    ```bash
