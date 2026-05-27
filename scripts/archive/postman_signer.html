@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BBSNS Postman Web3 Signer Utility</title>
+  <style>
+    :root {
+      --background: #020617;
+      --card: #0b1329;
+      --primary: #10b981;
+      --primary-hover: #059669;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #1e293b;
+    }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--background);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+
+    .container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 40px;
+      max-width: 550px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 800;
+      margin-top: 0;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: -0.025em;
+      background: linear-gradient(to right, #10b981, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 13px;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .info-banner {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: #60a5fa;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    input, select {
+      background: #070a13;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--primary);
+    }
+
+    .btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: background 0.2s;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-secondary {
+      background: #1e293b;
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: #334155;
+    }
+
+    .output-box {
+      background: #05070f;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 30px;
+      display: none;
+    }
+
+    .output-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .copy-btn {
+      background: #1e293b;
+      border: none;
+      color: var(--primary);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .copy-btn:hover {
+      background: #334155;
+    }
+
+    pre {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #34d399;
+      line-height: 1.5;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #f59e0b;
+      margin-bottom: 20px;
+    }
+
+    .status-badge.connected {
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>BBSNS Web3 Signer</h1>
+    <p class="subtitle">Quickly connect MetaMask, sign Postman challenge nonces, and copy the exact JSON body for authorized production testing.</p>
+
+    <div class="info-banner">
+      🌐 <strong>Production API Host:</strong> <code>https://api.bbsns.online</code><br>
+      <em>Note: Direct IP port 5000 is blocked by EC2 firewall. Always target the secure domain name!</em>
+    </div>
+
+    <div id="status" class="status-badge">
+      🔴 MetaMask Not Connected
+    </div>
+
+    <button id="connectBtn" class="btn">1. Connect MetaMask Wallet</button>
+
+    <div class="form-group">
+      <label for="nonce">2. Paste Nonce from Postman</label>
+      <input type="text" id="nonce" placeholder="e.g., ac97709b8b..." />
+    </div>
+
+    <div class="form-group">
+      <label for="role">3. Choose Test Role</label>
+      <select id="role">
+        <option value="admin">Genesis Admin (genesis@admin.online)</option>
+        <option value="notary">Notary (mateshubham45@gmail.com)</option>
+        <option value="owner">Document Owner (owner1@bbsns.com)</option>
+      </select>
+    </div>
+
+    <button id="signBtn" class="btn btn-secondary">4. Sign & Generate Postman Body</button>
+
+    <div id="outputContainer" class="output-box">
+      <div class="output-header">
+        <label>Postman Request Body (JSON)</label>
+        <button id="copyBtn" class="copy-btn">Copy JSON</button>
+      </div>
+      <pre id="outputCode"></pre>
+    </div>
+  </div>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const signBtn = document.getElementById('signBtn');
+    const statusDiv = document.getElementById('status');
+    const nonceInput = document.getElementById('nonce');
+    const roleSelect = document.getElementById('role');
+    const outputContainer = document.getElementById('outputContainer');
+    const outputCode = document.getElementById('outputCode');
+    const copyBtn = document.getElementById('copyBtn');
+
+    let userAddress = '';
+
+    // Static metadata database mapping
+    const metadata = {
+      notary: {
+        email: "mateshubham45@gmail.com",
+        password: "SecurePassword123!",
+        nationalId: "NOTARY2"
+      },
+      owner: {
+        email: "owner1@bbsns.com",
+        password: "SecurePassword123!",
+        nationalId: "OWNER1"
+      },
+      admin: {
+        email: "genesis@admin.online",
+        password: "SecurePassword123!",
+        nationalId: "GENESIS_ID_PLACEHOLDER"
+      }
+    };
+
+    async function connectWallet() {
+      if (typeof window.ethereum === 'undefined') {
+        alert('MetaMask is not installed! Please install MetaMask to use this utility.');
+        return;
+      }
+      try {
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        userAddress = accounts[0];
+        statusDiv.innerHTML = `🟢 Wallet Connected: ${userAddress.substring(0,6)}...${userAddress.substring(38)}`;
+        statusDiv.className = "status-badge connected";
+        connectBtn.style.display = 'none';
+      } catch (err) {
+        alert('Connection rejected: ' + err.message);
+      }
+    }
+
+    async function signNonce() {
+      const nonce = nonceInput.value.trim();
+      if (!userAddress) {
+        alert('Please connect your MetaMask wallet first!');
+        return;
+      }
+      if (!nonce) {
+        alert('Please paste the Nonce from your Postman request first!');
+        return;
+      }
+
+      try {
+        // 🛡️ [Nuclear Path Hardening]
+        // MetaMask automatically treats raw hex nonces as binary hex-bytes, causing a verification mismatch.
+        // We sign the canonical message challenge template directly. This enforces strict ASCII string signing
+        // which matches the server's verification engine flawlessly.
+        const challenge = `BBSNS_Protocol::LOGIN::v1::${nonce}::${userAddress.toLowerCase()}`;
+        console.log(`[SIGN_DEBUG] Challenge String to MetaMask: "${challenge}"`);
+
+        const signature = await window.ethereum.request({
+          method: 'personal_sign',
+          params: [challenge, userAddress]
+        });
+
+        const selectedRole = roleSelect.value;
+        const roleData = metadata[selectedRole];
+
+        const postmanBody = {
+          walletAddress: userAddress.toLowerCase(),
+          signature: signature,
+          nonce: nonce,
+          email: roleData.email,
+          password: roleData.password,
+          nationalId: roleData.nationalId
+        };
+
+        outputCode.textContent = JSON.stringify(postmanBody, null, 2);
+        outputContainer.style.display = 'block';
+        outputContainer.scrollIntoView({ behavior: 'smooth' });
+
+      } catch (err) {
+        alert('Signing failed: ' + err.message);
+      }
+    }
+
+    function copyToClipboard() {
+      navigator.clipboard.writeText(outputCode.textContent);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => {
+        copyBtn.textContent = 'Copy JSON';
+      }, 2000);
+    }
+
+    connectBtn.addEventListener('click', connectWallet);
+    signBtn.addEventListener('click', signNonce);
+    copyBtn.addEventListener('click', copyToClipboard);
+  </script>
+</body>
+</html>

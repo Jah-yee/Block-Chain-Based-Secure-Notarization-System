@@ -1,6 +1,22 @@
-# 🛡️ BBSNS: The Visual Technical Encyclopedia
+# 🛡️ BBSNS: Block-Chain Based Secure Notarization System
 
-**BBSNS (Block-Chain Based Secure Notarization System)** is an enterprise-grade decentralized infrastructure. This document provides a granular technical map of the protocol's engineering, security, and cryptographic foundations.
+![Node.js](https://img.shields.io/badge/Node.js-18.x-339933?style=flat&logo=nodedotjs&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14.x-000000?style=flat&logo=nextdotjs&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat&logo=electron&logoColor=white)
+![Solidity](https://img.shields.io/badge/Solidity-Smart_Contracts-363636?style=flat&logo=solidity&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=flat&logo=postgresql&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
+
+> **A zero-trust platform bridging off-chain identity with on-chain finality to digitize the notary public system.**
+
+**BBSNS** is an enterprise-grade decentralized infrastructure that securely modernizes remote notarizations. By combining biometric KYC, gasless EIP-712 remote signatures, AWS S3 storage vaults, and multi-signature smart contract governance, BBSNS provides irrefutable authenticity through cryptographic finality.
+
+## ✨ Key Features
+- **Zero-Trust Architecture:** End-to-end cryptographic verification for all actors.
+- **Gasless Remote Signatures:** EIP-712 compliant off-chain signing relayed securely to the blockchain.
+- **Immutable Document Vault:** Documents are sealed with SHA-256 and securely hosted on AWS S3.
+- **Multi-Sig Governance:** A decentralized control plane for system parameters and role management.
+- **Biometric Identity:** Deep integration with secure identity providers for Notary verification.
 
 ---
 

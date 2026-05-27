@@ -1,0 +1,336 @@
+{
+  "info": {
+    "name": "BBSNS Master Production API",
+    "_postman_id": "bbsns-master-production-api",
+    "description": "Authoritative Master Postman collection for all production-grade BBSNS secure endpoints, including Zero-Trust Web3 nonces, signatures, documents, and governance controls.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "wallet_address",
+      "value": "0x407075A059434EEf9A036D5370C919497eA7a1C8",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "admin@bbsns.online",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "SecurePassword123!",
+      "type": "string"
+    },
+    {
+      "key": "national_id",
+      "value": "ID-123456",
+      "type": "string"
+    },
+    {
+      "key": "signature",
+      "value": "0x_paste_signature_hex_here",
+      "type": "string"
+    },
+    {
+      "key": "challenge_nonce",
+      "value": "e3b0c442...",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "System Status Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/system-status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "system-status"]
+            },
+            "description": "Startup checklist verifying blockchain node connections, database users count, and active contract configurations."
+          }
+        },
+        {
+          "name": "Identity Pre-Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{wallet_address}}\",\n  \"email\": \"{{email}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/pre-check",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "pre-check"]
+            },
+            "description": "Verifies if the given user exists in the database and retrieves their active profile role."
+          }
+        },
+        {
+          "name": "Request Cryptographic Nonce",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wallet_address\": \"{{wallet_address}}\",\n  \"purpose\": \"LOGIN\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/nonce",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "nonce"]
+            },
+            "description": "Generates a secure, one-time EIP-712 challenge nonce for Web3 signing."
+          }
+        },
+        {
+          "name": "Zero-Trust Web3 Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{wallet_address}}\",\n  \"signature\": \"{{signature}}\",\n  \"nonce\": \"{{challenge_nonce}}\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"nationalId\": \"{{national_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Verifies your cryptographic signature and credentials, then sets the secure JWT session cookie."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Documents",
+      "item": [
+        {
+          "name": "List Active Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/documents",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents"]
+            },
+            "description": "Lists documents matching your active session permissions (Zero-Trust sandbox filtered)."
+          }
+        },
+        {
+          "name": "Upload Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "description": "Select the PDF document to upload",
+                  "type": "file"
+                },
+                {
+                  "key": "title",
+                  "value": "My Notarization Document",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/documents/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "upload"]
+            },
+            "description": "Secure, memory-safe file upload endpoint. Passes files directly into the S3 bucket pipeline."
+          }
+        },
+        {
+          "name": "Get Document Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/documents/1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "1"]
+            },
+            "description": "Fetch detailed audit logs, on-chain transaction hashes, and metadata for a specific document."
+          }
+        },
+        {
+          "name": "Reject Document Notarization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Invalid signature details on page 3.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/documents/1/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "1", "reject"]
+            },
+            "description": "Declines document approval. Flags it for scavenger storage garbage collection and updates on-chain indices."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Notary Management",
+      "item": [
+        {
+          "name": "Submit Notary Onboarding Application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Dr. John Doe\",\n  \"walletAddress\": \"0x8d24...\",\n  \"licenseNumber\": \"LIC-998811\",\n  \"experience\": 8,\n  \"nationalId\": \"ID-887766\",\n  \"nationality\": \"American\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/notaries/apply",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notaries", "apply"]
+            },
+            "description": "Registers a new notary onboarding application for admin review."
+          }
+        },
+        {
+          "name": "List Notary Applications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notaries/applications",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notaries", "applications"]
+            },
+            "description": "Retrieves all submitted applications awaiting approval (Admin only)."
+          }
+        },
+        {
+          "name": "Reject Notary Application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Credential verification failed.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/notaries/applications/2/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notaries", "applications", "2", "reject"]
+            },
+            "description": "Rejects notary profile. Automatically downgrades user role to user, scrubs PII data, and fires a rejection email notification."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Governance",
+      "item": [
+        {
+          "name": "List Governance Proposals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/governance/proposals",
+              "host": ["{{base_url}}"],
+              "path": ["api", "governance", "proposals"]
+            },
+            "description": "Lists all active and historic MultiSig administrative proposals."
+          }
+        },
+        {
+          "name": "Submit Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Promote Notary Jane\",\n  \"type\": \"NOTARY_PROMOTION\",\n  \"payload\": {\n    \"targetAddress\": \"0x82a9...\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/governance/proposals/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "governance", "proposals", "submit"]
+            },
+            "description": "Proposes administrative changes that require MultiSig consensus threshold."
+          }
+        },
+        {
+          "name": "Vote on Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approve\",\n  \"signature\": \"0x...\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/governance/proposals/1/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "governance", "proposals", "1", "vote"]
+            },
+            "description": "Registers an off-chain consensus vote for the specified proposal."
+          }
+        }
+      ]
+    }
+  ]
+}
