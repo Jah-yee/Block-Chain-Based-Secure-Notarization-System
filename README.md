@@ -5,6 +5,7 @@
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat&logo=electron&logoColor=white)
 ![Solidity](https://img.shields.io/badge/Solidity-Smart_Contracts-363636?style=flat&logo=solidity&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?style=flat&logo=postgresql&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-S3_Vault-FF9900?style=flat&logo=amazonaws&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
 <div align="center">
@@ -13,98 +14,117 @@
 
 > **A zero-trust platform bridging off-chain identity with on-chain finality to digitize the notary public system.**
 
-**BBSNS** is an enterprise-grade decentralized infrastructure that securely modernizes remote notarizations. By combining biometric KYC, gasless EIP-712 remote signatures, AWS S3 storage vaults, and multi-signature smart contract governance, BBSNS provides irrefutable authenticity through cryptographic finality.
+**BBSNS** is a massive, enterprise-grade decentralized infrastructure that securely modernizes remote notarizations. It replaces legacy, paper-based trust assumptions with immutable cryptographic proof. By combining biometric identity verification, gasless off-chain remote signatures, secure cloud object storage, and multi-signature smart contract governance, BBSNS provides irrefutable authenticity through cryptographic finality on the blockchain.
 
-## ✨ Key Features
-- **Zero-Trust Architecture:** End-to-end cryptographic verification for all actors.
-- **Gasless Remote Signatures:** EIP-712 compliant off-chain signing relayed securely to the blockchain.
-- **Immutable Document Vault:** Documents are sealed with SHA-256 and securely hosted on AWS S3.
-- **Multi-Sig Governance:** A decentralized control plane for system parameters and role management.
-- **Biometric Identity:** Deep integration with secure identity providers for Notary verification.
+---
+
+## ✨ Core Pillars & Features
+
+- **Zero-Trust Architecture:** End-to-end cryptographic verification for all actors. No action is trusted implicitly; every request is cryptographically signed and verified by core middleware.
+- **Gasless Remote Signatures:** EIP-712 compliant off-chain signing allows non-technical users to interact with the blockchain securely, without needing to manage gas fees.
+- **Immutable Document Vault:** Documents are sealed with SHA-256 hashing and securely hosted in highly restrictive cloud object storage.
+- **Multi-Sig Governance:** A decentralized control plane for system parameters and role management, ensuring no single entity has absolute power over the system.
+- **Automated Self-Healing:** Background worker processes continuously reconcile off-chain database states with on-chain realities, ensuring high availability and fault tolerance.
 
 ---
 
 ## 🏗️ 1. Global Ecosystem Blueprint
-The relationship between Client applications, Cloud infrastructure, and the Blockchain source-of-truth.
+
+BBSNS operates across four deeply integrated layers, ensuring a seamless experience for end-users while maintaining strict security boundaries.
 
 ```mermaid
 graph TD
     subgraph "🌐 Frontend Layer"
-        Web[Next.js Portal]
-        Desktop[Electron Console]
+        Web[Client Web Portal]
+        Desktop[Isolated Desktop Console]
     end
     subgraph "☁️ Application Layer"
-        API[Node.js Orchestrator]
-        Workers[Background Workers]
-        S3[AWS S3 Vault]
+        API[Core Orchestrator API]
+        Workers[Asynchronous Background Workers]
+        S3[Secure Object Storage]
     end
     subgraph "⛓️ Blockchain Layer"
         Registry[Master Record Contract]
         NTKR[Utility Token Contract]
         MultiSig[Governance Contract]
     end
-    Web -->|Upload| API
-    Desktop -->|Verify| API
-    API -->|Signed URL| S3
-    API -->|EIP-712 Relay| Registry
-    Registry -->|Status| NTKR
+    Web -->|Upload intent| API
+    Desktop -->|Identity verification| API
+    API -->|Encrypted transfer| S3
+    API -->|Payload relay| Registry
+    Registry -->|State update| NTKR
 ```
 
 ---
 
-## 📂 2. Document State Machine (Authoritative)
-Tracking every document from initial intent to permanent on-chain finalization.
+## 👥 2. Dual-Actor Workflows
 
-```mermaid
-stateDiagram-v2
-    [*] --> Upload_Initiated: Initiate
-    Upload_Initiated --> Storage_Secured: S3 Uploaded
-    Storage_Secured --> Payment_Verified: Token Burn
-    Payment_Verified --> Awaiting_Notary: System Sync
-    Awaiting_Notary --> Signing_In_Progress: Notary Signature
-    Signing_In_Progress --> On_Chain_Finalized: On-Chain Confirmed
-    On_Chain_Finalized --> [*]
-```
+BBSNS is designed around two distinct, highly specialized user journeys:
+
+### **The Document Owner Flow (Client Web Portal)**
+Clients utilize a seamless Next.js web interface to upload legal documents. The system hashes the document locally, creates a secure upload intent, and handles payment processing through a customized utility token economy. Clients can track the live notarization state machine from upload to final blockchain confirmation.
+
+### **The Notary Flow (Isolated Desktop Application)**
+Certified Notaries operate within a secure, sandboxed Electron desktop environment. To perform notarizations, they must pass strict biometric identity verifications. Once verified, they utilize a cryptographic bridge to review documents and apply their digital signature, which the system then relays to the blockchain.
 
 ---
 
-## 🖋️ 3. Cryptographic Bridge (EIP-712)
-Step-by-step sequence of the gasless remote signing protocol.
+## 🛡️ 3. Security & Cryptography Deep-Dive
 
+Security is not an afterthought; it is the foundation of BBSNS.
+
+*   **SHA-256 Document Sealing:** Documents are never stored on the blockchain. Instead, a SHA-256 cryptographic hash of the document is generated and sealed on-chain, proving the document existed at a specific time and has never been tampered with.
+*   **ECDSA Signatures & EIP-712:** We engineered a custom bridge using Elliptic Curve Digital Signature Algorithm (ECDSA). Notaries sign standardized data payloads off-chain, and the backend relays these signatures to the blockchain.
+*   **Strict Access Control Middleware:** Every API route is guarded by dynamic middleware that checks the actor's real-time authorization state before permitting data access.
+
+### Cryptographic Signature Relay
 ```mermaid
 sequenceDiagram
     participant D as Desktop App
-    participant B as Backend API
-    participant W as Remote Wallet
+    participant B as Core API
+    participant W as Hardware/Remote Wallet
     participant BC as Blockchain
-    D->>B: Request Payload
-    B->>BC: Fetch Nonce
+    D->>B: Request Signing Payload
+    B->>BC: Fetch Cryptographic Nonce
     BC-->>B: Nonce
-    B-->>D: Payload (EIP-712)
+    B-->>D: Structured Data Payload
     D->>W: Push Challenge
-    W->>W: Sign (MetaMask)
+    W->>W: Sign Challenge
     W->>B: Submit Signature
     B->>BC: Relay Signed Payload
 ```
 
 ---
 
-## 🚀 4. System Requirements
+## 🏛️ 4. Governance & Tokenomics
 
-### **API Server (Backend)**
-- **OS**: Linux (Ubuntu 22.04 recommended) or Windows Server.
-- **CPU**: 2+ Cores (optimized for bcrypt & crypto).
-- **RAM**: 4GB Minimum (8GB recommended for concurrent worker threads).
-- **Node.js**: v18.17.0 or higher.
+BBSNS operates its own internal micro-economy to align incentives and secure the network.
 
-### **Desktop Console (Notary)**
-- **OS**: Windows 10/11 (64-bit).
-- **RAM**: 4GB Minimum.
-- **Dependency**: Microsoft Edge (for Remote Auth Bridge).
+*   **Utility Token:** A dedicated smart contract token is used to meter system usage, pay for notarization services, and prevent spam.
+*   **Decentralized Control Plane:** Critical system parameters (such as fee structures or upgrading notary statuses) are governed by a Multi-Signature smart contract. This ensures that administrative actions require consensus among trusted governance keys, preventing unilateral system modifications.
 
 ---
 
-## 📊 5. Database Entity Architecture
+## 📂 5. Authoritative State Machine
+
+The lifecycle of a document is strictly enforced by a state machine that spans both the relational database and the blockchain.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Upload_Initiated: Initiate
+    Upload_Initiated --> Storage_Secured: Cloud Upload
+    Storage_Secured --> Payment_Verified: Token Verification
+    Payment_Verified --> Awaiting_Notary: System Sync
+    Awaiting_Notary --> Signing_In_Progress: Cryptographic Signature
+    Signing_In_Progress --> On_Chain_Finalized: Blockchain Confirmation
+    On_Chain_Finalized --> [*]
+```
+
+---
+
+## 📊 6. Core Entity Architecture
+
+The relational database acts as the high-speed caching and query layer for the blockchain source-of-truth.
 
 ```mermaid
 erDiagram
@@ -116,33 +136,45 @@ erDiagram
 
 ---
 
-## 🛡️ 6. Forensic Audit Log Schema
-Every request through the core access control middleware generates a correlated audit trail in the following format:
+## 🔍 7. Forensic Audit Log Schema
+
+For enterprise compliance, every authenticated action generates an immutable audit log, tracking the exact capability exercised by an actor.
 
 ```json
 {
-  "requestId": "UUID-V4",
-  "actorId": "101",
-  "role": "NOTARY",
-  "capability": "DOC_SIGNATURE_PAYLOAD",
-  "env": "VERIFIED",
-  "chainId": "97",
-  "timestamp": "2024-05-12T10:00:00Z"
+  "requestId": "[Unique-Request-ID]",
+  "actorRole": "[System-Role]",
+  "capability": "[Action-Performed]",
+  "environment": "[Security-Context]",
+  "timestamp": "[ISO-8601-Time]"
 }
 ```
 
 ---
 
-## 🚀 7. Production Hardening Guide
+## ⚙️ 8. Technology Stack Overview
 
-1. **Process Management**: Use **PM2** with clustering.
-   ```bash
-   pm2 start [Core_Entry_Point] --name "Core-Service" -i max
-   ```
-2. **Reverse Proxy**: Setup **Nginx** with TLS 1.3 encryption.
-3. **Database Security**: Enforce **SSL-only** connections to PostgreSQL.
-4. **S3 Hygiene**: Enable **Object Lock** and **Versioning** on your production bucket.
+| Layer | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Web Client** | Next.js / React | Fast, server-side rendered portals for Document Owners. |
+| **Desktop Client** | Electron | Secure, isolated environment bridging hardware wallets. |
+| **Core API** | Node.js / Express | Highly concurrent, asynchronous orchestration layer. |
+| **Smart Contracts** | Solidity / Hardhat | The immutable, decentralized source of truth. |
+| **Data Layer** | PostgreSQL | Fast, relational querying and state caching. |
+| **Blob Storage** | AWS S3 | Immutable, highly restricted document vaulting. |
 
 ---
 
-**BBSNS: Authenticity through Cryptographic Finality.**
+## 🚀 9. Production Resiliency
+
+BBSNS is built to survive network partitions and high loads:
+1. **Automated Background Workers:** Independent asynchronous processes continuously scan for dropped transactions or blockchain sync issues, automatically self-healing the state machine.
+2. **Clustered Processing:** The core API is designed to run in clustered environments (e.g., PM2) to maximize multi-core CPU utilization during heavy cryptographic operations.
+3. **Database Security:** Enforced SSL-only connections and strict sanitization.
+4. **Storage Hygiene:** Leveraging cloud features like Object Lock and Versioning to prevent accidental or malicious document deletion.
+
+---
+
+<div align="center">
+  <b>BBSNS: Authenticity through Cryptographic Finality.</b>
+</div>
