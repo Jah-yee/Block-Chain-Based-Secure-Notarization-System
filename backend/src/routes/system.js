@@ -140,133 +140,135 @@ router.get('/logs', requirePrivilege({ capability: 'SYSTEM_LOGS' }), async (req,
 
         // 1. Sync actual active notaries welcome pack mint logs
         try {
-            const activeNotaries = await pool.query(`
-                SELECT id, name, wallet_address, created_at 
-                FROM users 
-                WHERE role = 'notary' AND identity_state = 'ACTIVE'
+            await pool.query(`
+                INSERT INTO system_logs (level, message, source, metadata, created_at)
+                SELECT 
+                    'info'::text as level,
+                    'Notary welcome balance provisioned: 100 NTK welcomed to wallet ' || u.wallet_address || ' (' || u.name || ').' as message,
+                    'system'::text as source,
+                    json_build_object(
+                        'action', 'TOKEN_MINT',
+                        'wallet', LOWER(u.wallet_address),
+                        'amount', 100,
+                        'type', 'welcome_pack'
+                    ) as metadata,
+                    COALESCE(u.created_at, NOW()) as created_at
+                FROM users u
+                WHERE u.role = 'notary' 
+                  AND u.identity_state = 'ACTIVE' 
+                  AND u.wallet_address IS NOT NULL 
+                  AND u.wallet_address != ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM system_logs sl
+                      WHERE (sl.metadata->>'action') = 'TOKEN_MINT' 
+                        AND LOWER(sl.metadata->>'wallet') = LOWER(u.wallet_address)
+                  )
             `);
-            for (const notary of activeNotaries.rows) {
-                const wallet = (notary.wallet_address || '').toLowerCase();
-                if (!wallet) continue;
-                const hasLog = await pool.query(`
-                    SELECT id FROM system_logs 
-                    WHERE (metadata->>'action') = 'TOKEN_MINT' AND LOWER(metadata->>'wallet') = $1
-                `, [wallet]);
-                if (hasLog.rows.length === 0) {
-                    await pool.query(`
-                        INSERT INTO system_logs (level, message, source, metadata, created_at) 
-                        VALUES ('info', $1, 'system', $2, $3)
-                    `, [
-                        `Notary welcome balance provisioned: 100 NTK welcomed to wallet ${notary.wallet_address} (${notary.name}).`,
-                        JSON.stringify({ action: 'TOKEN_MINT', wallet: wallet, amount: 100, type: 'welcome_pack' }),
-                        notary.created_at || new Date()
-                    ]);
-                }
-            }
         } catch (err) {
             console.error('[SYNC_NOTARIES_TELEMETRY_FAIL]', err.message);
         }
 
         // 2. Sync actual document fee burn logs
         try {
-            const notarizedDocs = await pool.query(`
-                SELECT d.id, d.title, d.filename, d.payment_tx_hash, d.created_at, u.wallet_address as notary_wallet
+            await pool.query(`
+                INSERT INTO system_logs (level, message, source, metadata, created_at)
+                SELECT 
+                    'info'::text as level,
+                    '1 NTK burned for notary action on Document: "' || COALESCE(d.title, d.filename) || '" (ID: ' || d.id || ').' as message,
+                    COALESCE(u.wallet_address, 'system') as source,
+                    json_build_object(
+                        'action', 'TOKEN_BURN',
+                        'doc_id', d.id,
+                        'title', COALESCE(d.title, d.filename),
+                        'tx_hash', d.payment_tx_hash
+                    ) as metadata,
+                    COALESCE(d.created_at, NOW()) as created_at
                 FROM documents d
                 LEFT JOIN users u ON d.notary_id = u.id
                 WHERE d.submission_state IN ('notarized', 'approved', 'rejected')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM system_logs sl
+                      WHERE (sl.metadata->>'action') = 'TOKEN_BURN'
+                        AND (sl.metadata->>'doc_id')::int = d.id
+                  )
             `);
-            for (const doc of notarizedDocs.rows) {
-                const hasLog = await pool.query(`
-                    SELECT id FROM system_logs 
-                    WHERE (metadata->>'action') = 'TOKEN_BURN' AND (metadata->>'doc_id')::int = $1
-                `, [doc.id]);
-                if (hasLog.rows.length === 0) {
-                    await pool.query(`
-                        INSERT INTO system_logs (level, message, source, metadata, created_at) 
-                        VALUES ('info', $1, $2, $3, $4)
-                    `, [
-                        `1 NTK burned for notary action on Document: "${doc.title || doc.filename}" (ID: ${doc.id}).`,
-                        doc.notary_wallet || 'system',
-                        JSON.stringify({ action: 'TOKEN_BURN', doc_id: doc.id, title: doc.title || doc.filename, tx_hash: doc.payment_tx_hash }),
-                        doc.created_at || new Date()
-                    ]);
-                }
-            }
         } catch (err) {
             console.error('[SYNC_DOCUMENTS_TELEMETRY_FAIL]', err.message);
         }
 
         // 3. Sync actual governance proposals submit & execute logs
         try {
-            const actualProposals = await pool.query(`
-                SELECT p.id, p.title, p.type, p.status, p.on_chain_tx_index, p.created_at, u.wallet_address as creator_wallet
+            // a. Sync MULTISIG_SUBMIT
+            await pool.query(`
+                INSERT INTO system_logs (level, message, source, metadata, created_at)
+                SELECT 
+                    'info'::text as level,
+                    'MultiSig Proposal submitted on-chain: "' || p.title || '" (Prop ID: ' || p.id || ', Tx Index: ' || COALESCE(p.on_chain_tx_index, 0) || ').' as message,
+                    COALESCE(u.wallet_address, 'system') as source,
+                    json_build_object(
+                        'action', 'MULTISIG_SUBMIT',
+                        'proposal_id', p.id,
+                        'tx_index', COALESCE(p.on_chain_tx_index, 0),
+                        'type', p.type
+                    ) as metadata,
+                    COALESCE(p.created_at, NOW()) as created_at
                 FROM governance_proposals p
                 LEFT JOIN users u ON p.proposer_id = u.id
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM system_logs sl
+                    WHERE (sl.metadata->>'action') = 'MULTISIG_SUBMIT'
+                      AND (sl.metadata->>'proposal_id')::int = p.id
+                )
             `);
-            for (const prop of actualProposals.rows) {
-                // Check submit log
-                const hasSubmit = await pool.query(`
-                    SELECT id FROM system_logs 
-                    WHERE (metadata->>'action') = 'MULTISIG_SUBMIT' AND (metadata->>'proposal_id')::int = $1
-                `, [prop.id]);
-                if (hasSubmit.rows.length === 0) {
-                    await pool.query(`
-                        INSERT INTO system_logs (level, message, source, metadata, created_at) 
-                        VALUES ('info', $1, $2, $3, $4)
-                    `, [
-                        `MultiSig Proposal submitted on-chain: "${prop.title}" (Prop ID: ${prop.id}, Tx Index: ${prop.on_chain_tx_index || 0}).`,
-                        prop.creator_wallet || 'system',
-                        JSON.stringify({ action: 'MULTISIG_SUBMIT', proposal_id: prop.id, tx_index: prop.on_chain_tx_index || 0, type: prop.type }),
-                        prop.created_at || new Date()
-                    ]);
-                }
 
-                // Check execute log (if passed/executed)
-                if (['passed', 'executed'].includes(prop.status)) {
-                    const hasExecute = await pool.query(`
-                        SELECT id FROM system_logs 
-                        WHERE (metadata->>'action') = 'MULTISIG_EXECUTE' AND (metadata->>'proposal_id')::int = $1
-                    `, [prop.id]);
-                    if (hasExecute.rows.length === 0) {
-                        await pool.query(`
-                            INSERT INTO system_logs (level, message, source, metadata, created_at) 
-                            VALUES ('info', $1, 'system', $2, $3)
-                        `, [
-                            `MultiSig Transaction executed on-chain: "${prop.title}" state changes committed (Tx Index: ${prop.on_chain_tx_index || 0}).`,
-                            JSON.stringify({ action: 'MULTISIG_EXECUTE', proposal_id: prop.id, tx_index: prop.on_chain_tx_index || 0 }),
-                            prop.created_at || new Date()
-                        ]);
-                    }
-                }
+            // b. Sync MULTISIG_EXECUTE
+            await pool.query(`
+                INSERT INTO system_logs (level, message, source, metadata, created_at)
+                SELECT 
+                    'info'::text as level,
+                    'MultiSig Transaction executed on-chain: "' || p.title || '" state changes committed (Tx Index: ' || COALESCE(p.on_chain_tx_index, 0) || ').' as message,
+                    'system'::text as source,
+                    json_build_object(
+                        'action', 'MULTISIG_EXECUTE',
+                        'proposal_id', p.id,
+                        'tx_index', COALESCE(p.on_chain_tx_index, 0)
+                    ) as metadata,
+                    COALESCE(p.created_at, NOW()) as created_at
+                FROM governance_proposals p
+                WHERE p.status IN ('passed', 'executed')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM system_logs sl
+                      WHERE (sl.metadata->>'action') = 'MULTISIG_EXECUTE'
+                        AND (sl.metadata->>'proposal_id')::int = p.id
+                  )
+            `);
 
-                // Check fail/reject logs (if rejected/expired/cancelled)
-                if (['rejected', 'expired', 'cancelled'].includes(prop.status)) {
-                    const actionName = 'MULTISIG_EXECUTE_FAIL';
-                    const hasFail = await pool.query(`
-                        SELECT id FROM system_logs 
-                        WHERE (metadata->>'action') = $1 AND (metadata->>'proposal_id')::int = $2
-                    `, [actionName, prop.id]);
-                    if (hasFail.rows.length === 0) {
-                        let failMsg = `MultiSig Proposal execution failed: "${prop.title}" was ${prop.status} (Prop ID: ${prop.id}).`;
-                        if (prop.status === 'rejected') {
-                            failMsg = `MultiSig Proposal rejected by consensus: "${prop.title}" (Prop ID: ${prop.id}, Tx Index: ${prop.on_chain_tx_index || 0}).`;
-                        } else if (prop.status === 'expired') {
-                            failMsg = `MultiSig Proposal expired on-chain without execution: "${prop.title}" (Prop ID: ${prop.id}).`;
-                        } else if (prop.status === 'cancelled') {
-                            failMsg = `MultiSig Proposal cancelled: "${prop.title}" (Prop ID: ${prop.id}).`;
-                        }
-
-                        await pool.query(`
-                            INSERT INTO system_logs (level, message, source, metadata, created_at) 
-                            VALUES ('error', $1, 'system', $2, $3)
-                        `, [
-                            failMsg,
-                            JSON.stringify({ action: actionName, proposal_id: prop.id, tx_index: prop.on_chain_tx_index || 0, status: prop.status }),
-                            prop.created_at || new Date()
-                        ]);
-                    }
-                }
-            }
+            // c. Sync MULTISIG_EXECUTE_FAIL
+            await pool.query(`
+                INSERT INTO system_logs (level, message, source, metadata, created_at)
+                SELECT 
+                    'error'::text as level,
+                    CASE 
+                        WHEN p.status = 'rejected' THEN 'MultiSig Proposal rejected by consensus: "' || p.title || '" (Prop ID: ' || p.id || ', Tx Index: ' || COALESCE(p.on_chain_tx_index, 0) || ').'
+                        WHEN p.status = 'expired' THEN 'MultiSig Proposal expired on-chain without execution: "' || p.title || '" (Prop ID: ' || p.id || ').'
+                        ELSE 'MultiSig Proposal cancelled: "' || p.title || '" (Prop ID: ' || p.id || ').'
+                    END as message,
+                    'system'::text as source,
+                    json_build_object(
+                        'action', 'MULTISIG_EXECUTE_FAIL',
+                        'proposal_id', p.id,
+                        'tx_index', COALESCE(p.on_chain_tx_index, 0),
+                        'status', p.status
+                    ) as metadata,
+                    COALESCE(p.created_at, NOW()) as created_at
+                FROM governance_proposals p
+                WHERE p.status IN ('rejected', 'expired', 'cancelled')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM system_logs sl
+                      WHERE (sl.metadata->>'action') = 'MULTISIG_EXECUTE_FAIL'
+                        AND (sl.metadata->>'proposal_id')::int = p.id
+                  )
+            `);
         } catch (err) {
             console.error('[SYNC_PROPOSALS_TELEMETRY_FAIL]', err.message);
         }
@@ -413,7 +415,12 @@ router.post('/sync/reset-providers', requirePrivilege({ capability: 'SYSTEM_CONF
     try {
         const ProviderService = require('../blockchain/provider-service');
         ProviderService.reset();
-        res.json({ status: 'ok', message: 'Provider tiers re-indexed. Blacklist purged.' });
+        
+        // Also clear Ethers cache to allow dynamic reconnection
+        const { clearConnectionCache } = require('../blockchain/connection');
+        clearConnectionCache();
+        
+        res.json({ status: 'ok', message: 'Provider tiers re-indexed. Blacklist purged. Connection cache cleared.' });
     } catch (err) {
         res.status(500).json({ error: 'Reset failed', detail: err.message });
     }

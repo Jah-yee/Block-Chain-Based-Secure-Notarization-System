@@ -291,10 +291,10 @@ router.post("/applications/:id/verify", withDomain('NOTARY'), allowPublic, requi
       }
 
       // 🛡️ [Hardening] Prevent 500 on duplicate wallet during verification
-      const walletConflict = await auditClient.query(
-        "SELECT id FROM notary_applications WHERE wallet_address = $1 AND id != $2",
-        [normalizedWallet, id]
-      );
+      const conflictQuery = isReference 
+        ? "SELECT id FROM notary_applications WHERE wallet_address = $1 AND reference_id != $2"
+        : "SELECT id FROM notary_applications WHERE wallet_address = $1 AND id != $2";
+      const walletConflict = await auditClient.query(conflictQuery, [normalizedWallet, id]);
 
       if (walletConflict.rows.length > 0) {
         const err = new Error('This wallet is already linked to another application.');

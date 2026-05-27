@@ -41,7 +41,7 @@ async function reconcile() {
             const docResult = await pool.query(`
                 SELECT id, idempotency_key, file_hash, tx_hash, tx_status, submission_state, processing_started_at, storage_key, correlation_id
                 FROM documents 
-                WHERE chain_confirmed = false AND is_deleted = false
+                WHERE (chain_confirmed = false OR tx_hash = 'PENDING_USER_TX') AND is_deleted = false
                 ORDER BY created_at DESC
                 LIMIT 200
             `);
@@ -76,12 +76,25 @@ async function reconcile() {
                         if (!recoveredTxHash) {
                             try {
                                 const currentBlock = await provider.getBlockNumber();
-                                const fromBlock = Math.max(0, currentBlock - 50000);
-                                const logs = await provider.getLogs({
-                                    address: config.contracts.documentRegistry,
-                                    fromBlock,
-                                    toBlock: 'latest'
-                                });
+                                let logs = [];
+                                
+                                // Progressive search: 50,000 blocks -> 5,000 blocks -> 1,000 blocks
+                                const ranges = [50000, 5000, 1000];
+                                for (const range of ranges) {
+                                    try {
+                                        const fromBlock = Math.max(0, currentBlock - range);
+                                        logs = await provider.getLogs({
+                                            address: config.contracts.documentRegistry,
+                                            fromBlock,
+                                            toBlock: 'latest'
+                                        });
+                                        console.log(`[RECON_LOG] Successfully scanned last ${range} blocks.`);
+                                        break; // Successfully queried without throwing
+                                    } catch (e) {
+                                        if (range === 1000) throw e; // Reraise if even 1000 range fails
+                                    }
+                                }
+
                                 // Find the log that matches this document hash
                                 const matchingLog = logs.find(log => 
                                     log.topics && log.topics.some(t => t && t.toLowerCase().includes(docHashBytes.slice(2).toLowerCase()))
@@ -93,12 +106,14 @@ async function reconcile() {
                         }
 
                         const updateFields = recoveredTxHash
-                            ? "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, tx_hash = $3, approval_tx_hash = $3, updated_at = NOW(), status_updated_at = NOW()"
-                            : "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, updated_at = NOW(), status_updated_at = NOW()";
-                        const updateParams = recoveredTxHash ? [targetState, doc.id, recoveredTxHash] : [targetState, doc.id];
+                            ? "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, tx_hash = $2, approval_tx_hash = $3, updated_at = NOW(), status_updated_at = NOW() WHERE id = $4"
+                            : "chain_confirmed = true, tx_status = 'confirmed', submission_state = $1, updated_at = NOW(), status_updated_at = NOW() WHERE id = $2";
+                        const updateParams = recoveredTxHash 
+                            ? [targetState, recoveredTxHash, recoveredTxHash, doc.id] 
+                            : [targetState, doc.id];
 
                         await pool.query(
-                            `UPDATE documents SET ${updateFields} WHERE id = $2`,
+                            `UPDATE documents SET ${updateFields}`,
                             updateParams
                         );
                         await SyncLogger.logEvent({

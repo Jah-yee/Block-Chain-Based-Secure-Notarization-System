@@ -1051,7 +1051,7 @@ async function handleDocumentPatch(req, res) {
 
       try {
         let recoveredSigner = null;
-        if (signature === "DIRECT_TX_CONFIRMED") {
+        if (signature && signature.startsWith("DIRECT_TX_CONFIRMED")) {
           // If user sent directly, the "signer" is inferred from the actor address
           recoveredSigner = (actor.address || actor.wallet_address);
         } else {
@@ -1067,10 +1067,11 @@ async function handleDocumentPatch(req, res) {
         const txSendStart = Date.now();
         let txResult;
 
-        if (signature === "DIRECT_TX_CONFIRMED") {
+        if (signature && signature.startsWith("DIRECT_TX_CONFIRMED")) {
           logger.info('USER_DIRECT_TX_DETECTION', { id, correlation_id: correlationId });
           // If the user already sent it, we just need to wait for confirmation or use the provided hash
-          txResult = { txHash: txHash || 'PENDING_USER_TX', simulated: false };
+          const providedHash = signature.includes(':') ? signature.split(':')[1] : null;
+          txResult = { txHash: txHash || providedHash || 'PENDING_USER_TX', simulated: false };
         } else {
           txResult = await sendApprovalTx(
             docHashBytes,

@@ -1668,7 +1668,7 @@ router.post('/remote/authorize', withGuestContext, simpleRateLimiter(5, 60000), 
     const normalizedWalletAddress = walletAddress.toLowerCase();
     let recoveredAddress;
     
-    if (signature === "DIRECT_TX_CONFIRMED") {
+    if (signature && signature.startsWith("DIRECT_TX_CONFIRMED")) {
       // 🛡️ [RESILIENCE] Skip recovery if user already confirmed directly on-chain
       recoveredAddress = normalizedWalletAddress;
       console.log(`[AUTH] Direct transaction confirmation received for session: ${sessionId}`);

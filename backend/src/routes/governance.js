@@ -160,7 +160,7 @@ router.delete("/proposals/:id", withDomain('GOVERNANCE'), requirePrivilege({ cap
 });
 
 // POST /api/governance/proposals/:id/reject - Cast a gasless off-chain rejection
-router.post("/proposals/:id/reject", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
+router.post("/proposals/:id/reject", requirePrivilege({ capability: 'GOV_VOTE_SUBMIT' }), async (req, res) => {
     try {
         const proposalId = req.params.id;
         const voterId = req.actor.id;
@@ -787,6 +787,11 @@ router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, req
             return res.status(400).json({ error: `Session is already ${session.status}` });
         }
 
+        // Verify session-binding wallet ownership
+        if (session.wallet_address && session.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
+            return res.status(403).json({ error: 'Unauthorized: Wallet address does not match co-signer session' });
+        }
+
         if (new Date(session.expires_at) < new Date()) {
             return res.status(401).json({ error: 'Session expired' });
         }
@@ -1009,6 +1014,11 @@ router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, r
 
         const session = sessionResult.rows[0];
         if (session.status !== 'pending') return res.status(400).json({ error: `Session is already ${session.status}` });
+
+        // Verify session-binding wallet ownership
+        if (session.wallet_address && session.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
+            return res.status(403).json({ error: 'Unauthorized: Wallet address does not match co-signer session' });
+        }
 
         // 1. RELAY TO BLOCKCHAIN (Logic matches /submit-on-chain)
         const proposalId = session.proposal_id;
@@ -1233,6 +1243,11 @@ router.post('/remote/confirm/authorize', withDomain('GOVERNANCE'), allowPublic, 
 
         const session = sessionResult.rows[0];
         if (session.status !== 'pending') return res.status(400).json({ error: `Session is already ${session.status}` });
+
+        // Verify session-binding wallet ownership
+        if (session.wallet_address && session.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
+            return res.status(403).json({ error: 'Unauthorized: Wallet address does not match co-signer session' });
+        }
 
         // 1. RELAY TO BLOCKCHAIN
         const txIndex = session.proposal_id;

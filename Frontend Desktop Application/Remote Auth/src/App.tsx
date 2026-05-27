@@ -23,7 +23,7 @@ function App() {
   const [governanceMetadata, setGovernanceMetadata] = useState<any>(null);
   const [targetAddress, setTargetAddress] = useState<string | null>(null);
   const [isPromoting, setIsPromoting] = useState(false);
-  const [multiStepIndex, setMultiStepIndex] = useState<number>(0);
+  const [multiStepIndex, _setMultiStepIndex] = useState<number>(0);
   const [multiStepOperations, setMultiStepOperations] = useState<any[]>([]);
 
   const fetchConfig = useCallback(async () => {
@@ -305,6 +305,50 @@ function App() {
     }
   }, [notarizeMetadata, config, status]);
 
+  const ensureCorrectNetwork = async (provider: any) => {
+    if (!config || !config.chainId) return;
+    try {
+      const network = await provider.getNetwork();
+      if (Number(network.chainId) !== Number(config.chainId)) {
+        const targetChainHex = "0x" + Number(config.chainId).toString(16);
+        try {
+          await (window as any).ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: targetChainHex }],
+          });
+        } catch (switchError: any) {
+          // This error code indicates that the chain has not been added to MetaMask.
+          if (switchError.code === 4902) {
+            try {
+              await (window as any).ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: targetChainHex,
+                    chainName: config.chainId === 97 ? 'BNB Smart Chain Testnet' : 'BNB Smart Chain',
+                    rpcUrls: [config.rpcUrl],
+                    nativeCurrency: {
+                      name: 'BNB',
+                      symbol: 'BNB',
+                      decimals: 18,
+                    },
+                    blockExplorerUrls: [config.chainId === 97 ? 'https://testnet.bscscan.com' : 'https://bscscan.com'],
+                  },
+                ],
+              });
+            } catch (addError) {
+              console.error("Failed to add network:", addError);
+            }
+          } else {
+            console.error("Failed to switch network:", switchError);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Network switch warning:", err);
+    }
+  };
+
   const connectWallet = async () => {
     if (!(window as any).ethereum) {
       setError("Web3 Wallet not found.");
@@ -312,6 +356,8 @@ function App() {
     }
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
+      await ensureCorrectNetwork(provider);
+      
       const accounts = await provider.send("eth_requestAccounts", []);
       const address = accounts[0];
       setWalletAddress(address);
@@ -841,7 +887,7 @@ function App() {
         const res = await fetch(`${BACKEND_URL}/api/auth/remote/authorize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, walletAddress: address, signature: "DIRECT_TX_CONFIRMED" })
+          body: JSON.stringify({ sessionId, walletAddress: address, signature: `DIRECT_TX_CONFIRMED:${tx.hash}` })
         });
 
         if (!res.ok) {
@@ -987,6 +1033,8 @@ function App() {
     setError(null);
     try {
       const provider = new ethers.BrowserProvider((window as any).ethereum);
+      await ensureCorrectNetwork(provider);
+      
       const signer = await provider.getSigner();
       
       const abi = [

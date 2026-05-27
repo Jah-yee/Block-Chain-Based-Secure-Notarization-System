@@ -45,29 +45,40 @@ router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ capability: 'TX_
             return res.status(409).json({ error: 'Document already has an approval, rejection, or is in-flight' });
         }
 
-        // Insert transaction
-        const insertRes = await pool.query(
-            `INSERT INTO ntkr_transactions (user_id, document_id, tx_type, amount, tx_hash, status, note, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *`,
-            [actor.id, document_id, 'approval', 0, signature, 'success', note || '']
-        );
+        // Insert transaction & Update document atomically
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
 
-        // Update document state atomically (Gated Integrity alignment)
-        const dbState = status === 'rejected' ? 'rejected' : 'submitted_to_blockchain';
+            const insertRes = await client.query(
+                `INSERT INTO ntkr_transactions (user_id, document_id, tx_type, amount, tx_hash, status, note, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *`,
+                [actor.id, document_id, 'approval', 0, signature, 'success', note || '']
+            );
 
-        await pool.query(
-            'UPDATE documents SET submission_state = $1, updated_at = NOW() WHERE id = $2',
-            [dbState, document_id]
-        );
+            const dbState = status === 'rejected' ? 'rejected' : 'submitted_to_blockchain';
 
-        res.status(201).json({
-            transaction_id: insertRes.rows[0].id,
-            document_id: document_id,
-            status: status,
-            actor_role: actor.role,
-            note: note || '',
-            created_at: insertRes.rows[0].created_at
-        });
+            await client.query(
+                'UPDATE documents SET submission_state = $1, updated_at = NOW() WHERE id = $2',
+                [dbState, document_id]
+            );
+
+            await client.query('COMMIT');
+
+            res.status(201).json({
+                transaction_id: insertRes.rows[0].id,
+                document_id: document_id,
+                status: status,
+                actor_role: actor.role,
+                note: note || '',
+                created_at: insertRes.rows[0].created_at
+            });
+        } catch (txErr) {
+            await client.query('ROLLBACK');
+            throw txErr;
+        } finally {
+            client.release();
+        }
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to create transaction' });

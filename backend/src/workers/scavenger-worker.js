@@ -128,7 +128,7 @@ async function attemptDocCreation(client, intent) {
       await finalizeIntent(client, i, docId);
   } else {
       const existingDoc = await client.query("SELECT id FROM documents WHERE payment_tx_hash=$1", [i.payment_tx_hash]);
-      await finalizeIntent(client, i, existingDoc.rows[0].id);
+      await finalizeIntent(client, i, existingDoc.rows[0]?.id);
   }
 }
 

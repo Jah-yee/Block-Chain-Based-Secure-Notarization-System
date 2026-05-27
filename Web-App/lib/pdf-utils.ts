@@ -271,7 +271,8 @@ export async function generateCertificatePDF(data: CertificateData): Promise<voi
   doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...C.labelGray)
   doc.text("Smart Contract Address", 112, y + 21)
   doc.setFont("courier", "normal"); doc.setFontSize(5.8); doc.setTextColor(...C.text)
-  doc.text(data.contractAddress || "0xa798aB8171B09D4FCF5Bc8AA0621A9533FC7d769", 112, y + 25)
+  const activeContract = data.contractAddress || "0xD56E620AD70Bd0A4000F032383f10368418F0622"
+  doc.text(activeContract, 112, y + 25)
 
   // Contract Explorer Link
   doc.setFont("helvetica", "bold"); doc.setFontSize(6.5); doc.setTextColor(...C.labelGray)
@@ -284,6 +285,12 @@ export async function generateCertificatePDF(data: CertificateData): Promise<voi
   doc.setLineWidth(0.15)
   const textWidth = doc.getTextWidth(linkText)
   doc.line(112, y + 35, 112 + textWidth, y + 35)
+
+  // 🛡️ [Link Annotation] Make explorer link fully clickable in PDF
+  const linkUrl = explorerTxUrl || (data.contractAddress ? `${explorerBase}/address/${data.contractAddress}` : `${explorerBase}/address/${activeContract}`)
+  if (linkUrl) {
+    doc.link(112, y + 31.5, textWidth, 4, { url: linkUrl })
+  }
 
   // ── ROW 3: PUBLIC VERIFICATION (Left) & LIFECYCLE STATUS (Right) ──────────
   y = 122
@@ -304,6 +311,8 @@ export async function generateCertificatePDF(data: CertificateData): Promise<voi
       color: { dark: "#0f1e3c", light: "#ffffff" }
     })
     doc.addImage(qrDataUrl, "PNG", 17, y + 9, 34, 34)
+    // 🛡️ Make QR Code clickable
+    doc.link(17, y + 9, 34, 34, { url: verifyUrl })
   } catch (e) {
     console.error("QR generation failed", e)
   }
@@ -315,6 +324,8 @@ export async function generateCertificatePDF(data: CertificateData): Promise<voi
   doc.setFont("courier", "normal"); doc.setFontSize(5.2); doc.setTextColor(...C.mutedBlue)
   const urlLines = doc.splitTextToSize(verifyUrl, 68)
   doc.text(urlLines, 54, y + 15)
+  // 🛡️ Make URL text block clickable
+  doc.link(54, y + 12.5, 68, 7.5, { url: verifyUrl })
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(6.2); doc.setTextColor(...C.headerBg)
   doc.text("How to Independently Verify:", 54, y + 24)

@@ -64,7 +64,14 @@ const connectBNB = async () => {
     return { provider, signer, contract };
 };
 
-module.exports = { connectBNB };
+const clearConnectionCache = () => {
+    cachedProvider = null;
+    cachedSigner = null;
+    cachedContract = null;
+    console.log("🔐 Connection Cache: Ethers provider, signer, and contract cache cleared.");
+};
+
+module.exports = { connectBNB, clearConnectionCache };
 
 if (require.main === module) {
   connectBNB().catch(console.error);

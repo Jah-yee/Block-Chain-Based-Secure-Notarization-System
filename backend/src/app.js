@@ -23,7 +23,30 @@ const { globalLimiter, authLimiter } = require('./middleware/rate-limit');
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 app.use(require('cookie-parser')());
-app.use(require('cors')({ origin: true, credentials: true }));
+
+const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(o => o);
+
+const isProductionMatcher = (origin) => {
+    if (!origin) return false;
+    // Allow any subdomain of bbsns.online
+    if (origin.endsWith('.bbsns.online') || origin === 'https://bbsns.online') return true;
+    return corsOrigins.includes(origin);
+};
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Logic: Allow if (No Origin i.e. local fetch/curl) OR (Matches Production Pattern) OR (Not Production Environment)
+        if (!origin || isProductionMatcher(origin) || process.env.NODE_ENV !== 'production') {
+            callback(null, true);
+        } else {
+            console.warn(`[CORS_BLOCKED] Origin rejected: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Actor-Id', 'X-Correlation-Id']
+}));
 
 // 🛡️ [PHASE FINAL] GLOBAL ROOT AUDIT CONTEXT
 // Responsibility: establishes the single source of truth for the entire request lifecycle.
@@ -104,29 +127,7 @@ app.get("/api/system/health/deep", requirePrivilege({ capability: 'SYSTEM_LOGS',
 // 🛡️ [SECURITY] Correlation Trace
 app.use(correlationMiddleware);
 
-const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').filter(o => o);
 
-const isProductionMatcher = (origin) => {
-    if (!origin) return false;
-    // Allow any subdomain of bbsns.online
-    if (origin.endsWith('.bbsns.online') || origin === 'https://bbsns.online') return true;
-    return corsOrigins.includes(origin);
-};
-
-app.use(cors({
-    origin: (origin, callback) => {
-        // Logic: Allow if (No Origin i.e. local fetch/curl) OR (Matches Production Pattern) OR (Not Production Environment)
-        if (!origin || isProductionMatcher(origin) || process.env.NODE_ENV !== 'production') {
-            callback(null, true);
-        } else {
-            console.warn(`[CORS_BLOCKED] Origin rejected: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Actor-Id', 'X-Correlation-Id']
-}));
 
 // Route Definitions
 const authRoutes = require('./routes/auth');
