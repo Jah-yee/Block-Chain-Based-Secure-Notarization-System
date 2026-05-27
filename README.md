@@ -64,8 +64,45 @@ BBSNS is designed around two distinct, highly specialized user journeys:
 ### **The Document Owner Flow (Client Web Portal)**
 Clients utilize a seamless Next.js web interface to upload legal documents. The system hashes the document locally, creates a secure upload intent, and handles payment processing through a customized utility token economy. Clients can track the live notarization state machine from upload to final blockchain confirmation.
 
+```mermaid
+sequenceDiagram
+    participant O as Document Owner
+    participant W as Web Portal
+    participant S as Secure Storage
+    participant C as Core API
+    O->>W: Upload Legal Document
+    W->>W: Hash Document Locally
+    W->>C: Create Upload Intent
+    C->>S: Request Secure Upload URL
+    S-->>C: Signed URL
+    C-->>W: URL & Payment Req
+    W->>O: Prompt Token Payment
+    O->>C: Submit Token Payment
+    C->>C: Verify & Lock Intent
+    C-->>W: Status: Awaiting Notary
+```
+
 ### **The Notary Flow (Isolated Desktop Application)**
 Certified Notaries operate within a secure, sandboxed Electron desktop environment. To perform notarizations, they must pass strict biometric identity verifications. Once verified, they utilize a cryptographic bridge to review documents and apply their digital signature, which the system then relays to the blockchain.
+
+```mermaid
+sequenceDiagram
+    participant N as Certified Notary
+    participant D as Desktop Console
+    participant C as Core API
+    participant BC as Blockchain
+    N->>D: Authenticate (Biometrics)
+    D->>C: Verify Identity Status
+    C-->>D: Access Granted
+    D->>C: Fetch Pending Documents
+    C-->>D: Encrypted Document Hash
+    N->>D: Review & Approve
+    D->>D: Generate Cryptographic Signature
+    D->>C: Submit Digital Signature
+    C->>BC: Relay Signature to Blockchain
+    BC-->>C: Transaction Confirmed
+    C-->>D: Status: On-Chain Finalized
+```
 
 ---
 
