@@ -39,9 +39,9 @@ graph TD
         S3[AWS S3 Vault]
     end
     subgraph "⛓️ Blockchain Layer"
-        Registry[DocumentRegistry.sol]
-        NTKR[NTKR.sol]
-        MultiSig[BBSNSMultiSig.sol]
+        Registry[Master Record Contract]
+        NTKR[Utility Token Contract]
+        MultiSig[Governance Contract]
     end
     Web -->|Upload| API
     Desktop -->|Verify| API
@@ -57,13 +57,13 @@ Tracking every document from initial intent to permanent on-chain finalization.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> INTENT_CREATED: Initiate
-    INTENT_CREATED --> INTENT_PAYMENT_PENDING: S3 Uploaded
-    INTENT_PAYMENT_PENDING --> INTENT_PAYMENT_VERIFIED: NTKR Burn
-    INTENT_PAYMENT_VERIFIED --> NOTARY_ASSIGNMENT_PENDING: DB Sync
-    NOTARY_ASSIGNMENT_PENDING --> CHAIN_TX_PENDING: Notary Signature
-    CHAIN_TX_PENDING --> CHAIN_TX_CONFIRMED: On-Chain Confirmed
-    CHAIN_TX_CONFIRMED --> [*]
+    [*] --> Upload_Initiated: Initiate
+    Upload_Initiated --> Storage_Secured: S3 Uploaded
+    Storage_Secured --> Payment_Verified: Token Burn
+    Payment_Verified --> Awaiting_Notary: System Sync
+    Awaiting_Notary --> Signing_In_Progress: Notary Signature
+    Signing_In_Progress --> On_Chain_Finalized: On-Chain Confirmed
+    On_Chain_Finalized --> [*]
 ```
 
 ---
@@ -84,7 +84,7 @@ sequenceDiagram
     D->>W: Push Challenge
     W->>W: Sign (MetaMask)
     W->>B: Submit Signature
-    B->>BC: relay(recordAction)
+    B->>BC: Relay Signed Payload
 ```
 
 ---
@@ -108,16 +108,16 @@ sequenceDiagram
 
 ```mermaid
 erDiagram
-    USERS ||--o{ DOCUMENTS : "owns"
-    USERS ||--o{ UPLOAD_INTENTS : "initiates"
-    DOCUMENTS ||--o{ NTKR_TRANSACTIONS : "logs"
-    UPLOAD_INTENTS ||--|| DOCUMENTS : "finalizes"
+    SYSTEM_ACTORS ||--o{ NOTARIZATION_RECORDS : "owns"
+    SYSTEM_ACTORS ||--o{ UPLOAD_REQUESTS : "initiates"
+    NOTARIZATION_RECORDS ||--o{ TRANSACTION_LOGS : "logs"
+    UPLOAD_REQUESTS ||--|| NOTARIZATION_RECORDS : "finalizes"
 ```
 
 ---
 
 ## 🛡️ 6. Forensic Audit Log Schema
-Every request through the `actor.js` middleware generates a correlated audit trail in the following format:
+Every request through the core access control middleware generates a correlated audit trail in the following format:
 
 ```json
 {
@@ -137,7 +137,7 @@ Every request through the `actor.js` middleware generates a correlated audit tra
 
 1. **Process Management**: Use **PM2** with clustering.
    ```bash
-   pm2 start src/index.js --name "bbsns-api" -i max
+   pm2 start [Core_Entry_Point] --name "Core-Service" -i max
    ```
 2. **Reverse Proxy**: Setup **Nginx** with TLS 1.3 encryption.
 3. **Database Security**: Enforce **SSL-only** connections to PostgreSQL.
