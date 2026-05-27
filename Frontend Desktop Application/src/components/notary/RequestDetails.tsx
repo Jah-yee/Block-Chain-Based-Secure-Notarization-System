@@ -304,12 +304,15 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         </div>
                         <p className="text-sm text-muted-foreground">Document ID: #{request.id} • Review and process notarization request</p>
                         <Badge className={`uppercase tracking-widest text-[9px] font-black px-3 py-1 rounded-full ${
-                            request.submission_state === 'submitted_to_blockchain' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
                             request.status === 'approved' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
                             request.status === 'rejected' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
+                            request.submission_state === 'submitted_to_blockchain' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
                             'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                         }`}>
-                            {request.submission_state === 'submitted_to_blockchain' ? 'Processing' : request.status}
+                            {request.status === 'approved' ? 'Approved' :
+                             request.status === 'rejected' ? 'Rejected' :
+                             request.submission_state === 'submitted_to_blockchain' ? 'Processing' :
+                             request.status}
                         </Badge>
                     </div>
                 </div>
@@ -505,13 +508,15 @@ export function RequestDetails({ requestId, onBack }: RequestDetailsProps) {
                         ) : (
                             <div className="text-center">
                                 <Badge variant="outline" className={`w-full justify-center py-2 rounded-xl border-border font-bold uppercase tracking-widest text-[10px] ${
+                                    request.status === 'approved' ? 'text-green-400 border-green-500/20 bg-green-500/5' :
+                                    request.status === 'rejected' ? 'text-red-400 border-red-500/20 bg-red-500/5' :
                                     request.submission_state === 'submitted_to_blockchain' ? 'text-blue-400 border-blue-500/20 bg-blue-500/5' :
-                                    request.status === 'approved' ? 'text-green-400 border-green-500/20 bg-green-500/5' : 
-                                    'text-red-400 border-red-500/20 bg-red-500/5'
+                                    'text-muted-foreground border-border'
                                 }`}>
-                                    {request.submission_state === 'submitted_to_blockchain' ? 'Processing Transaction...' : 
-                                     request.status === 'approved' ? 'Transaction Completed' : 
-                                     'Transaction Rejected'}
+                                    {request.status === 'approved' ? 'Transaction Completed' :
+                                     request.status === 'rejected' ? 'Transaction Rejected' :
+                                     request.submission_state === 'submitted_to_blockchain' ? 'Processing Transaction...' :
+                                     request.status}
                                 </Badge>
                             </div>
                         )}

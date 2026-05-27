@@ -47,9 +47,9 @@ interface ConfigContextType {
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
-const DEFAULT_API_URL = "https://api.bbsns.online";
-const DEFAULT_WEB_URL = "https://app.bbsns.online";
-const DEFAULT_AUTH_URL = "https://auth.bbsns.online";
+const DEFAULT_API_URL = import.meta.env.VITE_API_BASE_URL || "https://api.bbsns.online";
+const DEFAULT_WEB_URL = import.meta.env.VITE_WEB_APP_URL || "https://app.bbsns.online";
+const DEFAULT_AUTH_URL = import.meta.env.VITE_AUTH_URL || "https://auth.bbsns.online";
 
 export const ConfigAuthorityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<ConfigStatus>('loading');

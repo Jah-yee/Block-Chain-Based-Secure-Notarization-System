@@ -278,6 +278,18 @@ router.post("/deposit", requirePrivilege({ capability: 'TOKEN_MINT' }), async (r
 
         console.log(`[DEPOSIT] SUCCESS: User ${user.id} deposited ${ntkrAmount} NTKR from tx ${txHash} (block ${receipt.blockNumber}, ${confirmations} confirmations)`);
 
+        try {
+            const { logAction } = require("../utils/logger");
+            logAction(
+                'TOKEN_MINT',
+                `User deposited ${ntkrAmount} NTKR from bridged transaction.`,
+                user.email || 'user',
+                { user_id: user.id, tx_hash: txHash, package_id: event.packageId, amount: ntkrAmount }
+            );
+        } catch (logErr) {
+            console.error("Failed to log bridge deposit mint event:", logErr.message);
+        }
+
         res.json({
             success: true,
             deposited: ntkrAmount,

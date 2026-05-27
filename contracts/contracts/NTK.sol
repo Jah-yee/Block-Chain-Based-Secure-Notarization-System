@@ -16,12 +16,10 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 contract NTKToken is ERC20, ERC20Burnable, AccessControl, Pausable {
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
     
-    mapping(address => uint256) public lastDailyMint;
-    uint256 public constant DAILY_NTK = 100 * 1e18;
-    uint256 public constant DAY = 1 days;
+    uint256 public constant REFILL_AMOUNT = 100 * 1e18;
     uint256 public constant COST_PER_ACTION = 1 * 1e18;
 
-    event DailyNTKMinted(address indexed notary, uint256 amount, uint256 timestamp);
+    event NTKProvisioned(address indexed notary, uint256 amount, uint256 timestamp);
     event NTKBurnedForAction(address indexed notary, uint256 amount);
 
     constructor(address initialRelayer) ERC20("Notary Action Token", "NTK") {
@@ -35,16 +33,11 @@ contract NTKToken is ERC20, ERC20Burnable, AccessControl, Pausable {
      * Backend cannot bypass this enforcement.
      * @param notary Address of the notary to receive daily allocation
      */
-    function mintDailyNTK(address notary) external onlyRole(RELAYER_ROLE) whenNotPaused {
-        require(
-            block.timestamp - lastDailyMint[notary] >= DAY,
-            "Daily NTK already issued"
-        );
+    function provisionNTK(address notary) external onlyRole(RELAYER_ROLE) whenNotPaused {
+        require(balanceOf(notary) == 0, "Notary already has NTK");
 
-        _mint(notary, DAILY_NTK);
-        lastDailyMint[notary] = block.timestamp;
-
-        emit DailyNTKMinted(notary, DAILY_NTK, block.timestamp);
+        _mint(notary, REFILL_AMOUNT);
+        emit NTKProvisioned(notary, REFILL_AMOUNT, block.timestamp);
     }
 
     /**
@@ -56,6 +49,11 @@ contract NTKToken is ERC20, ERC20Burnable, AccessControl, Pausable {
     function burnForAction(address notary) external onlyRole(RELAYER_ROLE) whenNotPaused {
         _burn(notary, COST_PER_ACTION);
         emit NTKBurnedForAction(notary, COST_PER_ACTION);
+
+        if (balanceOf(notary) == 0) {
+            _mint(notary, REFILL_AMOUNT);
+            emit NTKProvisioned(notary, REFILL_AMOUNT, block.timestamp);
+        }
     }
 
     /**

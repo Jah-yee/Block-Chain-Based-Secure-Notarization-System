@@ -50,7 +50,7 @@ export function AdminLogin({ onLogin, onBack }: AdminLoginProps) {
       const electronAPI = (window as any).electronAPI;
       if (!electronAPI?.auth) throw new Error("Security bridge failure: auth:start missing.");
 
-      const { sessionId } = await electronAPI.auth.start();
+      const { sessionId } = await electronAPI.auth.start('admin');
       setSessionId(sessionId);
       setStatus("awaiting_browser");
 

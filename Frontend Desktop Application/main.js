@@ -17,7 +17,7 @@ const logFile = path.join(app.getPath('userData'), 'app.log');
 function log(level, context, message) {
     const timestamp = new Date().toISOString();
     const formattedMessage = `[${timestamp}] [${level}] [${context}] ${message}\n`;
-    
+
     try {
         // Simple rotation guard: If > 5MB, purge.
         if (fs.existsSync(logFile) && fs.statSync(logFile).size > 5 * 1024 * 1024) {
@@ -32,7 +32,7 @@ function log(level, context, message) {
 // 🛡️ [SECURITY] authoritative API Configuration
 let API_BASE_URL = "https://api.bbsns.online";
 let remoteAuthWindow = null;
- // Production Source of Truth
+// Production Source of Truth
 
 log("INFO", "SYSTEM_BOOT", `App initialized (Packaged: ${app.isPackaged})`);
 
@@ -54,7 +54,7 @@ function getPersistentDeviceId() {
 
     const userDataPath = app.getPath('userData');
     const deviceIdPath = path.join(userDataPath, '.device_id');
-    
+
     let deviceId = null;
     if (fs.existsSync(deviceIdPath)) {
         try {
@@ -116,7 +116,7 @@ function saveSecureToken(token) {
         const encryptedToken = safeStorage.encryptString(token);
         const tokenPath = path.join(app.getPath('userData'), '.vault');
         fs.writeFileSync(tokenPath, encryptedToken);
-        
+
         log("INFO", "AUTH", `Token secured → B:${newBlock} | T:${newIat}`);
         return true;
     } catch (err) {
@@ -153,7 +153,7 @@ function isValidToken(token) {
  * Responsibility: Periodically attempts to upgrade DEGRADED sessions or refresh stale ones.
  */
 let recoveryInterval = null;
-let currentBackoff = 30000; 
+let currentBackoff = 30000;
 let activeRefreshPromise = null;
 
 async function getRefreshedToken(reason = "PROACTIVE") {
@@ -161,7 +161,7 @@ async function getRefreshedToken(reason = "PROACTIVE") {
         log("INFO", "RECOVERY", `[SINGLE_FLIGHT] Co-alescing parallel refresh request (${reason})`);
         return activeRefreshPromise;
     }
-    
+
     activeRefreshPromise = attemptSecurityUpgrade(reason).finally(() => {
         activeRefreshPromise = null;
     });
@@ -197,7 +197,7 @@ async function attemptSecurityUpgrade(reason = "PROACTIVE") {
             } else {
                 log("INFO", "RECOVERY", "Handshake succeeded but token was already fresh/older (Ignored).");
             }
-            
+
             // Reset backoff on success
             currentBackoff = 30000;
             return true;
@@ -213,14 +213,14 @@ async function attemptSecurityUpgrade(reason = "PROACTIVE") {
         } else {
             // Still DEGRADED - increase backoff
             currentBackoff = Math.min(currentBackoff * 2, 300000); // Max 5m (300s)
-            log("INFO", "RECOVERY", `Still DEGRADED. Next attempt in ${currentBackoff/1000}s`);
+            log("INFO", "RECOVERY", `Still DEGRADED. Next attempt in ${currentBackoff / 1000}s`);
             restartRecoveryTimer();
             return false;
         }
     } catch (err) {
         const status = err.response?.status;
         log("ERROR", "RECOVERY", `Handshake FAILED [${status}]: ${err.message}`);
-        
+
         if (status === 401 || status === 403) {
             handleUnauthorized();
         } else {
@@ -283,7 +283,7 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/auth\/remote\/session\/notarize$/, methods: ["POST"] },
     { path: /^\/api\/auth\/remote\/status\/[\w-]+$/, methods: ["GET"] },
 
-    // ⚖️ GOVERNANCE (Dashboard Visibility)
+    // ⚖️ GOVERNANCE
     { path: /^\/api\/governance\/proposals$/, methods: ["GET", "POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/prepare-on-chain$/, methods: ["POST"] },
     { path: /^\/api\/governance\/proposals\/[\w-]+\/submit-on-chain$/, methods: ["POST"] },
@@ -296,6 +296,13 @@ const ALLOWED_ROUTES = [
     { path: /^\/api\/governance\/remote\/vote\/status\/[\w-]+$/, methods: ["GET"] },
     { path: /^\/api\/governance\/remote\/submit\/session$/, methods: ["POST"] },
     { path: /^\/api\/governance\/remote\/submit\/status\/[\w-]+$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/remote\/confirm\/session$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/confirm\/status\/[\w-]+$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/remote\/confirm\/authorize$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/confirm\/sync-manual$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/execute\/session$/, methods: ["POST"] },
+    { path: /^\/api\/governance\/remote\/execute\/status\/[\w-]+$/, methods: ["GET"] },
+    { path: /^\/api\/governance\/remote\/execute\/sync-manual$/, methods: ["POST"] },
     { path: /^\/api\/governance\/multisig\/settings$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/stats$/, methods: ["GET"] },
     { path: /^\/api\/governance\/multisig\/transactions$/, methods: ["GET"] },
@@ -318,7 +325,7 @@ const ALLOWED_ROUTES = [
 
 function validateRequest(endpoint, method) {
     const cleanMethod = (method || 'GET').toUpperCase();
-    
+
     // 1. Normalize Path (Remove query params, decode URI)
     const parsed = new URL(endpoint, "http://localhost");
     const cleanPath = decodeURIComponent(parsed.pathname).replace(/\\/g, '/');
@@ -327,7 +334,7 @@ function validateRequest(endpoint, method) {
     if (cleanPath.includes("..")) return false;
 
     // 3. Match against Whitelist
-    return ALLOWED_ROUTES.some(route => 
+    return ALLOWED_ROUTES.some(route =>
         route.path.test(cleanPath) && route.methods.includes(cleanMethod)
     );
 }
@@ -436,14 +443,15 @@ async function loadConfigCache() {
 
 let pollingInterval = null;
 let currentTraceId = null;
-async function startAuthFlow() {
+async function startAuthFlow(role) {
     currentTraceId = Date.now().toString();
     log("INFO", "AUTH_HANDSHAKE", `[TRACE ${currentTraceId}] Initiating remote handshake with ${API_BASE_URL}`);
     try {
         const response = await axios.post(`${API_BASE_URL}/api/auth/remote/session`, {
-            device_id: getPersistentDeviceId()
+            device_id: getPersistentDeviceId(),
+            requested_role: role || 'admin'
         }, { timeout: 5000 });
-        
+
         const rawData = response.data;
         const sessionId = rawData.sessionId || rawData.session_id;
         const sessionSecret = rawData.sessionSecret;
@@ -456,17 +464,17 @@ async function startAuthFlow() {
 
         const AUTH_BASE = "https://auth.bbsns.online";
         const AUTH_ROUTE = "/";
-        
+
         // 🛡️ [ISOLATION] Determine if we should use local Auth UI
         const authUrl = getAuthHandshakeUrl('login', sessionId);
 
         log("INFO", "AUTH_HANDSHAKE", "Handshake active. URL: " + authUrl);
         openRemoteAuthWindow(authUrl);
-         if (pollingInterval) clearInterval(pollingInterval);
-        
+        if (pollingInterval) clearInterval(pollingInterval);
+
         const startTime = Date.now();
         const MAX_POLL_TIME = 180000; // 3 Minute Hard Timeout
-        
+
         pollingInterval = setInterval(async () => {
             try {
                 // 1. Check client-side timeout
@@ -485,11 +493,11 @@ async function startAuthFlow() {
                         'x-session-secret': sessionSecret
                     }
                 });
-                
+
                 // [TRACE 1] Polling Response
                 const { status, token, user } = pollRes.data;
-                log("INFO", "AUTH_TRACE", `[STEP 1] POLL_STATUS: ${status} (sid=${sessionId.substring(0,8)})`);
-                
+                log("INFO", "AUTH_TRACE", `[STEP 1] POLL_STATUS: ${status} (sid=${sessionId.substring(0, 8)})`);
+
                 // 2. [SUCCESS] Session Completed & Identity Bound
                 if (status === 'completed') {
                     if (!token) {
@@ -516,13 +524,13 @@ async function startAuthFlow() {
                         zeroTrustStatus = rawStatus;
                     }
 
-                    const ipcPayload = { 
-                        status: 'authorized', 
-                        user: user, 
+                    const ipcPayload = {
+                        status: 'authorized',
+                        user: user,
                         zeroTrustStatus,
-                        traceId: currentTraceId 
+                        traceId: currentTraceId
                     };
-                    
+
                     log("INFO", "AUTH_TRACE", `[STEP 3] IPC_AUTHORIZED_SEND`);
                     if (mainWindow) mainWindow.webContents.send('auth:status-changed', ipcPayload);
                     return;
@@ -536,7 +544,7 @@ async function startAuthFlow() {
                     if (mainWindow) mainWindow.webContents.send('auth:status-changed', { status, traceId: currentTraceId });
                 }
 
-            } catch (pollErr) { 
+            } catch (pollErr) {
                 const statusCode = pollErr.response?.status;
                 if (statusCode === 404) {
                     // Session consumed or missing
@@ -545,16 +553,16 @@ async function startAuthFlow() {
                     log("WARN", "AUTH_TRACE", "[CONSUMED] Session no longer available.");
                     return;
                 }
-                
+
                 if (statusCode === 429) {
                     log("ERROR", "API_THROTTLE", "Rate limited on /auth/status");
                     return;
                 }
-                
-                log("ERROR", "AUTH", `Polling link degraded: ${pollErr.message}`); 
+
+                log("ERROR", "AUTH", `Polling link degraded: ${pollErr.message}`);
             }
         }, 3000); // Poll every 3 seconds
-        
+
         return { sessionId: "[HIDDEN]" };
     } catch (err) {
         let reason = err.message;
@@ -569,265 +577,273 @@ async function startAuthFlow() {
 
 let mainWindow;
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1280, height: 800,
-    webPreferences: { 
-      preload: path.join(__dirname, 'preload.js'), 
-      nodeIntegration: false, 
-      contextIsolation: true,
-      plugins: true,
-      pdfViewer: true
-    },
-    titleBarStyle: 'hidden',
-    backgroundColor: '#07090e'
-  });
+    mainWindow = new BrowserWindow({
+        width: 1280, height: 800,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            plugins: true,
+            pdfViewer: true
+        },
+        titleBarStyle: 'hidden',
+        backgroundColor: '#07090e'
+    });
 
-  ipcMain.on('window:minimize', () => mainWindow.minimize());
-  ipcMain.on('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
+    const productionPath = path.join(__dirname, 'build', 'index.html');
+    const devUrl = 'http://localhost:3001';
+
+    if (app.isPackaged && fs.existsSync(productionPath)) {
+        mainWindow.loadFile(productionPath);
+        log("INFO", "UI_LOAD", "Loading production static assets from build/index.html");
     } else {
-      mainWindow.maximize();
+        mainWindow.loadURL(devUrl);
+        log("INFO", "UI_LOAD", "Loading dev environment from localhost:3001");
     }
-  });
-  ipcMain.on('window:close', () => mainWindow.close());
-
-
-  const productionPath = path.join(__dirname, 'build', 'index.html');
-  const devUrl = 'http://localhost:3001';
-
-  if (app.isPackaged && fs.existsSync(productionPath)) {
-    mainWindow.loadFile(productionPath);
-    log("INFO", "UI_LOAD", "Loading production static assets from build/index.html");
-  } else {
-    mainWindow.loadURL(devUrl);
-    log("INFO", "UI_LOAD", "Loading dev environment from localhost:3001");
-  }
 }
 
 app.whenReady().then(() => {
-  if (!safeStorage.isEncryptionAvailable() && app.isPackaged) {
-    log("ERROR", "SECURITY", "DPAPI unavailable. System terminating.");
-    dialog.showErrorBox("SECURITY_ERROR", "BBSNS Console requires OS encryption. DPAPI/SafeStorage unavailable.");
-    app.quit();
-    return;
-  }
-  createWindow();
-  ipcMain.handle('auth:start', startAuthFlow);
-  ipcMain.handle('auth:check-session', async () => !!(await getSecureToken()));
-  ipcMain.handle('auth:trigger-recovery', async () => attemptSecurityUpgrade());
-  ipcMain.handle('auth:logout', async () => handleUnauthorized());
-  ipcMain.handle('auth:open-remote', (event, url) => {
-      try {
-          const parsed = new URL(url);
-          const mode = parsed.searchParams.get('mode') || 'login';
-          const sessionId = parsed.searchParams.get('sessionId');
-          
-          if (!sessionId) {
-              log("ERROR", "AUTH_REMOTE", "Rejecting open-remote: Missing sessionId");
-              return false;
-          }
-
-          const handshakeUrl = getAuthHandshakeUrl(mode, sessionId);
-          openRemoteAuthWindow(handshakeUrl);
-          return true;
-      } catch (e) {
-          log("ERROR", "AUTH_REMOTE", "Failed to parse remote auth URL: " + e.message);
-          // Fallback for safety if it's already a valid path
-          if (url && (url.startsWith('https://auth.bbsns.online') || fs.existsSync(url.split('?')[0]))) {
-              openRemoteAuthWindow(url);
-              return true;
-          }
-          return false;
-      }
-  });
-  ipcMain.on('open-external', (event, url) => shell.openExternal(url));
-  ipcMain.handle('config:save', async (event, data) => saveConfigCache(data));
-  ipcMain.handle('config:load', async () => loadConfigCache());
-  ipcMain.handle('config:sync-api-url', (event, url) => {
-    if (url && url.startsWith('http')) {
-        log("INFO", "CONFIG_SYNC", `Main Process API_BASE_URL synchronized to: ${url}`);
-        API_BASE_URL = url;
-        return true;
+    if (!safeStorage.isEncryptionAvailable() && app.isPackaged) {
+        log("ERROR", "SECURITY", "DPAPI unavailable. System terminating.");
+        dialog.showErrorBox("SECURITY_ERROR", "BBSNS Console requires OS encryption. DPAPI/SafeStorage unavailable.");
+        app.quit();
+        return;
     }
-    return false;
-  });
+    createWindow();
+    // Auth IPC Handlers
+    ipcMain.handle('auth:start', (event, role) => startAuthFlow(role));
+    ipcMain.handle('auth:check-session', async () => !!(await getSecureToken()));
+    ipcMain.handle('auth:trigger-recovery', async () => attemptSecurityUpgrade());
+    ipcMain.handle('auth:logout', async () => handleUnauthorized());
+    ipcMain.handle('auth:open-remote', (event, url) => {
+        try {
+            const parsed = new URL(url);
+            const mode = parsed.searchParams.get('mode') || 'login';
+            const sessionId = parsed.searchParams.get('sessionId');
 
-  // 🛡️ [SECURITY] Device Identity Bridge
-  ipcMain.handle('auth:get-device-id', async () => getPersistentDeviceId());
-  
-  // 🛡️ [SECURITY] authoritative Session Authority
-  // Pull API for renderer to recover identity without localStorage
-  ipcMain.handle('auth:get-session', async () => {
-    log("INFO", "AUTH", "Session retrieval (auth:get-session) initiated by renderer.");
-    const token = await getSecureToken();
-    
-    if (!token) {
-        log("INFO", "AUTH", "No token in vault. Returning unauthenticated.");
-        return { authenticated: false };
-    }
+            if (!sessionId) {
+                log("ERROR", "AUTH_REMOTE", "Rejecting open-remote: Missing sessionId");
+                return false;
+            }
 
-    try {
-        const response = await axios.get(`${API_BASE_URL}/api/auth/me`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-            timeout: 5000 // Increased from 1500ms to handle blockchain resolution
-        });
-        
-        const user = response.data.user;
-        if (!user) {
-            log("INFO", "AUTH", "Backend returned null user (Invalid/Expired Token). Returning unauthenticated.");
+            const handshakeUrl = getAuthHandshakeUrl(mode, sessionId);
+            openRemoteAuthWindow(handshakeUrl);
+            return true;
+        } catch (e) {
+            log("ERROR", "AUTH_REMOTE", "Failed to parse remote auth URL: " + e.message);
+            // Fallback for safety if it's already a valid path
+            if (url && (url.startsWith('https://auth.bbsns.online') || fs.existsSync(url.split('?')[0]))) {
+                openRemoteAuthWindow(url);
+                return true;
+            }
+            return false;
+        }
+    });
+    ipcMain.on('open-external', (event, url) => shell.openExternal(url));
+
+    // 🛡️ [SECURITY] Window Management Bridge
+    ipcMain.on('window:minimize', () => {
+        if (mainWindow) mainWindow.minimize();
+    });
+
+    ipcMain.on('window:maximize', () => {
+        if (!mainWindow) return;
+        if (mainWindow.isMaximized()) {
+            mainWindow.unmaximize();
+        } else {
+            mainWindow.maximize();
+        }
+    });
+
+    ipcMain.on('window:close', () => {
+        if (mainWindow) mainWindow.close();
+    });
+    ipcMain.handle('config:save', async (event, data) => saveConfigCache(data));
+    ipcMain.handle('config:load', async () => loadConfigCache());
+    ipcMain.handle('config:sync-api-url', (event, url) => {
+        if (url && url.startsWith('http')) {
+            log("INFO", "CONFIG_SYNC", `Main Process API_BASE_URL synchronized to: ${url}`);
+            API_BASE_URL = url;
+            return true;
+        }
+        return false;
+    });
+
+    // 🛡️ [SECURITY] Device Identity Bridge
+    ipcMain.handle('auth:get-device-id', async () => getPersistentDeviceId());
+
+    // 🛡️ [SECURITY] authoritative Session Authority
+    // Pull API for renderer to recover identity without localStorage
+    ipcMain.handle('auth:get-session', async () => {
+        log("INFO", "AUTH", "Session retrieval (auth:get-session) initiated by renderer.");
+        const token = await getSecureToken();
+
+        if (!token) {
+            log("INFO", "AUTH", "No token in vault. Returning unauthenticated.");
             return { authenticated: false };
         }
 
-        const rawStatus = user?.zeroTrustStatus;
-        const validStatuses = ["VERIFIED", "DEGRADED", "UNKNOWN"];
-        
-        let zeroTrustStatus;
-        if (!rawStatus || !validStatuses.includes(rawStatus)) {
-            console.warn("[ZERO_TRUST] Invalid or missing status from backend", {
-                endpoint: "/api/auth/me",
-                received: rawStatus,
-                fallback: "UNKNOWN"
+        try {
+            const response = await axios.get(`${API_BASE_URL}/api/auth/me`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+                timeout: 5000 // Increased from 1500ms to handle blockchain resolution
             });
-            zeroTrustStatus = "UNKNOWN";
-        } else {
-            zeroTrustStatus = rawStatus;
-        }
-        
-        // 🛡️ [SELF-HEALING] Bunker V3.6.1: Snapshot Rotation
-        if (response.data.token) {
-            log("INFO", "AUTH", "[ROTATION] Refreshed token detected during session recovery.");
-            saveSecureToken(response.data.token);
-        }
 
-        log("INFO", "AUTH", `Session retrieval success for user: ${user.id} | Status: ${zeroTrustStatus}`);
-        return { authenticated: true, user, zeroTrustStatus, token };
-    } catch (err) {
-        const status = err.response ? err.response.status : "NETWORK_ERROR";
-        log("ERROR", "AUTH", `Session recovery failed [${status}]: ${err.message}`);
-        return { authenticated: false };
-    }
-  });
+            const user = response.data.user;
+            if (!user) {
+                log("INFO", "AUTH", "Backend returned null user (Invalid/Expired Token). Returning unauthenticated.");
+                return { authenticated: false };
+            }
 
-  // 🛡️ [SECURITY] Authenticated API Bridge
-  // Re-routes renderer requests through the main process to inject secure tokens
-  ipcMain.handle('api:call', async (event, endpoint, method = 'GET', data = null) => {
-    const cleanMethod = (method || 'GET').toUpperCase();
+            const rawStatus = user?.zeroTrustStatus;
+            const validStatuses = ["VERIFIED", "DEGRADED", "UNKNOWN"];
 
-    // 🛡️ [SECURITY] Hardened Path Enforcement
-    if (!validateRequest(endpoint, cleanMethod)) {
-        const parsed = new URL(endpoint, "http://localhost");
-        const tokenExists = !!(await getSecureToken());
-        const publicPaths = [
-            '/api/auth/system-status', '/api/auth/nonce', '/api/auth/remote/session', 
-            '/api/auth/remote/exchange', '/api/auth/remote/authorize', 
-            '/api/auth/remote/status', '/api/auth/remote/verify', '/api/auth/remote/callback'
-        ];
-        const isPublicRequest = publicPaths.some(p => parsed.pathname.startsWith(p));
-
-        if (!isPublicRequest) {
-            log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access: ${cleanMethod} ${endpoint}`);
-            return {
-                success: false,
-                error: { code: "ACCESS_DENIED", message: "Unauthorized API access attempt" }
-            };
-        }
-    }
-
-    try {
-        // 🛡️ [SELF-HEALING] Bunker V3.8: Hardened Atomic Recovery Bridge
-        // Intercepts 426 'Upgrade Required' and transparently heals the session.
-        async function executeWithHealing(retryCount = 0) {
-            const tokenValue = await getSecureToken();
-            const currentToken = isValidToken(tokenValue) ? tokenValue : null;
-            
-            const headers = { 
-                'Content-Type': 'application/json',
-                'x-client-source': 'desktop'
-            };
-
-            if (currentToken) {
-                headers['Authorization'] = `Bearer ${currentToken}`;
+            let zeroTrustStatus;
+            if (!rawStatus || !validStatuses.includes(rawStatus)) {
+                console.warn("[ZERO_TRUST] Invalid or missing status from backend", {
+                    endpoint: "/api/auth/me",
+                    received: rawStatus,
+                    fallback: "UNKNOWN"
+                });
+                zeroTrustStatus = "UNKNOWN";
             } else {
-                log("INFO", "BRIDGE_SANITATION", "Proceeding without Authorization header (No valid token found).");
+                zeroTrustStatus = rawStatus;
             }
 
-            const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
-            const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-            const fullUrl = `${cleanBase}${cleanEndpoint}`;
-
-            const axiosConfig = { method: cleanMethod, url: fullUrl, headers, timeout: 5000 };
-            if (cleanMethod !== 'GET' && data) axiosConfig.data = data;
-            
-            // 🛡️ [SECURITY] Binary Handling for Documents
-            if (endpoint.endsWith('/file') || endpoint.endsWith('/preview')) {
-                axiosConfig.responseType = 'arraybuffer';
+            // 🛡️ [SELF-HEALING] Bunker V3.6.1: Snapshot Rotation
+            if (response.data.token) {
+                log("INFO", "AUTH", "[ROTATION] Refreshed token detected during session recovery.");
+                saveSecureToken(response.data.token);
             }
 
-            try {
-                log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint} (v=${retryCount})`);
-                const response = await axios(axiosConfig);
-                
-                if (response.data && (endpoint.endsWith('/file') || endpoint.endsWith('/preview'))) {
-                    log("INFO", "API_BRIDGE", `← [BINARY] ${endpoint} | Size: ${response.data.byteLength || response.data.length} bytes`);
-                }
-                
-                return { success: true, data: response.data };
-            } catch (error) {
-                const status = error.response ? error.response.status : 'NETWORK_ERROR';
-                
-                // 🔐 [CRITICAL] 426 Upgrade Trigger
-                if (status === 426 && retryCount === 0) {
-                    log("WARN", "AUTH", `[426_INTERCEPT] Stale session detected for ${endpoint}. Initiating recovery...`);
-                    
-                    const healed = await getRefreshedToken("ACTIVE_RECOVERY");
-                    if (healed) {
-                        // Re-fetch token from vault before retry to ensure latest snapshot
-                        const newToken = await getSecureToken();
-                        
-                        // Idempotency Gate: If block unchanged, only skip if it's a GET. 
-                        // Mutations must always re-transmit with new context.
-                        if (cleanMethod === 'GET') {
-                            const payload = JSON.parse(Buffer.from(newToken.split('.')[1], 'base64').toString());
-                            const oldPayload = JSON.parse(Buffer.from(currentToken.split('.')[1], 'base64').toString());
-                            if (payload.snapshotBlock === oldPayload.snapshotBlock) {
-                                log("INFO", "AUTH", "[IDEMPOTENCY] Block unchanged after heal. Skipping GET retry.");
-                                return { success: false, error: { status: 426, message: "Block unchanged after recovery handshake" } };
-                            }
-                        }
-                        
-                        log("INFO", "AUTH", "[RETRY] Session authority restored. Retrying original request...");
-                        return executeWithHealing(retryCount + 1);
-                    } else {
-                        log("ERROR", "AUTH", "[TERMINAL] Recovery handshake failed. Rejecting request.");
-                        return { success: false, error: { status: 401, message: "Handshake required" } };
-                    }
-                }
+            log("INFO", "AUTH", `Session retrieval success for user: ${user.id} | Status: ${zeroTrustStatus}`);
+            return { authenticated: true, user, zeroTrustStatus, token };
+        } catch (err) {
+            const status = err.response ? err.response.status : "NETWORK_ERROR";
+            log("ERROR", "AUTH", `Session recovery failed [${status}]: ${err.message}`);
+            return { authenticated: false };
+        }
+    });
 
-                // Standard Error Handling
-                let detail = error.message;
-                if (error.response?.data) detail += ` | Body: ${JSON.stringify(error.response.data).slice(0, 300)}`;
-                log("ERROR", "API_BRIDGE", `← ${status} ${endpoint} | Error: ${detail}`);
+    // 🛡️ [SECURITY] Authenticated API Bridge
+    // Re-routes renderer requests through the main process to inject secure tokens
+    ipcMain.handle('api:call', async (event, endpoint, method = 'GET', data = null) => {
+        const cleanMethod = (method || 'GET').toUpperCase();
 
+        // 🛡️ [SECURITY] Hardened Path Enforcement
+        if (!validateRequest(endpoint, cleanMethod)) {
+            const parsed = new URL(endpoint, "http://localhost");
+            const tokenExists = !!(await getSecureToken());
+            const publicPaths = [
+                '/api/auth/system-status', '/api/auth/nonce', '/api/auth/remote/session',
+                '/api/auth/remote/exchange', '/api/auth/remote/authorize',
+                '/api/auth/remote/status', '/api/auth/remote/verify', '/api/auth/remote/callback'
+            ];
+            const isPublicRequest = publicPaths.some(p => parsed.pathname.startsWith(p));
+
+            if (!isPublicRequest) {
+                log("WARN", "SECURITY_VIOLATION", `Unauthorized Bridge Access: ${cleanMethod} ${endpoint}`);
                 return {
                     success: false,
-                    error: {
-                        message: error.message,
-                        status: status,
-                        data: error.response ? error.response.data : null,
-                        endpoint
-                    }
+                    error: { code: "ACCESS_DENIED", message: "Unauthorized API access attempt" }
                 };
             }
         }
 
-        return await executeWithHealing();
+        try {
+            // 🛡️ [SELF-HEALING] Bunker V3.8: Hardened Atomic Recovery Bridge
+            // Intercepts 426 'Upgrade Required' and transparently heals the session.
+            async function executeWithHealing(retryCount = 0) {
+                const tokenValue = await getSecureToken();
+                const currentToken = isValidToken(tokenValue) ? tokenValue : null;
 
-    } catch (globalErr) {
-        log("ERROR", "API_BRIDGE_FATAL", globalErr.message);
-        return { success: false, error: { message: globalErr.message } };
-    }
-  });
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'x-client-source': 'desktop'
+                };
+
+                if (currentToken) {
+                    headers['Authorization'] = `Bearer ${currentToken}`;
+                } else {
+                    log("INFO", "BRIDGE_SANITATION", "Proceeding without Authorization header (No valid token found).");
+                }
+
+                const cleanBase = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+                const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+                const fullUrl = `${cleanBase}${cleanEndpoint}`;
+
+                const axiosConfig = { method: cleanMethod, url: fullUrl, headers, timeout: 5000 };
+                if (cleanMethod !== 'GET' && data) axiosConfig.data = data;
+
+                // 🛡️ [SECURITY] Binary Handling for Documents
+                if (endpoint.endsWith('/file') || endpoint.endsWith('/preview')) {
+                    axiosConfig.responseType = 'arraybuffer';
+                }
+
+                try {
+                    log("INFO", "API_BRIDGE", `→ ${cleanMethod} ${endpoint} (v=${retryCount})`);
+                    const response = await axios(axiosConfig);
+
+                    if (response.data && (endpoint.endsWith('/file') || endpoint.endsWith('/preview'))) {
+                        log("INFO", "API_BRIDGE", `← [BINARY] ${endpoint} | Size: ${response.data.byteLength || response.data.length} bytes`);
+                    }
+
+                    return { success: true, data: response.data };
+                } catch (error) {
+                    const status = error.response ? error.response.status : 'NETWORK_ERROR';
+
+                    // 🔐 [CRITICAL] 426 Upgrade Trigger
+                    if (status === 426 && retryCount === 0) {
+                        log("WARN", "AUTH", `[426_INTERCEPT] Stale session detected for ${endpoint}. Initiating recovery...`);
+
+                        const healed = await getRefreshedToken("ACTIVE_RECOVERY");
+                        if (healed) {
+                            // Re-fetch token from vault before retry to ensure latest snapshot
+                            const newToken = await getSecureToken();
+
+                            // Idempotency Gate: If block unchanged, only skip if it's a GET. 
+                            // Mutations must always re-transmit with new context.
+                            if (cleanMethod === 'GET') {
+                                const payload = JSON.parse(Buffer.from(newToken.split('.')[1], 'base64').toString());
+                                const oldPayload = JSON.parse(Buffer.from(currentToken.split('.')[1], 'base64').toString());
+                                if (payload.snapshotBlock === oldPayload.snapshotBlock) {
+                                    log("INFO", "AUTH", "[IDEMPOTENCY] Block unchanged after heal. Skipping GET retry.");
+                                    return { success: false, error: { status: 426, message: "Block unchanged after recovery handshake" } };
+                                }
+                            }
+
+                            log("INFO", "AUTH", "[RETRY] Session authority restored. Retrying original request...");
+                            return executeWithHealing(retryCount + 1);
+                        } else {
+                            log("ERROR", "AUTH", "[TERMINAL] Recovery handshake failed. Rejecting request.");
+                            return { success: false, error: { status: 401, message: "Handshake required" } };
+                        }
+                    }
+
+                    // Standard Error Handling
+                    let detail = error.message;
+                    if (error.response?.data) detail += ` | Body: ${JSON.stringify(error.response.data).slice(0, 300)}`;
+                    log("ERROR", "API_BRIDGE", `← ${status} ${endpoint} | Error: ${detail}`);
+
+                    return {
+                        success: false,
+                        error: {
+                            message: error.message,
+                            status: status,
+                            data: error.response ? error.response.data : null,
+                            endpoint
+                        }
+                    };
+                }
+            }
+
+            return await executeWithHealing();
+
+        } catch (globalErr) {
+            log("ERROR", "API_BRIDGE_FATAL", globalErr.message);
+            return { success: false, error: { message: globalErr.message } };
+        }
+    });
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -102,10 +102,36 @@ class ConfigService {
         updatedAt = postSeedRes.rows[0].updated_at;
       } else {
         // 🛡️ [STATE: OPERATIONAL] - Using Database Authority
-        console.log('[CONFIG] Existing configuration found. Using Database as authority.');
+        console.log('[CONFIG] Existing configuration found. Checking environment consistency...');
         config = res.rows[0].config_snapshot;
         version = res.rows[0].version;
         updatedAt = res.rows[0].updated_at;
+
+        // 🛡️ [RESILIENCE] Detect .env mismatch (e.g., after a system reset)
+        const envConfig = this._prepareInitialConfig();
+        const hasMismatch = Object.keys(envConfig.contracts).some(
+          key => envConfig.contracts[key] && envConfig.contracts[key] !== config.contracts[key]
+        );
+
+        if (hasMismatch) {
+          console.warn('⚠️ [CONFIG] Authoritative Mismatch Detected! .env addresses differ from Database.');
+          console.log('[CONFIG] Automatically re-seeding from .env to maintain integrity...');
+          
+          const newVersion = version + 1;
+          await pool.query(
+            'UPDATE system_config SET config_snapshot = $1, config_version = $2, updated_at = CURRENT_TIMESTAMP WHERE id = 1',
+            [JSON.stringify(envConfig), newVersion]
+          );
+          
+          // Re-fetch to confirm
+          const refreshedRes = await pool.query('SELECT config_snapshot, config_version as version, updated_at FROM system_config WHERE id = 1');
+          config = refreshedRes.rows[0].config_snapshot;
+          version = refreshedRes.rows[0].version;
+          updatedAt = refreshedRes.rows[0].updated_at;
+          console.log(`✅ [CONFIG] Boot-sync successful. System updated to v${version}.`);
+        } else {
+          console.log('✅ [CONFIG] Environment consistency verified.');
+        }
       }
 
       // 🛡️ [TIER 1 RISK MITIGATION] Strict Address & State Validation

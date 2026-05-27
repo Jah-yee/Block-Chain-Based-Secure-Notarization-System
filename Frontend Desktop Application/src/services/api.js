@@ -215,27 +215,7 @@ const api = {
     });
   },
 
-  async executeProposal(id) {
-    return this.request(`/api/governance/proposals/${id}/execute`, { method: 'POST' });
-  },
-
-  async prepareProposalOnChain(id) {
-    return this.request(`/api/governance/proposals/${id}/prepare-on-chain`, { method: 'POST' });
-  },
-
-  async submitProposalOnChain(id, signature) {
-    return this.request(`/api/governance/proposals/${id}/submit-on-chain`, {
-      method: 'POST',
-      body: JSON.stringify({ signature })
-    });
-  },
-
-  async voteOnProposal(proposalId, decision, signature, timestamp) {
-    return this.request(`/api/governance/proposals/${proposalId}/vote`, {
-      method: 'POST',
-      body: JSON.stringify({ decision, signature, timestamp })
-    });
-  },
+    // Deprecated off-chain voting routes removed: prepareProposalOnChain, submitProposalOnChain, voteOnProposal, executeProposal.
 
   async getGovernanceAlertCount() {
     return this.request('/api/governance/alerts/count');
@@ -281,8 +261,12 @@ const api = {
   // the direct contract call (revokeAction/confirmAction in MultiSigApprovals.tsx)
   // or the remote/confirm/authorize flow.
 
-  async executeMultiSigTransaction(txIndex) {
-    return this.request(`/api/governance/multisig/transactions/${txIndex}/execute`, { method: 'POST' });
+  async executeMultiSigTransaction(txIndex, txHash = null) {
+    const options = { method: 'POST' };
+    if (txHash) {
+      options.body = JSON.stringify({ txHash });
+    }
+    return this.request(`/api/governance/multisig/transactions/${txIndex}/execute`, options);
   },
 
   async revokeMultiSigConfirmation(txIndex) {
@@ -298,6 +282,17 @@ const api = {
 
   async checkRemoteMultiSigStatus(sessionId) {
     return this.request(`/api/governance/remote/confirm/status/${sessionId}`);
+  },
+
+  async initRemoteMultiSigExecuteSession(txIndex) {
+    return this.request('/api/governance/remote/execute/session', {
+      method: 'POST',
+      body: JSON.stringify({ txIndex })
+    });
+  },
+
+  async checkRemoteMultiSigExecuteStatus(sessionId) {
+    return this.request(`/api/governance/remote/execute/status/${sessionId}`);
   },
 
   async getSystemLogs() {

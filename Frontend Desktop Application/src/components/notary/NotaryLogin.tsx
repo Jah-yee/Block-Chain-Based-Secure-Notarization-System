@@ -59,9 +59,9 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       const res = await fetch(`${api.baseUrl}/api/auth/verify-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           email: userId.toLowerCase().trim(),
-          password: password 
+          password: password
         }),
       });
 
@@ -73,6 +73,14 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
 
       if (data.role !== 'notary' && data.role !== 'admin') {
         throw new Error("Unauthorized: This account is not a Notary or Admin.");
+      }
+
+      // 🛡️ [WEB3-ONLY] Accounts promoted via on-chain governance have no password/NationalID.
+      // Skip Steps 1 & 2 entirely and jump directly to wallet signing (Step 3).
+      if (data.web3_only === true) {
+        toast.info("Web3 account detected — proceeding directly to wallet signing.");
+        setStep(3);
+        return;
       }
 
       setStep(2);
@@ -95,7 +103,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       const res = await fetch(`${api.baseUrl}/api/auth/verify-identity`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           email: userId.toLowerCase().trim(),
           nationalId: nationalId
         }),
@@ -127,7 +135,7 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
       const electronAPI = (window as any).electronAPI;
       if (!electronAPI?.auth) throw new Error("Security bridge failure: auth:start missing.");
 
-      const { sessionId } = await electronAPI.auth.start();
+      const { sessionId } = await electronAPI.auth.start('notary');
       setSessionId(sessionId);
       setAuthStatus("awaiting_browser");
 
@@ -180,26 +188,26 @@ export function NotaryLogin({ onLogin, onBack }: NotaryLoginProps) {
 
           {error === "SYSTEM_NOT_ACTIVATED" ? (
             <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl space-y-3 mb-6">
-               <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
-                 <AlertCircle className="h-4 w-4" />
-                 <span>Protocol Activation Required</span>
-               </div>
-               <p className="text-[10px] text-amber-500/80 leading-relaxed">
-                 The BBSNS protocol has not been activated on-chain yet. Please contact your Genesis Admin to activate the network.
-               </p>
+              <div className="flex items-center gap-2 text-amber-500 text-sm font-bold">
+                <AlertCircle className="h-4 w-4" />
+                <span>Protocol Activation Required</span>
+              </div>
+              <p className="text-[10px] text-amber-500/80 leading-relaxed">
+                The BBSNS protocol has not been activated on-chain yet. Please contact your Genesis Admin to activate the network.
+              </p>
             </div>
           ) : error === "ACCOUNT_NOT_ACTIVATED" ? (
             <div className="bg-blue-500/10 border border-blue-500/30 p-4 rounded-xl space-y-3 mb-6">
-               <div className="flex items-center gap-2 text-blue-500 text-sm font-bold">
-                 <AlertCircle className="h-4 w-4" />
-                 <span>Account Activation Required</span>
-               </div>
-               <p className="text-[10px] text-blue-400/80 leading-relaxed">
-                 Your application has been approved, but your account is not yet activated. Please check your email for the activation link to set your secure password.
-               </p>
-               <Button variant="outline" size="sm" onClick={() => setStep(1)} className="w-full border-blue-500/30 text-blue-500 hover:bg-blue-500/10 text-xs">
-                  Back to Login
-               </Button>
+              <div className="flex items-center gap-2 text-blue-500 text-sm font-bold">
+                <AlertCircle className="h-4 w-4" />
+                <span>Account Activation Required</span>
+              </div>
+              <p className="text-[10px] text-blue-400/80 leading-relaxed">
+                Your application has been approved, but your account is not yet activated. Please check your email for the activation link to set your secure password.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setStep(1)} className="w-full border-blue-500/30 text-blue-500 hover:bg-blue-500/10 text-xs">
+                Back to Login
+              </Button>
             </div>
           ) : error && (
             <Alert variant="destructive" className="mb-6 bg-red-50 dark:bg-destructive/10 border-red-200 dark:border-destructive/50">

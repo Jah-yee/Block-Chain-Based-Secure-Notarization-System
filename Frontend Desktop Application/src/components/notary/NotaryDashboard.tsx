@@ -118,7 +118,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
             <div className="flex-none border-b border-border bg-background/95 backdrop-blur-sm z-20 shadow-sm px-6 py-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-foreground mb-1">
+                        <h1 className="text-foreground font-bold mb-1">
                             {filterStatus === 'processed' ? 'Processed Requests' : filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Notary Dashboard"}
                         </h1>
                         <p className="text-sm text-muted-foreground">
@@ -148,7 +148,7 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
 
                 {/* Stats Grid - Show only on main dashboard */}
                 {!filterStatus && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-4 gap-6">
                         {stats.map((stat) => {
                             const Icon = stat.icon;
                             // Keeping specific colors for stats as they are semantic status indicators
@@ -195,8 +195,8 @@ export function NotaryDashboard({ onViewRequest, filterStatus }: NotaryDashboard
                 )}
 
                 {/* Requests Table */}
-                <Card className="bg-card/50 border-border rounded-xl p-6 overflow-hidden">
-                    <h3 className="text-foreground mb-4 font-semibold">
+                <Card className="bg-card/50 border-border rounded-xl p-6">
+                    <h3 className="text-foreground mb-6 font-semibold">
                         {filterStatus === 'processed' ? 'Processed Requests' : filterStatus ? `${filterStatus.charAt(0).toUpperCase() + filterStatus.slice(1)} Requests` : "Recent Requests"}
                     </h3>
 

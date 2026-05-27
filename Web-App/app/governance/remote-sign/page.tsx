@@ -46,35 +46,15 @@ function RemoteSignContent() {
 
         const fetchSession = async () => {
             try {
-                // Try VOTE session first
-                let data: any = null;
-                try {
-                    data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
-                } catch (_) { data = null; }
-
-                // Try SUBMIT session if vote lookup failed
-                if (!data || data.error || !data.status) {
-                    try {
-                        data = await apiClient.get(`/api/governance/remote/submit/status/${sessionId}`)
-                    } catch (_) { data = null; }
-                }
-
-                // Try CONFIRM (MultiSig) session if both above failed
-                if (!data || data.error || !data.status) {
-                    try {
-                        data = await apiClient.get(`/api/governance/remote/confirm/status/${sessionId}`)
-                    } catch (_) { data = null; }
-                }
-
-                if (!data || (!data.status && !data.challenge)) {
-                    throw new Error("Session not found. It may have expired or been used already.")
-                }
+                const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
 
                 if (data.status !== "pending") {
                     setStatus(data.status as any)
                     return
                 }
 
+                // Fetching the actual challenge and session info
+                // The status endpoint should ideally return more info
                 setSessionData(data)
                 setStatus("ready")
             } catch (err: any) {
@@ -85,7 +65,6 @@ function RemoteSignContent() {
 
         fetchSession()
     }, [sessionId])
-
 
     const handleSignVote = async () => {
         if (typeof window === "undefined" || !(window as any).ethereum) {
@@ -101,119 +80,47 @@ function RemoteSignContent() {
         try {
             const { ethers } = await import("ethers")
             const provider = new ethers.BrowserProvider((window as any).ethereum)
-            await provider.send("eth_requestAccounts", [])
+            const accounts = await provider.send("eth_requestAccounts", [])
             const signer = await provider.getSigner()
             const walletAddress = await signer.getAddress()
             setConnectedWallet(walletAddress)
 
-            // 1. Fetch Latest Session Data — try all three session types
-            let session: any = null;
+            // Get session info including challenge
+            const data = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
+
+            // We need the challenge to sign
+            // Since our status endpoint currently doesn't return the challenge for security, 
+            // the /session endpoint in backend does. 
+            // Wait, the remote session *should* store the challenge and return it if status is pending.
+
+            // Re-fetch challenge if needed or use from state (we'll fix the status endpoint in next step if it doesn't have it)
+            // But wait, the backend governance.js status endpoint DOES NOT return the challenge.
+            // I should fix that in governance.js.
+
+            // Actually, for now let's assumes we add challenge to status endpoint.
+            if (!data.challenge) {
+                // We'll need to update backend to return challenge in status check
+                throw new Error("Challenge missing from session. Contact Support.")
+            }
+
+            const signature = await signer.signMessage(data.challenge)
+
             try {
-                session = await apiClient.get(`/api/governance/remote/vote/status/${sessionId}`)
-            } catch (_) { session = null; }
-            if (!session || session.error || !session.type) {
-                try {
-                    session = await apiClient.get(`/api/governance/remote/submit/status/${sessionId}`)
-                } catch (_) { session = null; }
-            }
-            if (!session || session.error || !session.type) {
-                try {
-                    session = await apiClient.get(`/api/governance/remote/confirm/status/${sessionId}`)
-                } catch (_) { session = null; }
-            }
-
-            if (!session || !session.challenge) {
-                throw new Error("Session challenge is missing. Please restart the process.")
-            }
-
-            // 2. Branch Logic based on Session Type
-            if (session.type === 'SUBMIT') {
-                console.log("🚀 [RemoteSign] Detected SUBMIT mode. Initiating Direct Blockchain Transaction.");
-                
-                if (!session.proposal || !session.multisigAddress) {
-                    throw new Error("Proposal details missing from session data.");
-                }
-
-                const multisigAddress = session.multisigAddress;
-                const { to, value, data: txData, proposalHash } = session.proposal;
-
-                const contract = new ethers.Contract(multisigAddress, [
-                    "function submitTransaction(address _to, uint256 _value, bytes _data, bytes32 _proposalHash) external"
-                ], signer);
-
-                toast({
-                    title: "Transaction Initiated",
-                    description: "Please confirm the transaction in MetaMask to submit the proposal.",
-                });
-
-                // Execute Transaction
-                const tx = await contract.submitTransaction(to, value, txData, proposalHash);
-                console.log("🚀 [RemoteSign] Transaction sent:", tx.hash);
-                
-                setStatus("authorized"); // Optimistic UI update or wait for confirm
-                
-                toast({
-                    title: "Processing Transaction",
-                    description: "Waiting for blockchain confirmation...",
-                });
-
-                const receipt = await tx.wait();
-                console.log("🚀 [RemoteSign] Transaction confirmed:", receipt.hash);
-
-                // 3. Sync with Backend
-                try {
-                    await apiClient.post("/api/governance/remote/submit/sync-manual", {
-                        sessionId,
-                        txHash: receipt.hash,
-                        walletAddress
-                    });
-                } catch (err: any) {
-                    console.error("Manual sync failed:", err);
-                    // We don't throw here because the tx is already on-chain, 
-                    // the desktop app can poll or the user can manual sync later.
-                }
-
-                setStatus("authorized")
-                toast({
-                    title: "Proposal Submitted",
-                    description: "The proposal has been successfully recorded on-chain. Window closing in 10s."
-                })
-
-            } else if (session.type === 'CONFIRM') {
-                // MultiSig confirmation — sign challenge and relay to confirm/authorize
-                console.log("🚀 [RemoteSign] Detected CONFIRM mode. Signing MultiSig confirmation.");
-                const signature = await signer.signMessage(session.challenge)
-
-                await apiClient.post("/api/governance/remote/confirm/authorize", {
-                    sessionId,
-                    walletAddress,
-                    signature
-                })
-
-                setStatus("authorized")
-                toast({
-                    title: "Confirmation Signed",
-                    description: "Your MultiSig confirmation has been recorded. This window will close automatically."
-                })
-
-            } else {
-                // Standard VOTE logic (Signature-based)
-                console.log("🚀 [RemoteSign] Detected VOTE mode. Using Cryptographic Signing.");
-                const signature = await signer.signMessage(session.challenge)
-
                 await apiClient.post("/api/governance/remote/vote/authorize", {
                     sessionId,
                     walletAddress,
                     signature
                 })
-
-                setStatus("authorized")
-                toast({
-                    title: "Vote Signed Successfully",
-                    description: "Your vote has been recorded. This window will close automatically."
-                })
+                // Status will update via polling
+            } catch (err: any) {
+                toast({ title: "Auth Failed", description: err.message, variant: "destructive" })
             }
 
+            setStatus("authorized")
+            toast({
+                title: "Vote Signed Successfully",
+                description: "The proposal has been updated. This window will close automatically."
+            })
 
             // Auto-close after 10 seconds
             setTimeout(() => {
@@ -223,13 +130,8 @@ function RemoteSignContent() {
             }, 10000);
         } catch (err: any) {
             console.error(err)
-            setError(err.message || "Action failed")
+            setError(err.message || "Failed to sign vote")
             setStatus("error")
-            toast({
-                title: "Operation Failed",
-                description: err.message || "An unexpected error occurred.",
-                variant: "destructive"
-            })
         }
     }
 
@@ -268,15 +170,10 @@ function RemoteSignContent() {
                                     <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">Decision Summary</h4>
                                     <div className="flex items-center justify-between">
                                         <span className="text-sm text-slate-400">Action:</span>
-                                        <span className="text-sm font-medium text-white px-2 py-0.5 bg-slate-800 rounded">
-                                            {sessionData?.type === 'SUBMIT' ? 'Governance Proposal' : 'Governance Vote'}
-                                        </span>
+                                        <span className="text-sm font-medium text-white px-2 py-0.5 bg-slate-800 rounded">Governance Vote</span>
                                     </div>
                                     <p className="text-[10px] text-slate-500 leading-relaxed italic">
-                                        {sessionData?.type === 'SUBMIT' 
-                                            ? '"I hereby authorize the creation of this governance proposal and its submission to the blockchain via my connected wallet."'
-                                            : '"I hereby confirm my decision on this proposal and authorize the recording of my wallet signature and timestamp on the blockchain."'
-                                        }
+                                        "I hereby confirm my decision on this proposal and authorize the recording of my wallet signature and timestamp on the blockchain."
                                     </p>
                                 </div>
 
@@ -293,8 +190,7 @@ function RemoteSignContent() {
                                 )}
 
                                 <Button onClick={handleSignVote} className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-lg rounded-xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95">
-                                    <ShieldCheck className="w-5 h-5 mr-2" /> 
-                                    {sessionData?.type === 'SUBMIT' ? 'Submit to Blockchain' : 'Complete Secure Audit'}
+                                    <ShieldCheck className="w-5 h-5 mr-2" /> Complete Secure Audit
                                 </Button>
                             </motion.div>
                         )}

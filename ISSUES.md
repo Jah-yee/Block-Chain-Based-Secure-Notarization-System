@@ -60,4 +60,31 @@
 **Status:** ✅ CLOSED (2026-05-15)
 **Resolution:** `isSingleAdmin` now preferentially uses `adminCount` (DB truth) returned from the backend, which was added to both `/multisig/settings` and `/multisig/stats` responses. Falls back to on-chain signer count only if `adminCount` is unavailable.
 
+## [BUG-016] Governance Execute Crashes on `add_notary` — `provider` Undefined
+**Status:** ✅ CLOSED (2026-05-15)
+**Resolution:** Added `const verifyProvider = await ProviderService.getProvider()` inside the `add_notary`/`NOTARY_PROMOTION` post-execution polling block in `governance.js`. The `provider` variable was never declared in the execute handler scope, causing a `ReferenceError` after every successful on-chain execution, leaving proposals permanently stuck in `passed` state with no DB update.
+
+## [BUG-017] `sync-manual` Regresses `passed` Proposals to `active`
+**Status:** ✅ CLOSED (2026-05-15)
+**Resolution:** Changed the hard-coded `status = 'active'` in the `/remote/submit/sync-manual` DB update to `status = CASE WHEN status = 'passed' THEN 'passed' ELSE 'active' END`. Single-admin fast-tracked proposals now retain their `passed` state after the Genesis Admin manually syncs their submission.
+
+## [BUG-018] Legacy `NOTARY_PROMOTION` Proposal Type Returns 400 on Execute
+**Status:** ✅ CLOSED (2026-05-15)
+**Resolution:** Added `case 'NOTARY_PROMOTION':` as an alias in the Step 3 calldata encoder switch in `governance.js`. Previously, any proposal created with the old uppercase type hit the `default:` branch and returned `400 Unknown type` before any on-chain or DB action was attempted.
+
+## [BUG-019] ManageNotaries Amber Dot Never Appears for Pending Promotions
+**Status:** ✅ CLOSED (2026-05-15)
+**Resolution:** Fixed `getOnChainIndicator` in `ManageNotaries.tsx` to check `p.type === 'NOTARY_PROMOTION' || p.type === 'add_notary'`. Also extended the status check to include `passed` alongside `active` and `signed`.
+
+## [BUG-020] ManageNotaries Promotion Dialog Opens With Stale Pre-Approve Data
+**Status:** ✅ CLOSED (2026-05-15)
+**Resolution:** Reordered `confirmAction` in `ManageNotaries.tsx` to `await loadApplications()` before opening `promotionDialog`, so the dialog receives the refreshed application record instead of the pre-approve snapshot.
+
+
+## [BUG-021] Multi-Sig Transaction Execution 500/404 Failure
+**Status:** ✅ CLOSED (2026-05-18)
+**Resolution:** Re-architected execution pipeline to bypass the backend relayer (which is not a signer) and execute transactions directly via the admin's local MetaMask wallet on-chain. Modified the backend `/execute` route to accept an optional `txHash` to securely sync the database state off-chain.
+
+
+
 

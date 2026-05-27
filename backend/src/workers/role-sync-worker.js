@@ -28,7 +28,7 @@ async function startWorker() {
         WHERE id = (
             SELECT id FROM users 
             WHERE role = 'notary'
-              AND role_tx_status IN ('initiated', 'failed', 'retrying')
+              AND role_tx_status IN ('initiated', 'failed', 'retrying', 'pending_finalize')
               AND role_retry_count < 5
               AND (role_status_updated_at IS NULL OR NOW() > role_status_updated_at + (power(2, role_retry_count) * interval '1 minute'))
             ORDER BY role_status_updated_at ASC NULLS FIRST
@@ -147,32 +147,28 @@ async function executeAuthoritativePromotion(user) {
       return;
     }
 
-    // --- PATH 3: SEND_TX (Submission Mode) ---
-    console.log(`[ROLE_SYNC] 🚀 Submitting promotion for ${user.wallet_address}...`);
-    const { registerNotaryOnChain } = require('../blockchain/notary-registry.js');
-    
-    // The utility already handles the linear check, but we'll add extra logging here
-    const result = await registerNotaryOnChain(user.wallet_address);
-    
-    if (result && result.success && result.txHash) {
-      // IMMEDIATE PERSISTENCE (Idempotency Anchor)
+    // --- PATH 3: PENDING_MANUAL_FINALIZE ---
+    if (user.status_before !== 'pending_finalize') {
+      console.log(`[ROLE_SYNC] ⏳ On-chain promotion pending manual finalization by Admin wallet for ${user.wallet_address}.`);
       await pool.query(
-        "UPDATE users SET role_tx_hash = $1, role_tx_status = 'initiated', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $2",
-        [result.txHash, user.id]
+        "UPDATE users SET role_tx_status = 'pending_finalize', role_status_updated_at = NOW() WHERE id = $1",
+        [user.id]
       );
       await SyncLogger.logEvent({
-        userId: user.id, syncType: 'role', eventType: SyncLogger.EVENTS.TX_SUBMITTED,
-        statusBefore: 'processing', statusAfter: 'initiated', txHash: result.txHash, retryCount: user.role_retry_count
+        userId: user.id,
+        syncType: 'role',
+        eventType: 'PENDING_MANUAL_FINALIZE',
+        statusBefore: 'processing',
+        statusAfter: 'pending_finalize',
+        metadata: { reason: 'waiting_for_admin_signature' }
       });
-      console.log(`[ROLE_SYNC] 🏁 TX Submitted & Locked: ${result.txHash}`);
-    } else if (result && result.alreadyExists) {
-        console.log(`[ROLE_SYNC] ✅ User already a Notary on-chain. Settling.`);
-        await pool.query(
-            "UPDATE users SET role_tx_status = 'confirmed', updated_at = NOW(), role_status_updated_at = NOW() WHERE id = $1",
-            [user.id]
-        );
-        // 🚀 [NTK_TRIGGER] Check for instant provisioning
-        await ntkService.verifyAndProvisionInitialNTK(user.id);
+    } else {
+      console.log(`[ROLE_SYNC] ⏳ Still waiting for manual Admin finalization for ${user.wallet_address}.`);
+      // Update status timestamp to prevent starving but keep checking
+      await pool.query(
+        "UPDATE users SET role_status_updated_at = NOW() WHERE id = $1",
+        [user.id]
+      );
     }
 
 

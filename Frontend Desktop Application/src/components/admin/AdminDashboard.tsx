@@ -108,7 +108,23 @@ export function AdminDashboard({ onNavigate, isDarkMode, user: initialUser }: { 
                   </div>
                   <h2 className="text-3xl font-black text-foreground italic tracking-tighter">SESSION EXPIRED</h2>
                   <p className="text-slate-400 text-sm italic leading-relaxed">The secure link to the management node has timed out or the session has been invalidated. Please re-authenticate to continue.</p>
-                  <Button onClick={() => window.location.reload()} className="w-full bg-red-500 hover:bg-red-600 font-black h-16 rounded-2xl transition-all shadow-red-500/20 shadow-xl">RE-AUTHENTICATE</Button>
+                  <Button 
+                    onClick={async () => {
+                      try {
+                        // @ts-ignore
+                        if (window.electronAPI?.auth) {
+                          // @ts-ignore
+                          await window.electronAPI.auth.logout();
+                        }
+                      } catch (e) {
+                        console.error("Session clear failed:", e);
+                      }
+                      window.location.reload();
+                    }} 
+                    className="w-full bg-red-500 hover:bg-red-600 font-black h-16 rounded-2xl transition-all shadow-red-500/20 shadow-xl"
+                  >
+                    RE-AUTHENTICATE
+                  </Button>
               </div>
             </div>
           )}

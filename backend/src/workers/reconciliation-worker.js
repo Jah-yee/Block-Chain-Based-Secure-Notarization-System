@@ -71,7 +71,8 @@ async function reconcile() {
                         const targetState = onChainStatus === 2 ? 'rejected' : 'submitted_to_blockchain';
                         
                         // 🛡️ [Fix] Try to recover tx_hash from blockchain logs if not already stored
-                        let recoveredTxHash = doc.tx_hash || null;
+                        const isValidTxHash = (hash) => typeof hash === 'string' && /^0x[a-fA-F0-9]{64}$/.test(hash);
+                        let recoveredTxHash = isValidTxHash(doc.tx_hash) ? doc.tx_hash : null;
                         if (!recoveredTxHash) {
                             try {
                                 const currentBlock = await provider.getBlockNumber();
@@ -104,12 +105,15 @@ async function reconcile() {
                             userId: doc.id, syncType: 'notarization', eventType: SyncLogger.EVENTS.SELF_HEAL_SUCCESS,
                             statusBefore: doc.tx_status, statusAfter: 'confirmed', metadata: { reason: 'onchain_match', txHash: recoveredTxHash }
                         });
-                        // await cleanupStorage(doc);
+                        if (targetState === 'rejected') {
+                            try { await cleanupStorage(doc); } catch (e) { console.error(`[RECON_CLEANUP_ERR] ${e.message}`); }
+                        }
                         continue;
                     }
 
                     // 2. RECEIPT CHECK
-                    if (doc.tx_hash) {
+                    const isValidTxHash = (hash) => typeof hash === 'string' && /^0x[a-fA-F0-9]{64}$/.test(hash);
+                    if (isValidTxHash(doc.tx_hash)) {
                         const receipt = await provider.getTransactionReceipt(doc.tx_hash);
                         if (receipt) {
                             const isSuccess = receipt.status === 1;
@@ -137,7 +141,9 @@ async function reconcile() {
                                 eventType: isSuccess ? SyncLogger.EVENTS.TX_CONFIRMED : SyncLogger.EVENTS.TX_FAILED,
                                 statusBefore: doc.tx_status, statusAfter, txHash: doc.tx_hash
                             });
-                            // if (isSuccess) await cleanupStorage(doc);
+                            if (isSuccess && submissionStateUpdate === 'rejected') {
+                                try { await cleanupStorage(doc); } catch (e) { console.error(`[RECON_CLEANUP_ERR] ${e.message}`); }
+                            }
                             continue;
                         }
                     }

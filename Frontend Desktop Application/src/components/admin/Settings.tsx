@@ -63,7 +63,7 @@ export function Settings({ }: SettingsProps) {
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">Current application version</p>
                     </div>
                     <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px] font-black uppercase tracking-widest">
-                      v27.8.20
+                      v28.0.1
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between p-4 hover:bg-muted/10 transition-colors">
@@ -71,14 +71,14 @@ export function Settings({ }: SettingsProps) {
                       <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Build Date</p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">Last compilation timestamp</p>
                     </div>
-                    <span className="text-xs font-black text-foreground uppercase tracking-tight">October 16, 2024</span>
+                    <span className="text-xs font-black text-foreground uppercase tracking-tight">May 16, 2026</span>
                   </div>
                   <div className="flex items-center justify-between p-4 hover:bg-muted/10 transition-colors">
                     <div>
                       <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Platform</p>
                       <p className="text-[10px] text-muted-foreground/60 mt-0.5">Runtime environment</p>
                     </div>
-                    <span className="text-xs font-black text-foreground uppercase tracking-tight">Electron + Node.js</span>
+                    <span className="text-xs font-black text-foreground uppercase tracking-tight">BBSNS Desktop Software</span>
                   </div>
                 </div>
               </CardContent>

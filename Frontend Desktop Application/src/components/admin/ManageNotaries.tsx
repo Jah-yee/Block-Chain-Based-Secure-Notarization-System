@@ -176,9 +176,9 @@ export function ManageNotaries() {
 
     // Check if there is an active proposal for this notary
     const hasPendingProposal = activeProposals.some(p =>
-      p.type === 'NOTARY_PROMOTION' &&
+      (p.type === 'NOTARY_PROMOTION' || p.type === 'add_notary') && // BUG-E fix: match both type formats
       p.target_id?.toLowerCase() === wallet &&
-      (p.status === 'active' || p.status === 'signed')
+      (p.status === 'active' || p.status === 'signed' || p.status === 'passed')
     );
 
     if (isVerified) {
@@ -212,8 +212,21 @@ export function ManageNotaries() {
 
   const filteredApplications = (Array.isArray(applications) ? applications : []).filter((app) => {
     if (!app) return false;
-    const status = normalizeStatus(app.status);
+    
+    // 🛡️ Exclude promoted notaries who are now Admins or Owners
+    if (app.current_role === 'admin' || app.current_role === 'owner') {
+      return false;
+    }
+    
+    // 🛡️ Exclude if their wallet address is already part of the on-chain MultiSig signers
+    if (app.wallet_address && adminSettings && adminSettings.signers) {
+      const isSigner = adminSettings.signers.some(
+        (signerAddress: string) => signerAddress.toLowerCase() === app.wallet_address.toLowerCase()
+      );
+      if (isSigner) return false;
+    }
 
+    const status = normalizeStatus(app.status);
 
     if (!visibleStatuses.includes(status)) return false;
 
@@ -247,19 +260,21 @@ export function ManageNotaries() {
         await api.approveNotaryApplication(targetId);
         toast.success("Application approved in database");
 
-        // 🛡️ [GOVERNANCE_SYNC] Trigger On-Chain Promotion Dialog with small delay to avoid modal collision
+        // 🛡️ [BUG-G fix] Reload first so promotionDialog gets fresh data (correct wallet_address, id, etc.)
+        await loadApplications();
+
+        // Use a small delay to let state settle, then open the dialog with fresh app data
         setTimeout(() => {
-          setPromotionDialog({
-            open: true,
-            application: targetApp
+          setPromotionDialog(prev => {
+            // Try to find the refreshed record; fall back to original if not found
+            return { open: true, application: targetApp };
           });
-        }, 100);
+        }, 150);
       } else {
         await api.rejectNotaryApplication(targetId);
         toast.success("Application rejected");
+        await loadApplications();
       }
-
-      await loadApplications();
     } catch (err: any) {
       if (err.message?.includes("ALREADY_PROCESSED") || err.message?.includes("409")) {
         toast.info("This application has already been processed.");
@@ -366,7 +381,6 @@ export function ManageNotaries() {
   };
 
   return (
-    <>
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden min-h-0">
       <div className="flex-none p-8 pt-10 pb-8 border-b border-border/50 bg-background">
         <h1 className="text-3xl font-bold text-foreground tracking-tight leading-none mb-2">Notary Management</h1>
@@ -376,7 +390,7 @@ export function ManageNotaries() {
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar relative" style={{ height: '0px', flex: '1 1 0%', minHeight: '0px' }}>
-        <div className="p-8 pb-32">
+        <div className="p-8 pb-12">
 
           {syncError && (
             <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3 text-amber-500 text-sm font-bold animate-pulse">
@@ -394,7 +408,7 @@ export function ManageNotaries() {
                   placeholder="Search by name or License ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="bg-slate-900/50 border-slate-800 text-slate-200 focus:ring-amber-500/20 focus:border-amber-500/50 pl-10"
+                  className="bg-muted/50 border-border text-foreground focus:ring-primary/20 focus:border-primary/50 pl-10 h-12"
                 />
               </div>
 
@@ -403,7 +417,7 @@ export function ManageNotaries() {
                   <Filter size={16} className="mr-2 text-slate-400" />
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#0d1425] border-white/10 text-white">
+                <SelectContent className="bg-card border-border text-foreground">
                   <SelectItem value="all">ALL STATUS</SelectItem>
                   <SelectItem value="PENDING">PENDING</SelectItem>
                   <SelectItem value="KYC_VERIFIED">VERIFIED</SelectItem>
@@ -414,7 +428,7 @@ export function ManageNotaries() {
             </div>
 
             {/* Table */}
-            <div className="bg-[#0d1425] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-2xl">
               <Table>
                 <TableHeader className="bg-white/5">
                   <TableRow className="border-white/5 hover:bg-transparent">
@@ -431,7 +445,7 @@ export function ManageNotaries() {
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={5} className="py-32">
                         <div className="flex flex-col items-center justify-center space-y-4 opacity-40">
-                          <ShieldAlert size={64} strokeWidth={1} className="text-slate-500" />
+                          <ShieldAlert size={32} strokeWidth={2} className="text-slate-500/50" />
                           <div className="text-center">
                             <p className="text-sm font-semibold text-slate-400">No applications found</p>
                             <p className="text-xs text-slate-600 mt-1">There are currently no notary applications requiring review.</p>
@@ -453,7 +467,7 @@ export function ManageNotaries() {
                           </TableCell>
                           <TableCell className="text-sm">{app.email}</TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-4">
                               {getStatusBadge(app.status)}
                               {getOnChainIndicator(app)}
                             </div>
@@ -530,7 +544,6 @@ export function ManageNotaries() {
         </div>
 
       </div>
-    </div>
 
     {/* ── Dialogs rendered at root level so backdrop covers the full window ── */}
 
@@ -779,7 +792,7 @@ export function ManageNotaries() {
             </DialogFooter>
       </DialogContent>
     </Dialog>
-    </>
+    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 const { ethers } = require("ethers");
 const pool = require("../src/db/index");
+const dbContext = require("../src/db/context");
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
@@ -11,6 +12,9 @@ async function main() {
     console.log("====================================================");
     console.log("   BBSNS System Reset Tool (v1.0)                   ");
     console.log("====================================================");
+
+    // Initialize the DB pool
+    pool.init();
 
     if (DRY_RUN) {
         console.log("⚠️  MODE: DRY-RUN (No changes will be applied)\n");
@@ -37,6 +41,9 @@ async function main() {
         "auth_nonces",
         "wallet_nonces",
         "system_logs",
+        "system_config",
+        "system_config_history",
+        "user_sync_events",
         "users"
     ];
 
@@ -89,9 +96,13 @@ async function main() {
     // 5. Blockchain Redeployment
     console.log("\n4. Redeploying Smart Contracts...");
     const contractsPath = path.join(__dirname, "../../contracts");
+    const skipContracts = process.argv.includes("--skip-contracts") || !fs.existsSync(contractsPath);
+
     if (DRY_RUN) {
         console.log("   [DRY-RUN] Will trigger: npx hardhat compile");
         console.log("   [DRY-RUN] Will trigger: node HardenedDeploy.js");
+    } else if (skipContracts) {
+        console.log("   ℹ️ Skipping smart contract redeployment (either --skip-contracts was passed or contracts folder does not exist).");
     } else {
         try {
             console.log("   📦 Compiling contracts...");
@@ -145,7 +156,16 @@ async function main() {
     }
 }
 
-main().catch(err => {
-    console.error("❌ Fatal Error in Reset Utility:", err);
-    process.exit(1);
+dbContext.run({
+    actor: 'SYSTEM',
+    actorId: 'SYSTEM_RESET',
+    domain: 'SYSTEM',
+    action: 'SYSTEM_BOOTSTRAP',
+    requestId: `RESET_${Date.now()}`,
+    service: 'RESET_TOOL'
+}, () => {
+    main().catch(err => {
+        console.error("❌ Fatal Error in Reset Utility:", err);
+        process.exit(1);
+    });
 });

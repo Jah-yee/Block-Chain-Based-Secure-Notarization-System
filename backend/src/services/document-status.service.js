@@ -49,6 +49,8 @@ class DocumentStatusService {
             // If the value is a string starting with '$', it's a placeholder referring to extraParams
             if (typeof val === 'string' && val.startsWith('$') && !isNaN(val.substring(1))) {
                 additionalSql += `, ${key} = ${val}`;
+            } else if (val === 'NOW()') {
+                additionalSql += `, ${key} = NOW()`;
             } else {
                 additionalSql += `, ${key} = $${params.length + 1}`;
                 params.push(val);

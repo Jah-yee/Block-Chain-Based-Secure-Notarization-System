@@ -5,5 +5,6 @@ declare global {
         electronAPI: {
             openExternal: (url: string) => Promise<void>;
         };
+        ethereum?: any;
     }
 }

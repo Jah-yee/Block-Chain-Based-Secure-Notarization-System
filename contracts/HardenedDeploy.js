@@ -75,7 +75,7 @@ async function main() {
         console.log(`   🔸 MultiSig Execution: Calling ${target.slice(0, 10)}...`);
 
         // 1. Submit
-        const submitTx = await multiSig.submitTransaction(target, 0, data, ethers.ZeroHash);
+        const submitTx = await multiSig.submitTransaction([target], [0], [data], ethers.ZeroHash);
         const receipt = await submitTx.wait();
 
         let txIndex;
@@ -113,8 +113,11 @@ async function main() {
         console.log(`   ✅ Test wallet funded: 0.01 BNB\n`);
 
         // STEP 1: Buy-In (MultiSig)
+        // 🔐 ARCHITECTURE: The Genesis Admin wallet is the ONLY seed signer.
+        // The Deployer wallet (BNB_SYSTEM_PRIVATE_KEY) is a throwaway gas-payer only.
+        // The Relayer (KMS_RELAYER_ADDRESS) is NOT a signer — it is only a RELAYER_ROLE holder on NTK.
         console.log(`[STEP 1] Deploying BBSNSMultiSig...`);
-        const signers = [founder];
+        const signers = [GENESIS_TARGET_WALLET]; // ← Admin is sole signer, NOT the deployer
         const threshold = 1;
         const timelock = 0;
         const multiSig = await deploy("BBSNSMultiSig", "BBSNSMultiSig", signers, threshold, timelock);

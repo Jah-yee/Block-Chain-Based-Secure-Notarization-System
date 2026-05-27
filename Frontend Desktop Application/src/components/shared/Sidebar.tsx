@@ -1,4 +1,4 @@
-import { Home, Users, FileText, CheckSquare, Settings, LogOut, User, Gavel, ChevronLeft, ChevronRight, Shield, Sun, Moon, LayoutDashboard, Database, Activity } from "lucide-react";
+import { Home, Users, FileText, CheckSquare, Settings, LogOut, User, Gavel, ChevronLeft, ChevronRight, Shield, Sun, Moon, LayoutDashboard, Database, Activity, Copy } from "lucide-react";
 import { Button } from "../ui/button";
 import { useState } from "react";
 
@@ -100,7 +100,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
 
       {/* Profile Section - Premium Overhaul */}
       {!isCollapsed ? (
-        <div className="px-3 mt-1 animate-in fade-in duration-500">
+        <div className="px-3 mt-4 animate-in fade-in duration-500">
           <div className="p-3 bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.05] rounded-xl flex items-center gap-3 group hover:border-white/10 transition-colors relative">
             <div className="relative shrink-0">
                <div className="absolute inset-0 bg-emerald-500/20 blur-md rounded-full" />
@@ -111,15 +111,15 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
             <div className="overflow-hidden flex-1">
               <p className="text-[10px] font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">{user?.name || "System Actor"}</p>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 text-[8px] font-mono text-white/40 overflow-hidden">
-                    <span className="truncate selectable">{user?.wallet_address || "0x00...000"}</span>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-white/40 overflow-hidden">
+                    <span className="truncate selectable">{user?.wallet_address ? `${user.wallet_address.slice(0, 6)}...${user.wallet_address.slice(-4)}` : "0x00...000"}</span>
                 </div>
                 <button 
                   onClick={handleCopy}
                   className="p-1 hover:bg-white/10 rounded transition-colors text-white/20 hover:text-emerald-400 relative"
                   title="Copy Wallet Address"
                 >
-                  <FileText size={8} />
+                  <Copy size={10} />
                   {showCopied && (
                     <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg animate-in fade-in zoom-in duration-200">
                       COPIED!
@@ -140,7 +140,7 @@ export function Sidebar({ role, user, activeScreen, onNavigate, onLogout, alertC
 
 
       {/* Navigation */}
-      <nav className="flex-1 min-h-0 p-4 mt-6 space-y-1.5 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 min-h-0 p-4 mt-3 space-y-1.5 overflow-y-auto custom-scrollbar">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeScreen === item.id;

@@ -181,13 +181,52 @@ export default function DocumentsPage() {
                                         )}
                                     </div>
 
-                                    <button
-                                        onClick={() => setSelectedDocument(doc)}
-                                        className="ml-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg flex items-center gap-2 transition-colors"
-                                    >
-                                        <Eye size={16} />
-                                        Details
-                                    </button>
+                                    <div className="flex flex-col gap-2 ml-4">
+                                        <button
+                                            onClick={() => setSelectedDocument(doc)}
+                                            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                                        >
+                                            <Eye size={16} />
+                                            Details
+                                        </button>
+                                        
+                                        {doc.status === "approved" && (
+                                            <button
+                                                onClick={async (e) => {
+                                                    e.stopPropagation(); // prevent card click if any
+                                                    try {
+                                                        toast.info("Generating certificate...")
+                                                        let ownerWalletStr = "Owner Wallet (Redacted)"
+                                                        try {
+                                                            const storedUser = localStorage.getItem('bbsns_user')
+                                                            if (storedUser) {
+                                                                const parsed = JSON.parse(storedUser)
+                                                                if (parsed.wallet_address) ownerWalletStr = parsed.wallet_address
+                                                            }
+                                                        } catch (e) {}
+                                                        await generateCertificatePDF({
+                                                            filename: doc.filename,
+                                                            fileHash: doc.file_hash,
+                                                            status: doc.status,
+                                                            txHash: doc.approval_tx_hash || "",
+                                                            notaryWallet: doc.notary_wallet || "0xNotary... (Redacted by request)",
+                                                            ownerWallet: ownerWalletStr,
+                                                            timestamp: doc.updated_at,
+                                                            documentSummary: doc.document_summary
+                                                        })
+                                                        toast.success("Certificate downloaded successfully!")
+                                                    } catch (err) {
+                                                        console.error(err)
+                                                        toast.error("Failed to generate PDF certificate")
+                                                    }
+                                                }}
+                                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg flex items-center justify-center gap-2 transition-colors font-medium shadow-lg"
+                                            >
+                                                <Download size={16} />
+                                                Certificate
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -264,50 +303,7 @@ export default function DocumentsPage() {
                                 </div>
                             )}
 
-                            {selectedDocument.status === "approved" && (
-                                <div className="flex justify-center pt-2 pb-2">
-                                    <button
-                                        onClick={async () => {
-                                            try {
-                                                toast.info("Generating certificate...")
-                                                
-                                                // Extract Owner Wallet from stored user data if available
-                                                let ownerWalletStr = "Owner Wallet (Redacted)"
-                                                try {
-                                                    const storedUser = localStorage.getItem('bbsns_user')
-                                                    if (storedUser) {
-                                                        const parsed = JSON.parse(storedUser)
-                                                        if (parsed.wallet_address) {
-                                                            ownerWalletStr = parsed.wallet_address
-                                                        }
-                                                    }
-                                                } catch (e) {
-                                                    // ignore parse errors
-                                                }
 
-                                                await generateCertificatePDF({
-                                                    filename: selectedDocument.filename,
-                                                    fileHash: selectedDocument.file_hash,
-                                                    status: selectedDocument.status,
-                                                    txHash: selectedDocument.approval_tx_hash || "",
-                                                    notaryWallet: selectedDocument.notary_wallet || "0xNotary... (Redacted by request)",
-                                                    ownerWallet: ownerWalletStr,
-                                                    timestamp: selectedDocument.updated_at,
-                                                    documentSummary: selectedDocument.document_summary
-                                                })
-                                                toast.success("Certificate downloaded successfully!")
-                                            } catch (err) {
-                                                console.error(err)
-                                                toast.error("Failed to generate PDF certificate")
-                                            }
-                                        }}
-                                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-2 transition-colors font-medium border border-emerald-500"
-                                    >
-                                        <Download size={18} />
-                                        Download Official Receipt
-                                    </button>
-                                </div>
-                            )}
 
                             {selectedDocument.document_summary && (
                                 <div className="bg-gray-900/50 rounded-lg p-4">

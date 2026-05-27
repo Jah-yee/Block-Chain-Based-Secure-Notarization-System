@@ -1138,3 +1138,9 @@ CREATE TABLE IF NOT EXISTS system_config_history (
 
 INSERT INTO system_config (id, version, config_snapshot) VALUES (1, 0, '{}') ON CONFLICT DO NOTHING;
 
+
+-- MIGRATION: Add participation_scope column and extend proposal_status enum
+ALTER TABLE governance_proposals ADD COLUMN IF NOT EXISTS participation_scope VARCHAR(20) DEFAULT 'all';
+ALTER TYPE proposal_status ADD VALUE IF NOT EXISTS 'expired';
+
+

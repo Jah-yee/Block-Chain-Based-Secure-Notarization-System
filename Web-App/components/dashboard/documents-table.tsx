@@ -9,6 +9,7 @@ import { Eye, Download, Loader2, FileText, ShieldCheck, Copy, ExternalLink, Chec
 import { apiClient } from "@/lib/api-client"
 import { useToast } from "@/hooks/use-toast"
 import { normalizeStatus, getDisplayStatus } from "@/lib/status-utils"
+import { generateCertificatePDF } from "@/lib/pdf-utils"
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,7 @@ interface CertificateData {
   chain_id: number
   block_explorer_url: string | null
   contract_explorer_url: string
+  owner_wallet?: string
 }
 
 // ─── Certificate Dialog ────────────────────────────────────────────────────────
@@ -123,8 +125,8 @@ function CertificateDialog({ doc }: { doc: Document }) {
                   ? "bg-emerald-100 text-emerald-700"
                   : "bg-yellow-100 text-yellow-700"
               }`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                {cert.chain_confirmed ? "Confirmed On-Chain" : "Submitted to Blockchain"}
+                <span className={`w-1.5 h-1.5 rounded-full bg-current ${!cert.chain_confirmed ? 'animate-pulse' : ''}`} />
+                {cert.chain_confirmed ? "Confirmed On-Chain" : "Processing Transaction..."}
               </span>
             </div>
 
@@ -150,11 +152,17 @@ function CertificateDialog({ doc }: { doc: Document }) {
               <div className="flex justify-between items-center px-4 py-2.5 gap-4">
                 <span className="text-muted-foreground shrink-0 font-medium">Tx Hash</span>
                 <div className="flex items-center gap-1.5">
-                  <code className="text-xs font-mono">{cert.approval_tx_hash ? trunc(cert.approval_tx_hash, 12, 10) : "Pending"}</code>
-                  {cert.approval_tx_hash && (
-                    <button onClick={() => copy(cert.approval_tx_hash!, "tx")} className="text-muted-foreground hover:text-foreground">
-                      {copied === "tx" ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
+                  {cert.approval_tx_hash ? (
+                    <>
+                      <code className="text-xs font-mono">{trunc(cert.approval_tx_hash, 12, 10)}</code>
+                      <button onClick={() => copy(cert.approval_tx_hash!, "tx")} className="text-muted-foreground hover:text-foreground">
+                        {copied === "tx" ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                    </>
+                  ) : cert.chain_confirmed ? (
+                    <span className="text-xs text-muted-foreground italic">Confirmed (ID Unavailable)</span>
+                  ) : (
+                    <span className="text-xs text-yellow-600 animate-pulse">Processing...</span>
                   )}
                 </div>
               </div>
@@ -220,6 +228,44 @@ function CertificateDialog({ doc }: { doc: Document }) {
                 <ExternalLink className="h-3.5 w-3.5" />
                 View Registry Contract
               </a>
+              {cert.chain_confirmed && (
+                <button
+                  onClick={async () => {
+                    try {
+                      // toast is not accessible directly here without useToast, but we can just use console or a simple alert, 
+                      // Wait, we have access to cert.filename. Let's just generate it.
+                      let ownerWalletStr = "";
+                      try {
+                          const storedUser = localStorage.getItem('bbsns_user');
+                          if (storedUser) {
+                              const parsed = JSON.parse(storedUser);
+                              if (parsed.wallet_address) ownerWalletStr = parsed.wallet_address;
+                          }
+                      } catch (e) {}
+
+                      await generateCertificatePDF({
+                          filename: cert.title || cert.filename,
+                          fileHash: cert.file_hash,
+                          status: "APPROVED",
+                          txHash: cert.approval_tx_hash || undefined,
+                          notaryWallet: cert.notary_wallet || "System Assigned Notary",
+                          notaryName: cert.notary_name || undefined,
+                          ownerWallet: cert.owner_wallet || ownerWalletStr,
+                          timestamp: cert.notarized_at,
+                          contractAddress: cert.contract_address,
+                          chainId: cert.chain_id,
+                          verificationUrl: `https://app.bbsns.online/verify?hash=${cert.file_hash}`,
+                      });
+                    } catch (e) {
+                      console.error("Failed to generate PDF", e);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-sm transition-colors mt-2 border border-emerald-500 shadow-sm"
+                >
+                  <Download className="h-4 w-4" />
+                  Download Certificate PDF
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -6,7 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  */
 contextBridge.exposeInMainWorld('electronAPI', {
     auth: {
-        start: () => ipcRenderer.invoke('auth:start'),
+        start: (role) => ipcRenderer.invoke('auth:start', role),
         checkSession: () => ipcRenderer.invoke('auth:check-session'),
         logout: () => ipcRenderer.invoke('auth:logout'),
         getDeviceId: () => ipcRenderer.invoke('auth:get-device-id'),

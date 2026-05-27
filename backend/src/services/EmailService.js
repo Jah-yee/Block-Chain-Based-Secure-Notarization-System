@@ -23,8 +23,8 @@ class EmailService {
    * Triggers the notary onboarding link to users.
    */
   async sendActivationEmail(to, token) {
-    const webAppUrl = process.env.WEB_APP_URL || "https://app.bbsns.online";
-    const activationLink = `${webAppUrl}/activate?token=${token}`;
+    const authUrl = process.env.REMOTE_AUTH_URL || "https://auth.bbsns.online";
+    const activationLink = `${authUrl}/?mode=activate&token=${token}`;
 
     const emailData = {
       sender: {
@@ -70,6 +70,39 @@ class EmailService {
         code: error.response?.data?.code
       });
       
+      return { success: false, error: errorMsg };
+    }
+  }
+  async sendRejectionEmail(to) {
+    const emailData = {
+      sender: {
+        name: this.senderName,
+        email: this.senderEmail
+      },
+      to: [{ email: to }],
+      subject: "BBSNS Notary Application Update",
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+          <h2 style="color: #1f2937;">Notary Application Update</h2>
+          <p style="color: #4b5563;">Thank you for your interest in becoming a notary on BBSNS.</p>
+          <p style="color: #4b5563;">After careful review, we are unable to approve your application at this time.</p>
+          <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+          <p style="color: #9ca3af; font-size: 0.75rem;">If you have any questions, please contact our support team.</p>
+        </div>
+      `
+    };
+
+    try {
+      const response = await axios.post(this.apiUrl, emailData, {
+        headers: {
+          "api-key": this.apiKey,
+          "content-type": "application/json",
+          "accept": "application/json"
+        }
+      });
+      return { success: true, messageId: response.data.messageId };
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || error.message;
       return { success: false, error: errorMsg };
     }
   }

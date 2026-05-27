@@ -18,15 +18,53 @@ const isValidUUID = (str) => UUID_REGEX.test(str);
 router.get("/proposals", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
     try {
         let query = `
-            SELECT p.*, u.name as proposer_name 
+            SELECT 
+                p.id,
+                p.title,
+                p.description,
+                p.type,
+                p.target_id,
+                p.proposer_id,
+                p.participation_scope,
+                CASE 
+                    WHEN p.status = 'active' AND p.expires_at < NOW() THEN 'expired' 
+                    ELSE p.status::text 
+                END as status,
+                p.created_at,
+                p.expires_at,
+                p.executed_at,
+                p.target_notaries,
+                p.executed_by,
+                p.execution_tx_hash,
+                p.on_chain_tx_index,
+                p.on_chain_data,
+                p.on_chain_target,
+                u.name as proposer_name,
+                COALESCE(vote_counts.approvals, 0)::integer as approvals,
+                COALESCE(vote_counts.rejections, 0)::integer as rejections,
+                my_v.decision as my_vote,
+                my_v.signature as my_vote_hash
             FROM governance_proposals p
             LEFT JOIN users u ON p.proposer_id = u.id
+            LEFT JOIN (
+                SELECT 
+                    proposal_id,
+                    COUNT(CASE WHEN decision = 'approve' THEN 1 END) as approvals,
+                    COUNT(CASE WHEN decision = 'reject' THEN 1 END) as rejections
+                FROM governance_votes
+                GROUP BY proposal_id
+            ) vote_counts ON p.id = vote_counts.proposal_id
+            LEFT JOIN governance_votes my_v ON p.id = my_v.proposal_id AND my_v.voter_id = $1
+            WHERE p.on_chain_tx_index IS NOT NULL
         `;
-        let params = [];
+        let params = [req.actor.id];
 
-        // If actor is a NOTARY (and not an ADMIN/OWNER), filter by targeting
+        // If actor is a NOTARY (and not an ADMIN/OWNER), filter by scope and targeting
         if (req.actor.role === ROLES.NOTARY && req.actor.role < ROLES.ADMIN) {
-            query += ` WHERE p.target_notaries @> $1::jsonb OR p.target_notaries = '[]'::jsonb OR p.target_notaries IS NULL`;
+            // 🛡️ [ACCESS_CONTROL] Admin-scoped proposals must NEVER be visible to notaries,
+            // even when target_notaries is empty. Check scope first, then targeting.
+            query += ` AND p.participation_scope != 'admin'`;
+            query += ` AND (p.target_notaries @> $2::jsonb OR p.target_notaries = '[]'::jsonb OR p.target_notaries IS NULL)`;
             params.push(JSON.stringify([req.actor.id]));
         }
 
@@ -42,7 +80,7 @@ router.get("/proposals", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), 
 // GET /api/governance/alerts/count
 router.get("/alerts/count", allowPublic, requirePrivilege({ capability: 'GOV_PROPOSAL_LIST', allowPublic: true }), async (req, res) => {
     try {
-        const result = await pool.query("SELECT COUNT(*) FROM governance_proposals WHERE status = 'active'");
+        const result = await pool.query("SELECT COUNT(*) FROM governance_proposals WHERE status = 'active' AND expires_at >= NOW() AND on_chain_tx_index IS NOT NULL");
         res.json({ count: parseInt(result.rows[0].count) });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -51,25 +89,32 @@ router.get("/alerts/count", allowPublic, requirePrivilege({ capability: 'GOV_PRO
 
 // POST /api/governance/proposals (Admin only)
 router.post("/proposals", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_PROPOSAL_CREATE' }), withAction('GOV_PROPOSAL_CREATE'), withMutation(), async (req, res) => {
-    const { title, description, type, target_id, target_notaries, expires_in_days } = req.body;
+    const { title, description, type, target_id, target_notaries, expires_in_days, duration_hours, on_chain_tx_index, on_chain_data, on_chain_target, participation_scope } = req.body;
 
     if (!title || !type) {
         return res.status(400).json({ error: "Title and type are required" });
     }
 
     const expires_at = new Date();
-    expires_at.setDate(expires_at.getDate() + (expires_in_days || 7));
+    if (duration_hours) {
+        expires_at.setHours(expires_at.getHours() + parseInt(duration_hours, 10));
+    } else {
+        expires_at.setDate(expires_at.getDate() + (expires_in_days || 7));
+    }
+
+    const scope = participation_scope || 'all';
 
     try {
         // 🛡️ [FAST_TRACK] Check for Single Admin Mode
-        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
+        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'admin' OR role = 'owner'");
         const adminCount = parseInt(adminRes.rows[0].count);
-        const status = (adminCount === 1) ? 'passed' : 'active';
+        // Note: Even if adminCount is 1, it must be executed on-chain. Status is active until on-chain execution.
+        const status = 'active';
 
         const result = await pool.query(
-            `INSERT INTO governance_proposals (title, description, type, target_id, target_notaries, proposer_id, expires_at, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-            [title, description, type, target_id, JSON.stringify(target_notaries || []), req.actor.id, expires_at, status]
+            `INSERT INTO governance_proposals (title, description, type, target_id, target_notaries, proposer_id, expires_at, status, on_chain_tx_index, on_chain_data, on_chain_target, participation_scope)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+            [title, description, type, target_id, JSON.stringify(target_notaries || []), req.actor.id, expires_at, status, on_chain_tx_index, on_chain_data, on_chain_target, scope]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -114,61 +159,63 @@ router.delete("/proposals/:id", withDomain('GOVERNANCE'), requirePrivilege({ cap
     }
 });
 
-// POST /api/governance/proposals/:id/vote (Admin/Notary depending on type - keeping Admin for now but checking threshold)
-router.post("/proposals/:id/vote", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_VOTE_SUBMIT' }), withAction('GOV_VOTE_SUBMIT'), withMutation(), async (req, res) => {
-    const { decision, signature } = req.body;
-    const proposalId = req.params.id;
-
-    if (!decision || !signature) {
-        return res.status(400).json({ error: "Decision and signature are required" });
-    }
-
+// POST /api/governance/proposals/:id/reject - Cast a gasless off-chain rejection
+router.post("/proposals/:id/reject", requirePrivilege({ capability: 'GOV_PROPOSAL_LIST' }), async (req, res) => {
     try {
-        // 1. Check if proposal exists and is active
-        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
-        if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
-        const proposal = propRes.rows[0];
-        if (proposal.status !== 'active') return res.status(400).json({ error: "Proposal is no longer active" });
+        const proposalId = req.params.id;
+        const voterId = req.actor.id;
 
-        // 2. Authorization Check: If targeted, is this notary in the list?
-        if (proposal.target_notaries && proposal.target_notaries.length > 0) {
-            if (!proposal.target_notaries.includes(req.actor.id)) {
-                return res.status(403).json({ error: "You are not authorized to vote on this targeted proposal" });
-            }
+        // Verify proposal exists and is active
+        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
+        if (propRes.rows.length === 0) {
+            return res.status(404).json({ error: "Proposal not found" });
+        }
+        const proposal = propRes.rows[0];
+        if (proposal.status !== 'active') {
+            return res.status(400).json({ error: `Proposal is already ${proposal.status}` });
+        }
+        if (new Date(proposal.expires_at) < new Date()) {
+            return res.status(400).json({ error: "Proposal has expired" });
         }
 
-        // 3. Record vote
+        // Record the rejection vote in governance_votes
         await pool.query(
             `INSERT INTO governance_votes (proposal_id, voter_id, decision, signature)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (proposal_id, voter_id) DO UPDATE SET decision = $3, signature = $4`,
-            [proposalId, req.actor.id, decision, signature]
+             VALUES ($1, $2, 'reject', 'off-chain-reject')
+             ON CONFLICT (proposal_id, voter_id)
+             DO UPDATE SET decision = 'reject', signature = 'off-chain-reject', voted_at = NOW()`,
+            [proposalId, voterId]
         );
 
-        // 4. THRESHOLD / AUTO-EXECUTION CHECK
-        // Count approvals
-        const voteCountRes = await pool.query(
-            "SELECT COUNT(*) FROM governance_votes WHERE proposal_id = $1 AND decision = 'approve'",
-            [proposalId]
-        );
-        const approvals = parseInt(voteCountRes.rows[0].count);
-
-        // Fetch Admin Count for Dynamic Threshold
-        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
-        const adminCount = parseInt(adminRes.rows[0].count);
-
-        // If only 1 admin exists, or if threshold is met (e.g., majority or 1 for single admin)
-        if (decision === 'approve' && (adminCount === 1 || approvals >= adminCount)) {
-            console.log(`🎊 Threshold met for Proposal ${proposalId}. Marking as passed.`);
-            await pool.query("UPDATE governance_proposals SET status = 'passed' WHERE id = $1", [proposalId]);
-            return res.json({ message: "Vote recorded. Proposal PASSED and ready for execution.", executed: false, status: 'passed' });
+        // Tally votes to see if threshold is met
+        const voteCountRes = await pool.query("SELECT COUNT(*) FROM governance_votes WHERE proposal_id = $1 AND decision = 'reject'", [proposalId]);
+        const rejections = parseInt(voteCountRes.rows[0].count, 10);
+        
+        let threshold = 2; // fallback
+        try {
+            const config = await ConfigService.getConfig();
+            const ProviderService = require("../blockchain/provider-service");
+            const provider = await ProviderService.getProvider();
+            const artifact = require("../artifacts/BBSNSMultiSig.json");
+            const contract = new ethers.Contract(config.contracts.multisig, artifact.abi, provider);
+            threshold = Number(await contract.threshold());
+        } catch(e) {
+            console.warn("[VOTE_TALLY] Could not fetch threshold, using fallback.");
         }
 
-        res.json({ message: "Vote recorded successfully" });
+        if (rejections >= threshold) {
+             await pool.query("UPDATE governance_proposals SET status = 'rejected' WHERE id = $1", [proposalId]);
+             console.log(`[GOV_REJECT] Proposal ${proposalId} rejected by threshold.`);
+        }
+
+        res.json({ message: "Rejection vote cast successfully", rejections, threshold });
     } catch (err) {
+        console.error("Rejection vote error:", err);
         res.status(500).json({ error: err.message });
     }
 });
+
+// VOTE endpoint deleted. All votes must go through the blockchain now.
 
 // GET /api/governance/multisig/settings
 router.get(
@@ -181,7 +228,7 @@ router.get(
             const contractAddress = config?.contracts?.multisig;
 
             // Fetch DB admin count in parallel
-            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
+            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'admin' OR role = 'owner'");
             const adminCount = parseInt(dbAdminRes.rows[0].count);
 
             if (!contractAddress) {
@@ -207,11 +254,30 @@ router.get(
                 contract.getSigners()
             ]);
 
+            // Query database to map signer wallet addresses to user names
+            const signerAddresses = signers.map(s => s.toLowerCase());
+            const userRes = await pool.query(
+                "SELECT name, wallet_address FROM users WHERE LOWER(wallet_address) = ANY($1)",
+                [signerAddresses]
+            );
+
+            const signerNames = {};
+            // Initialize with address as fallback name
+            signers.forEach(s => {
+                signerNames[s.toLowerCase()] = s;
+            });
+            userRes.rows.forEach(row => {
+                if (row.wallet_address && row.name) {
+                    signerNames[row.wallet_address.toLowerCase()] = row.name;
+                }
+            });
+
             res.json({
                 address: contractAddress,
                 threshold: Number(threshold),
                 timelockDelay: Number(delay),
                 signers: signers,
+                signerNames: signerNames,
                 adminCount,
                 status: "active"
             });
@@ -219,7 +285,7 @@ router.get(
             console.error("Fetch multisig settings error:", error);
             // 🛡️ [RESILIENCE] Fallback to safe state
             const config = await ConfigService.getConfig();
-            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]).catch(() => ({ rows: [{ count: 0 }] }));
+            const dbAdminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'admin' OR role = 'owner'").catch(() => ({ rows: [{ count: 0 }] }));
             const adminCount = parseInt(dbAdminRes.rows[0].count);
             res.json({ 
                 address: config?.contracts?.multisig || "0x0",
@@ -308,12 +374,9 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }
                 p.on_chain_data,
                 p.title,
                 p.type,
-                p.target_id,
-                COUNT(v.id) as numConfirmations
+                p.target_id
             FROM governance_proposals p
-            LEFT JOIN governance_votes v ON p.id = v.proposal_id AND v.decision = 'approve'
             WHERE p.on_chain_tx_index IS NOT NULL
-            GROUP BY p.id
             ORDER BY p.created_at DESC
             LIMIT 20
         `);
@@ -331,14 +394,16 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }
                 const artifact = require(artifactPath);
                 const contract = new ethers.Contract(contractAddress, artifact.abi, provider);
 
-                const [threshold, delay, signers] = await Promise.all([
+                const [threshold, delay, signers, currentVersion] = await Promise.all([
                     contract.threshold(),
                     contract.timelockDelay(),
-                    contract.getSigners()
+                    contract.getSigners(),
+                    contract.signerVersion()
                 ]);
                 contractThreshold = Number(threshold);
                 contractTimelockDelay = Number(delay);
                 contractSigners = signers;
+                const currentSignerVersion = Number(currentVersion);
 
                 // Enrich each on-chain transaction with live confirmations
                 await Promise.all(result.rows.map(async (row) => {
@@ -352,12 +417,57 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }
                                 confirmed: await contract.isConfirmed(txIdx, addr).catch(() => false)
                             })))
                         ]);
+
+                        const txSignerVersion = txData ? Number(txData[6]) : currentSignerVersion;
+                        const isExpired = txSignerVersion !== currentSignerVersion;
+
                         txEnrichments[txIdx] = {
-                            to: txData?.to || contractAddress,
-                            value: txData?.value?.toString() || '0',
-                            data: txData?.data || (row.on_chain_data || '0x'),
-                            confirmations: confirmationStatuses
+                            to: txData ? txData[0] : contractAddress, 
+                            value: txData ? txData[1].toString() : '0', 
+                            data: txData ? txData[2] : (row.on_chain_data || '0x'), 
+                            executed: txData ? txData[3] : false,
+                            numConfirmations: txData ? Number(txData[4]) : 0,
+                            expired: isExpired,
+                            confirmations: txData && txData[3] 
+                                ? confirmationStatuses.filter(c => c.confirmed)
+                                : confirmationStatuses
                         };
+
+                        // 🛡️ Self-Healing State-Gap Check: Auto-update executed status in DB if executed on-chain
+                        if (txData && txData[3] && row.status !== 'executed') {
+                            await pool.query(
+                                `UPDATE governance_proposals 
+                                 SET status = 'executed', 
+                                     executed_at = NOW(),
+                                     execution_tx_hash = 'auto_healed_from_chain'
+                                 WHERE id = $1`,
+                                [row.id]
+                            ).catch(e => console.warn(`[SELF_HEAL_ERR] Failed to auto-heal proposal ${row.id}:`, e.message));
+
+                            // Synchronize DB user role
+                            try {
+                                if (row.type === 'add_admin_protocol' || row.type === 'add_admin_governance') {
+                                    await pool.query("UPDATE users SET role = 'admin' WHERE id::text = $1 OR wallet_address = $2", [row.target_id, row.target_id.toLowerCase()]);
+                                } else if (row.type === 'add_notary' || row.type === 'NOTARY_PROMOTION') {
+                                    await pool.query("UPDATE users SET role = 'notary' WHERE id::text = $1 OR wallet_address = $2", [row.target_id, row.target_id.toLowerCase()]);
+                                } else if (row.type === 'remove_admin' || row.type === 'remove_admin_protocol' || row.type === 'remove_admin_governance' || row.type === 'remove_notary') {
+                                    await pool.query("UPDATE users SET role = 'owner' WHERE id::text = $1 OR wallet_address = $2", [row.target_id, row.target_id.toLowerCase()]);
+                                }
+                            } catch (roleErr) {
+                                console.warn(`[SELF_HEAL_ROLE_ERR] Failed to sync role for proposal ${row.id}:`, roleErr.message);
+                            }
+
+                            row.status = 'executed';
+                        } else if (isExpired && row.status !== 'expired' && row.status !== 'executed') {
+                            await pool.query(
+                                `UPDATE governance_proposals 
+                                 SET status = 'expired', 
+                                     updated_at = NOW()
+                                 WHERE id = $1`,
+                                [row.id]
+                            ).catch(e => console.warn(`[SELF_HEAL_ERR] Failed to auto-heal proposal to expired state ${row.id}:`, e.message));
+                            row.status = 'expired';
+                        }
                     } catch (e) {
                         console.warn(`[MULTISIG_TX_ENRICH] Could not enrich txIndex ${txIdx}:`, e.message);
                     }
@@ -375,21 +485,41 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }
             const tsNum = submissionTs ? Math.floor(new Date(submissionTs).getTime() / 1000) : 0;
             return {
                 index: txIdx !== null ? Number(txIdx) : row.id,
-                to: enriched.to || contractAddress || '',
+                to: enriched.to || contractAddress, 
                 value: enriched.value || '0',
                 data: enriched.data || row.on_chain_data || '0x',
                 submissionTime: tsNum,
-                numConfirmations: parseInt(row.numconfirmations || row.numConfirmations) || 0,
-                executed: row.status === 'executed',
+                numConfirmations: enriched.numConfirmations || 0,
+                executed: enriched.executed || row.status === 'executed',
+                expired: enriched.expired || false,
                 confirmations: enriched.confirmations || []
             };
         });
+
+        let signerNames = {};
+        if (contractSigners && contractSigners.length > 0) {
+            const signerAddresses = contractSigners.map(s => s.toLowerCase());
+            const userRes = await pool.query(
+                "SELECT name, wallet_address FROM users WHERE LOWER(wallet_address) = ANY($1)",
+                [signerAddresses]
+            ).catch(() => ({ rows: [] }));
+            
+            contractSigners.forEach(s => {
+                signerNames[s.toLowerCase()] = s;
+            });
+            userRes.rows.forEach(row => {
+                if (row.wallet_address && row.name) {
+                    signerNames[row.wallet_address.toLowerCase()] = row.name;
+                }
+            });
+        }
 
         res.json({ 
             transactions,
             address: contractAddress || '',
             threshold: contractThreshold,
-            timelockDelay: contractTimelockDelay
+            timelockDelay: contractTimelockDelay,
+            signerNames: signerNames
         });
     } catch (err) {
         console.error("[GOVERNANCE_TX_FAIL] Resilient failure fallback:", err.message);
@@ -405,121 +535,152 @@ router.get("/multisig/transactions", requirePrivilege({ capability: 'GOV_READ' }
     }
 });
 
-
-// POST /api/governance/proposals/:id/prepare-on-chain
-router.post("/proposals/:id/prepare-on-chain", requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), async (req, res) => {
-    const proposalId = req.params.id;
-    try {
-        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
-        if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
-        const proposal = propRes.rows[0];
-
-        // 1. Get MultiSig Info & Authoritative Config
-        const config = await ConfigService.getConfig();
-        const multisigAddress = config.contracts.multisig;
-        const chainId = Number(config.chainId);
-
-        // 2. Load MultiSig Contract to get Version
-        const provider = await ProviderService.getProvider();
-        const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
-        const artifact = require(artifactPath);
-        const contract = new ethers.Contract(multisigAddress, artifact.abi, provider);
-        const version = await contract.signerVersion();
-
-        // 3. Construct EIP-712 Data
-        // To: DocumentRegistry (usually)
-        const to = config.contracts.documentRegistry;
-        const value = "0";
-        const data = "0x"; // Empty data for now as we just want to register it on-chain
-        const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
-
-        const eip712Data = {
-            domain: {
-                name: "BBSNS_Protocol",
-                version: "2",
-                chainId: chainId,
-                verifyingContract: multisigAddress
-            },
-            types: {
-                Submit: [
-                    { name: "to", type: "address" },
-                    { name: "value", type: "uint256" },
-                    { name: "data", type: "bytes" },
-                    { name: "proposalHash", type: "bytes32" },
-                    { name: "version", type: "uint256" }
-                ]
-            },
-            message: {
-                to,
-                value,
-                data,
-                proposalHash,
-                version: Number(version)
-            }
-        };
-
-        res.json({ eip712Data, proposalHash, version: Number(version) });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// POST /api/governance/proposals/:id/submit-on-chain
-router.post("/proposals/:id/submit-on-chain", withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
-    const proposalId = req.params.id;
-    const { signature } = req.body;
-
-    if (!signature) return res.status(400).json({ error: "Signature required" });
-
-    try {
-        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
-        const proposal = propRes.rows[0];
-
-        // 1. Send Transaction via Relayer
-        const { signer } = await require("../blockchain/connection").connectBNB();
-        const config = await ConfigService.getConfig();
-        const multisigAddress = config.contracts.multisig;
-        const artifact = require("../artifacts/BBSNSMultiSig.json");
-        const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
-
-        const to = config.contracts.documentRegistry;
-        const value = "0";
-        const data = "0x";
-        const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
-
-        console.log(`🚀 Relaying submitWithSignature for Prop ${proposalId}...`);
-        const tx = await contract.submitWithSignature(to, value, data, signature, proposalHash);
-        const receipt = await tx.wait();
-
-        // 2. Fetch the Transaction Index from logs
-        // The event is: event TransactionSubmitted(uint256 indexed txIndex, ...)
-        const iface = new ethers.Interface(artifact.abi);
-        let txIndex;
-        for (const log of receipt.logs) {
-            try {
-                const parsed = iface.parseLog(log);
-                if (parsed.name === 'TransactionSubmitted') {
-                    txIndex = Number(parsed.args.txIndex);
-                    break;
-                }
-            } catch (e) { }
+// POST /api/governance/multisig/transactions/:txIndex/execute
+// Execute a MultiSig transaction on-chain via the relayer (or sync an already-executed transaction)
+router.post(
+    "/multisig/transactions/:txIndex/execute",
+    withDomain('GOVERNANCE'),
+    requirePrivilege({ capability: 'GOV_PROPOSAL_EXECUTE' }),
+    withAction('GOV_PROPOSAL_EXECUTE'),
+    withMutation(),
+    async (req, res) => {
+        const txIndex = parseInt(req.params.txIndex, 10);
+        if (isNaN(txIndex)) {
+            return res.status(400).json({ error: "Invalid transaction index" });
         }
 
-        // 3. Update DB — preserve 'passed' status if it was already fast-tracked
-        await pool.query(
-            `UPDATE governance_proposals
-             SET on_chain_tx_index = $1,
-                 status = CASE WHEN status = 'passed' THEN 'passed' ELSE 'active' END
-             WHERE id = $2`,
-            [txIndex, proposalId]
-        );
+        const { txHash } = req.body || {};
 
-        res.json({ success: true, txIndex, txHash: receipt.hash });
-    } catch (err) {
-        console.error("Submit On-Chain Error:", err);
-        res.status(500).json({ error: err.message });
+        const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
+        const artifact = require(artifactPath);
+
+        let config, multisigAddress, signer, multisigContract;
+        try {
+            config = await ConfigService.getConfig();
+            multisigAddress = config?.contracts?.multisig;
+            if (!multisigAddress) throw new Error("Multisig contract address not configured.");
+
+            const { signer: relayerSigner } = await require("../blockchain/connection").connectBNB();
+            signer = relayerSigner;
+            multisigContract = new ethers.Contract(multisigAddress, artifact.abi, signer);
+        } catch (connErr) {
+            console.error(`[MULTISIG_EXECUTE] Blockchain connection failed:`, connErr.message);
+            return res.status(503).json({ error: `Blockchain connection failed: ${connErr.message}` });
+        }
+
+        try {
+            let finalTxHash = txHash;
+
+            if (txHash) {
+                console.log(`[MULTISIG_EXECUTE] Verifying externally executed txHash ${txHash}...`);
+                const provider = await require("../services/providers").getProvider();
+                const receipt = await provider.getTransactionReceipt(txHash);
+                if (!receipt) {
+                    return res.status(400).json({ error: "Transaction receipt not found on-chain. Please wait for confirmation." });
+                }
+                if (receipt.status !== 1) {
+                    return res.status(400).json({ error: "On-chain transaction execution failed." });
+                }
+                console.log(`[MULTISIG_EXECUTE] ✅ Verified txHash ${txHash} on-chain.`);
+            } else {
+                // If no txHash provided, check if transaction is already executed on-chain
+                try {
+                    const txInfo = await multisigContract.transactions(txIndex);
+                    if (txInfo && txInfo.executed) {
+                        console.log(`[MULTISIG_EXECUTE] Transaction index ${txIndex} is already executed on-chain. Syncing...`);
+                        // Proceed to off-chain update without calling executeTransaction again
+                        finalTxHash = null; 
+                    } else {
+                        console.log(`[MULTISIG_EXECUTE] Executing txIndex ${txIndex} on-chain...`);
+                        const execTx = await multisigContract.executeTransaction(txIndex);
+                        console.log(`[MULTISIG_EXECUTE] executeTransaction sent, waiting for receipt... txHash=${execTx.hash}`);
+                        const execReceipt = await execTx.wait();
+                        finalTxHash = execReceipt.hash;
+                    }
+                } catch (err) {
+                    console.error(`[MULTISIG_EXECUTE] ❌ On-chain execution failed for txIndex ${txIndex}:`, err.message);
+                    return res.status(500).json({ error: `On-chain execution failed: ${err.message}` });
+                }
+            }
+
+            // Update corresponding off-chain proposal in database if exists
+            try {
+                const propRes = await pool.query(
+                    "SELECT * FROM governance_proposals WHERE on_chain_tx_index = $1",
+                    [txIndex]
+                );
+                if (propRes.rows.length > 0) {
+                    const proposal = propRes.rows[0];
+                    console.log(`[MULTISIG_EXECUTE] Found matching proposal ${proposal.id}, updating status...`);
+                    
+                    await pool.query(
+                        `UPDATE governance_proposals 
+                         SET status = 'executed', 
+                             executed_at = NOW(), 
+                             executed_by = $1, 
+                             execution_tx_hash = $2 
+                         WHERE id = $3`,
+                        [req.actor?.id || null, finalTxHash, proposal.id]
+                    );
+
+                    // Write audit log
+                    try {
+                        await pool.query(
+                            `INSERT INTO audit_logs (action, details, created_at) 
+                             VALUES ('GOVERNANCE_EXECUTED', $1, NOW())`,
+                            [JSON.stringify({ proposalId: proposal.id, type: proposal.type, target_id: proposal.target_id, executedBy: req.actor?.id, txHash: finalTxHash })]
+                        );
+                        
+                        const { logAction } = require('../utils/logger');
+                        logAction(
+                            'MULTISIG_EXECUTE',
+                            `MultiSig Transaction executed on-chain (Tx Index: ${txIndex}, Proposal ID: ${proposal.id}).`,
+                            req.actor?.email || 'admin',
+                            { proposal_id: proposal.id, tx_index: txIndex, tx_hash: finalTxHash }
+                        );
+                    } catch (auditErr) {
+                        console.warn(`[MULTISIG_EXECUTE_AUDIT_WARN] Audit log write failed:`, auditErr.message);
+                    }
+                }
+            } catch (dbErr) {
+                console.error(`[MULTISIG_EXECUTE_DB_WARN] Failed to update matching proposal:`, dbErr.message);
+            }
+
+            res.json({
+                success: true,
+                message: `Transaction index ${txIndex} executed successfully.`,
+                txHash: finalTxHash
+            });
+        } catch (chainErr) {
+            console.error(`[MULTISIG_EXECUTE] ❌ Route handler failure for txIndex ${txIndex}:`, chainErr.message);
+            try {
+                const { logAction } = require('../utils/logger');
+                logAction(
+                    'MULTISIG_EXECUTE_FAIL',
+                    `MultiSig Transaction execution failed: ${chainErr.message}`,
+                    req.actor?.email || 'admin',
+                    { tx_index: txIndex, error: chainErr.message }
+                );
+            } catch (e) {}
+            res.status(500).json({ error: `Route handler failure: ${chainErr.message}` });
+        }
     }
-});
+);
+
+// POST /api/governance/multisig/transactions/:txIndex/revoke
+// Revoke a MultiSig confirmation on-chain (must be signed and submitted directly)
+router.post(
+    "/multisig/transactions/:txIndex/revoke",
+    withDomain('GOVERNANCE'),
+    requirePrivilege({ capability: 'GOV_REMOTE_INIT' }),
+    withAction('GOV_REMOTE_INIT'),
+    withMutation(),
+    async (req, res) => {
+        res.status(400).json({ error: "On-chain confirmation revocation must be signed and submitted directly via MetaMask/Remote Signer." });
+    }
+);
+
+// SUBMIT-ON-CHAIN endpoint deleted. Desktop App submits directly.
 
 // ================= REMOTE GOVERNANCE VOTING ==================
 
@@ -529,6 +690,19 @@ router.post('/remote/vote/session', withDomain('GOVERNANCE'), requirePrivilege({
         const { proposalId, decision } = req.body;
         if (!proposalId || !decision) {
             return res.status(400).json({ error: 'proposalId and decision are required' });
+        }
+
+        // Verify proposal exists and has not expired
+        const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
+        if (propRes.rows.length === 0) {
+            return res.status(404).json({ error: "Proposal not found" });
+        }
+        const proposal = propRes.rows[0];
+        if (proposal.status !== 'active') {
+            return res.status(400).json({ error: `Proposal is already ${proposal.status}` });
+        }
+        if (new Date(proposal.expires_at) < new Date()) {
+            return res.status(400).json({ error: "Proposal has expired" });
         }
 
         const challenge = `BBSNS-GOV-VOTE-${proposalId}-${decision}-${Math.random().toString(36).substring(2, 15)}`;
@@ -567,12 +741,23 @@ router.get('/remote/vote/status/:sessionId', withDomain('GOVERNANCE'), allowPubl
             return res.json({ status: 'expired' });
         }
 
+        const propResult = await pool.query('SELECT * FROM governance_proposals WHERE id = $1', [session.proposal_id]);
+        let onChainTxIndex = null;
+        if (propResult.rows.length > 0) {
+            onChainTxIndex = propResult.rows[0].on_chain_tx_index;
+        }
+
+        const config = await ConfigService.getConfig();
+        const multisigAddress = config?.contracts?.multisig || '';
+
         res.json({
             status: session.status,
             challenge: session.challenge,
             proposalId: session.proposal_id,
             decision: session.decision,
-            wallet_address: session.wallet_address
+            wallet_address: session.wallet_address,
+            onChainTxIndex,
+            multisigAddress
         });
     } catch (error) {
         console.error('Remote vote status error:', error);
@@ -580,13 +765,13 @@ router.get('/remote/vote/status/:sessionId', withDomain('GOVERNANCE'), allowPubl
     }
 });
 
-// POST /api/governance/remote/vote/authorize - Submit signature for remote vote
+// POST /api/governance/remote/vote/authorize - Submit txHash for remote vote
 router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
     try {
-        const { sessionId, walletAddress, signature } = req.body;
+        const { sessionId, walletAddress, txHash } = req.body;
 
-        if (!sessionId || !walletAddress || !signature) {
-            return res.status(400).json({ error: 'sessionId, walletAddress, and signature are required' });
+        if (!sessionId || !walletAddress || !txHash) {
+            return res.status(400).json({ error: 'sessionId, walletAddress, and txHash are required' });
         }
         if (!isValidUUID(sessionId)) {
             return res.status(400).json({ error: 'Invalid session ID format' });
@@ -606,65 +791,59 @@ router.post('/remote/vote/authorize', withDomain('GOVERNANCE'), allowPublic, req
             return res.status(401).json({ error: 'Session expired' });
         }
 
-        // 1. Verify Signature
-        const recoveredAddress = ethers.verifyMessage(session.challenge, signature);
-        if (recoveredAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-            return res.status(401).json({ error: 'Invalid signature for this challenge' });
-        }
-
-        // 2. Check if user exists and has enough privilege
+        // 1. Check if user exists and has enough privilege
         const userResult = await pool.query('SELECT * FROM users WHERE wallet_address = $1', [walletAddress.toLowerCase()]);
         if (userResult.rows.length === 0) {
             return res.status(403).json({ error: 'Wallet not registered' });
         }
         const user = userResult.rows[0];
-        // Note: We don't have requirePrivilege context here, but we check role manually
         const ROLE_MAP = { 'none': 0, 'owner': 1, 'notary': 2, 'admin': 3 };
         const numericRole = ROLE_MAP[String(user.role).toLowerCase()] || 0;
         if (numericRole < ROLES.NOTARY) {
             return res.status(403).json({ error: 'Insufficient privileges to vote' });
         }
 
-        // 3. Record the vote in governance_votes
-        await pool.query(
-            `INSERT INTO governance_votes (proposal_id, voter_id, decision, signature)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (proposal_id, voter_id) DO UPDATE SET decision = $3, signature = $4`,
-            [session.proposal_id, user.id, session.decision, signature]
-        );
-
-        // 4. Update session status
+        // 2. Update session status
         await pool.query(
             "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, signature = $2, authorized_at = NOW() WHERE id = $3",
-            [walletAddress.toLowerCase(), signature, sessionId]
+            [walletAddress.toLowerCase(), txHash, sessionId] // using signature column to store txHash temporarily
         );
 
-        // EXTRA: Check threshold / auto-execution (Logic duplicated from /proposals/:id/vote)
-        const voteCountRes = await pool.query(
-            "SELECT COUNT(*) FROM governance_votes WHERE proposal_id = $1 AND decision = 'approve'",
-            [session.proposal_id]
+        // 3. Sync on-chain vote into governance_votes table
+        const proposalId = session.proposal_id;
+        const voterId = user.id;
+        await pool.query(
+            `INSERT INTO governance_votes (proposal_id, voter_id, decision, signature)
+             VALUES ($1, $2, 'approve', $3)
+             ON CONFLICT (proposal_id, voter_id) 
+             DO UPDATE SET decision = 'approve', signature = $3, voted_at = NOW()`,
+            [proposalId, voterId, txHash]
         );
-        const approvals = parseInt(voteCountRes.rows[0].count);
-        const adminRes = await pool.query("SELECT COUNT(*) FROM users WHERE role >= $1", [ROLES.ADMIN]);
-        const adminCount = parseInt(adminRes.rows[0].count);
 
-        const isSingleAdmin = adminCount === 1;
-        if (session.decision === 'approve' && (isSingleAdmin || approvals >= adminCount)) {
-            await pool.query("UPDATE governance_proposals SET status = 'passed' WHERE id = $1", [session.proposal_id]);
-            console.log(`✅ [GOV_REMOTE_VOTE] Proposal ${session.proposal_id} passed. isSingleAdmin=${isSingleAdmin}, approvals=${approvals}/${adminCount}`);
-            return res.json({
-                message: isSingleAdmin
-                    ? 'Vote authorized. Proposal PASSED (single-admin fast-track). Execute on-chain to apply changes.'
-                    : 'Vote authorized. Proposal PASSED — threshold met.',
-                proposalPassed: true,
-                isSingleAdmin,
-                status: 'passed'
-            });
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_CONFIRM',
+                `MultiSig Transaction confirmed on-chain by co-signer (Proposal ID: ${proposalId}).`,
+                walletAddress.toLowerCase(),
+                { proposal_id: proposalId, tx_hash: txHash }
+            );
+        } catch (e) {
+            console.error("Failed to log multisig confirm action:", e.message);
         }
 
         res.json({ message: 'Vote authorized successfully', proposalPassed: false, status: 'active' });
     } catch (error) {
         console.error('Remote vote authorize error:', error);
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_CONFIRM_FAIL',
+                `MultiSig on-chain vote failed: ${error.message}`,
+                req.body.walletAddress || 'guest',
+                { session_id: req.body.sessionId, error: error.message }
+            );
+        } catch (e) {}
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -683,12 +862,71 @@ router.post('/remote/submit/session', withDomain('GOVERNANCE'), requirePrivilege
         const propRes = await pool.query("SELECT * FROM governance_proposals WHERE id = $1", [proposalId]);
         if (propRes.rows.length === 0) return res.status(404).json({ error: "Proposal not found" });
 
+        const proposal = propRes.rows[0];
+        if (proposal.status !== 'active') {
+            return res.status(400).json({ error: `Proposal is already ${proposal.status}` });
+        }
+        if (new Date(proposal.expires_at) < new Date()) {
+            return res.status(400).json({ error: "Proposal has expired" });
+        }
+
+        // 🛡️ [Hardening] Prepare On-Chain metadata
+        const config = await ConfigService.getConfig();
+        const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
+        
+        let onChainTarget = config.contracts.documentRegistry;
+        let onChainData = "0x";
+
+        const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
+        const artifact = require(artifactPath);
+        const multisigIface = new ethers.Interface(artifact.abi);
+
+        let operations = [];
+        if (proposal.type === 'add_admin') {
+            operations.push({
+                target: config.contracts.multisig,
+                data: multisigIface.encodeFunctionData("promoteAdmin", [proposal.target_id, config.contracts.notaryRegistry])
+            });
+        } else if (proposal.type === 'remove_admin') {
+            operations.push({
+                target: config.contracts.multisig,
+                data: multisigIface.encodeFunctionData("demoteAdmin", [proposal.target_id, config.contracts.notaryRegistry])
+            });
+        } else if (proposal.type === 'add_notary' || proposal.type === 'NOTARY_PROMOTION') {
+            operations.push({
+                target: config.contracts.multisig,
+                data: multisigIface.encodeFunctionData("addSigner", [proposal.target_id])
+            });
+        } else if (proposal.type === 'remove_notary') {
+            operations.push({
+                target: config.contracts.multisig,
+                data: multisigIface.encodeFunctionData("removeSigner", [proposal.target_id])
+            });
+        } else if (proposal.type === 'change_threshold') {
+            const newThreshold = parseInt(proposal.target_id, 10);
+            operations.push({
+                target: config.contracts.multisig,
+                data: multisigIface.encodeFunctionData("changeThreshold", [newThreshold])
+            });
+        }
+
+        if (operations.length > 0) {
+            onChainData = operations.length > 1 ? JSON.stringify(operations) : operations[0].data;
+            onChainTarget = operations.length > 1 ? "MULTI_STEP" : operations[0].target;
+        }
+
+        // Update Proposal with metadata if not already present
+        await pool.query(
+            "UPDATE governance_proposals SET on_chain_data = $1, on_chain_target = $2 WHERE id = $3",
+            [onChainData, onChainTarget, proposalId]
+        );
+
         const challenge = `BBSNS-GOV-SUBMIT-${proposalId}-${Math.random().toString(36).substring(2, 15)}`;
         const expires_at = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes for complex signing
 
         const result = await pool.query(
-            'INSERT INTO remote_gov_sessions (proposal_id, challenge, expires_at, type) VALUES ($1, $2, $3, $4) RETURNING id',
-            [proposalId, challenge, expires_at, 'SUBMIT']
+            'INSERT INTO remote_gov_sessions (proposal_id, challenge, expires_at, type, proposal_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+            [proposalId, challenge, expires_at, 'SUBMIT', proposalHash]
         );
 
         res.json({ sessionId: result.rows[0].id });
@@ -783,9 +1021,9 @@ router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, r
         const artifact = require("../artifacts/BBSNSMultiSig.json");
         const contract = new ethers.Contract(multisigAddress, artifact.abi, signer);
 
-        const to = config.contracts.documentRegistry;
+        const to = proposal.on_chain_target || config.contracts.documentRegistry;
         const value = "0";
-        const data = "0x";
+        const data = proposal.on_chain_data || "0x";
         const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
 
         console.log(`🚀 [REMOTE_RELAY] Submitting Prop ${proposalId} via session ${sessionId}...`);
@@ -819,15 +1057,36 @@ router.post('/remote/submit/authorize', withDomain('GOVERNANCE'), allowPublic, r
             [walletAddress.toLowerCase(), signature, receipt.hash, sessionId]
         );
 
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_SUBMIT',
+                `MultiSig Proposal submitted on-chain (Prop ID: ${proposalId}, Tx Index: ${txIndex}).`,
+                walletAddress.toLowerCase(),
+                { proposal_id: proposalId, tx_index: txIndex, tx_hash: receipt.hash }
+            );
+        } catch (e) {
+            console.error("Failed to log multisig submit action:", e.message);
+        }
+
         res.json({ success: true, txHash: receipt.hash });
     } catch (error) {
         console.error('Remote submit authorize error:', error);
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_SUBMIT_FAIL',
+                `MultiSig on-chain submission failed: ${error.message}`,
+                req.body.walletAddress || 'guest',
+                { session_id: req.body.sessionId, error: error.message }
+            );
+        } catch (e) {}
         res.status(500).json({ error: error.message || 'Internal server error' });
     }
 });
 
 // POST /api/governance/remote/submit/sync-manual - Confirm direct blockchain transaction by Admin
-router.post('/remote/submit/sync-manual', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_ONCHAIN_SUBMIT' }), withAction('GOV_ONCHAIN_SUBMIT'), withMutation(), async (req, res) => {
+router.post('/remote/submit/sync-manual', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
     try {
         const { sessionId, txHash, walletAddress } = req.body;
 
@@ -876,10 +1135,13 @@ router.post('/remote/submit/sync-manual', withDomain('GOVERNANCE'), requirePrivi
             return res.status(400).json({ error: 'TransactionSubmitted event not found in logs. Wrong transaction?' });
         }
 
-        // 4. Update DB
+        // 4. Update DB — preserve 'passed' status if already fast-tracked (BUG-B fix)
         const proposalId = session.proposal_id;
         await pool.query(
-            "UPDATE governance_proposals SET on_chain_tx_index = $1, status = 'active' WHERE id = $2",
+            `UPDATE governance_proposals
+             SET on_chain_tx_index = $1,
+                 status = (CASE WHEN status::text = 'passed' THEN 'passed' ELSE 'active' END)::proposal_status
+             WHERE id = $2`,
             [txIndex, proposalId]
         );
 
@@ -887,6 +1149,18 @@ router.post('/remote/submit/sync-manual', withDomain('GOVERNANCE'), requirePrivi
             "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, tx_hash = $2, authorized_at = NOW() WHERE id = $3",
             [walletAddress.toLowerCase(), txHash, sessionId]
         );
+
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_SUBMIT',
+                `MultiSig Proposal submitted on-chain by Genesis Admin (Prop ID: ${proposalId}, Tx Index: ${txIndex}).`,
+                walletAddress.toLowerCase(),
+                { proposal_id: proposalId, tx_index: txIndex, tx_hash: txHash, type: 'sync_manual' }
+            );
+        } catch (e) {
+            console.error("Failed to log multisig submit sync action:", e.message);
+        }
 
         res.json({ success: true, txIndex, txHash });
     } catch (error) {
@@ -978,12 +1252,329 @@ router.post('/remote/confirm/authorize', withDomain('GOVERNANCE'), allowPublic, 
             [walletAddress.toLowerCase(), signature, receipt.hash, sessionId]
         );
 
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_CONFIRM',
+                `MultiSig Transaction confirmed on-chain (Tx Index: ${txIndex}).`,
+                walletAddress.toLowerCase(),
+                { tx_index: txIndex, tx_hash: receipt.hash }
+            );
+        } catch (e) {
+            console.error("Failed to log multisig confirm action:", e.message);
+        }
+
         res.json({ success: true, txHash: receipt.hash });
     } catch (error) {
         console.error('Remote confirm authorize error:', error);
         res.status(500).json({ error: error.message || 'Internal server error' });
     }
 });
+
+// POST /api/governance/remote/confirm/sync-manual - Confirm direct blockchain confirmation transaction by Admin
+router.post('/remote/confirm/sync-manual', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+    try {
+        const { sessionId, txHash, walletAddress } = req.body;
+
+        if (!sessionId || !txHash || !walletAddress) {
+            return res.status(400).json({ error: 'sessionId, txHash, and walletAddress are required' });
+        }
+
+        // 1. Verify Session
+        const sessionResult = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'CONFIRM'", [sessionId]);
+        if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const session = sessionResult.rows[0];
+
+        if (session.status !== 'pending') {
+            if (session.status === 'authorized') return res.json({ success: true, txHash: session.tx_hash });
+            return res.status(400).json({ error: `Session is already ${session.status}` });
+        }
+
+        // 2. Verify Transaction on Chain
+        let eventVerified = false;
+        const expectedTxIndex = session.proposal_id; // For CONFIRM session, proposal_id stores txIndex
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
+        const provider = await ProviderService.getProvider();
+
+        if (txHash === 'already_executed_onchain' || txHash === 'already_confirmed_onchain') {
+            try {
+                const config = await ConfigService.getConfig();
+                const multisigAddress = config?.contracts?.multisig;
+                const multisigContract = new ethers.Contract(multisigAddress, artifact.abi, provider);
+                
+                // If the transaction has already been executed on-chain, confirmations are implicitly verified
+                const onChainTxInfo = await multisigContract.getTransaction(expectedTxIndex);
+                if (onChainTxInfo && onChainTxInfo.executed) {
+                    eventVerified = true;
+                } else {
+                    // Otherwise check if this signer has confirmed on-chain
+                    const isSignerConfirmed = await multisigContract.isConfirmed(expectedTxIndex, walletAddress);
+                    if (isSignerConfirmed) {
+                        eventVerified = true;
+                    }
+                }
+            } catch (e) {
+                console.warn('[REMOTE_CONFIRM_SELF_HEAL_WARN]', e.message);
+            }
+        } else {
+            const receipt = await provider.getTransactionReceipt(txHash);
+
+            if (!receipt) {
+                return res.status(400).json({ error: 'Transaction receipt not found. Please wait for confirmation.' });
+            }
+
+            if (receipt.status !== 1) {
+                return res.status(400).json({ error: 'Blockchain transaction failed on-chain.' });
+            }
+
+            // 3. Verify TransactionConfirmed event in logs
+            const iface = new ethers.Interface(artifact.abi);
+
+            for (const log of receipt.logs) {
+                try {
+                    const parsed = iface.parseLog(log);
+                    if (parsed.name === 'TransactionConfirmed') {
+                        const eventTxIndex = Number(parsed.args.txIndex);
+                        const eventSigner = parsed.args.signer.toLowerCase();
+                        if (eventTxIndex === expectedTxIndex && eventSigner === walletAddress.toLowerCase()) {
+                            eventVerified = true;
+                            break;
+                        }
+                    }
+                } catch (e) { }
+            }
+        }
+
+        if (!eventVerified) {
+            return res.status(400).json({ error: 'TransactionConfirmed event not found in logs for this txIndex and signer.' });
+        }
+
+        // 4. Update DB Session status
+        await pool.query(
+            "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, tx_hash = $2, authorized_at = NOW() WHERE id = $3",
+            [walletAddress.toLowerCase(), txHash, sessionId]
+        );
+
+        try {
+            const { logAction } = require('../utils/logger');
+            logAction(
+                'MULTISIG_CONFIRM',
+                `MultiSig Transaction confirmed on-chain by Genesis Admin (Tx Index: ${expectedTxIndex}).`,
+                walletAddress.toLowerCase(),
+                { tx_index: expectedTxIndex, tx_hash: txHash, type: 'sync_manual' }
+            );
+        } catch (e) {
+            console.error("Failed to log multisig confirm sync action:", e.message);
+        }
+
+        res.json({ success: true, txIndex: expectedTxIndex, txHash });
+    } catch (error) {
+        console.error('Remote confirm manual sync error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+// ================= REMOTE MULTISIG EXECUTION ==================
+
+// POST /api/governance/remote/execute/session
+router.post('/remote/execute/session', withDomain('GOVERNANCE'), requirePrivilege({ capability: 'GOV_REMOTE_INIT' }), withAction('GOV_REMOTE_INIT'), withMutation(), async (req, res) => {
+    try {
+        const { txIndex } = req.body;
+        if (txIndex === undefined) return res.status(400).json({ error: 'txIndex is required' });
+
+        const challenge = `BBSNS-GOV-EXECUTE-${txIndex}-${Math.random().toString(36).substring(2, 15)}`;
+        const expires_at = new Date(Date.now() + 15 * 60 * 1000);
+
+        const result = await pool.query(
+            "INSERT INTO remote_gov_sessions (proposal_id, challenge, expires_at, type, decision) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            [txIndex, challenge, expires_at, 'EXECUTE', 'approve']
+        );
+
+        res.json({ sessionId: result.rows[0].id });
+    } catch (error) {
+        console.error('Remote execute session error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// GET /api/governance/remote/execute/status/:sessionId
+router.get('/remote/execute/status/:sessionId', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_STATUS', allowPublic: true }), async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        if (!isValidUUID(sessionId)) return res.status(400).json({ error: 'Invalid session ID format' });
+
+        const result = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'EXECUTE'", [sessionId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+        const session = result.rows[0];
+        if (session.status === 'pending' && new Date(session.expires_at) < new Date()) {
+            await pool.query("UPDATE remote_gov_sessions SET status = 'expired' WHERE id = $1", [sessionId]);
+            return res.json({ status: 'expired' });
+        }
+
+        res.json({
+            status: session.status,
+            challenge: session.challenge,
+            txIndex: session.proposal_id,
+            wallet_address: session.wallet_address,
+            txHash: session.tx_hash
+        });
+    } catch (error) {
+        console.error('Remote execute status error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /api/governance/remote/execute/sync-manual - Confirm direct blockchain execution transaction by Admin
+router.post('/remote/execute/sync-manual', withDomain('GOVERNANCE'), allowPublic, requirePrivilege({ capability: 'GOV_REMOTE_AUTHORIZE', allowPublic: true }), withAction('GOV_REMOTE_AUTHORIZE'), withMutation(), async (req, res) => {
+    try {
+        const { sessionId, txHash, walletAddress } = req.body;
+
+        if (!sessionId || !txHash || !walletAddress) {
+            return res.status(400).json({ error: 'sessionId, txHash, and walletAddress are required' });
+        }
+
+        // 1. Verify Session
+        const sessionResult = await pool.query("SELECT * FROM remote_gov_sessions WHERE id = $1 AND type = 'EXECUTE'", [sessionId]);
+        if (sessionResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const session = sessionResult.rows[0];
+
+        if (session.status !== 'pending') {
+            if (session.status === 'authorized') return res.json({ success: true, txHash: session.tx_hash });
+            return res.status(400).json({ error: `Session is already ${session.status}` });
+        }
+
+        // 2. Verify Transaction on Chain
+        let eventVerified = false;
+        const expectedTxIndex = session.proposal_id; // For EXECUTE session, proposal_id stores txIndex
+        const artifact = require("../artifacts/BBSNSMultiSig.json");
+        const provider = await ProviderService.getProvider();
+
+        if (txHash === 'already_executed_onchain' || txHash === 'already_confirmed_onchain') {
+            try {
+                const config = await ConfigService.getConfig();
+                const multisigAddress = config?.contracts?.multisig;
+                const multisigContract = new ethers.Contract(multisigAddress, artifact.abi, provider);
+                const onChainTxInfo = await multisigContract.getTransaction(expectedTxIndex);
+                if (onChainTxInfo && onChainTxInfo.executed) {
+                    eventVerified = true;
+                }
+            } catch (e) {
+                console.warn('[REMOTE_EXECUTE_SELF_HEAL_WARN]', e.message);
+            }
+        } else {
+            const receipt = await provider.getTransactionReceipt(txHash);
+
+            if (!receipt) {
+                return res.status(400).json({ error: 'Transaction receipt not found. Please wait for confirmation.' });
+            }
+
+            if (receipt.status !== 1) {
+                return res.status(400).json({ error: 'Blockchain transaction failed on-chain.' });
+            }
+
+            // 3. Verify execution event or state
+            const iface = new ethers.Interface(artifact.abi);
+
+            for (const log of receipt.logs) {
+                try {
+                    const parsed = iface.parseLog(log);
+                    if (parsed.name === 'Execution' || parsed.name === 'TransactionExecuted') {
+                        const eventTxIndex = Number(parsed.args.txIndex);
+                        if (eventTxIndex === expectedTxIndex) {
+                            eventVerified = true;
+                            break;
+                        }
+                    }
+                } catch (e) { }
+            }
+        }
+
+        // Self-healing: double check contract execution state directly
+        try {
+            const config = await ConfigService.getConfig();
+            const multisigAddress = config?.contracts?.multisig;
+            const multisigContract = new ethers.Contract(multisigAddress, artifact.abi, provider);
+            const onChainTxInfo = await multisigContract.getTransaction(expectedTxIndex);
+            if (onChainTxInfo && onChainTxInfo.executed) {
+                eventVerified = true;
+            }
+        } catch (e) {
+            console.warn('[REMOTE_EXECUTE_SELF_HEAL_WARN]', e.message);
+        }
+
+        if (!eventVerified) {
+            return res.status(400).json({ error: 'Transaction Execution event not found in logs for this txIndex.' });
+        }
+
+        // 4. Update Database Governance Proposal to executed if it exists
+        try {
+            const propRes = await pool.query(
+                "SELECT * FROM governance_proposals WHERE on_chain_tx_index = $1",
+                [expectedTxIndex]
+            );
+            if (propRes.rows.length > 0) {
+                const proposal = propRes.rows[0];
+                await pool.query(
+                    `UPDATE governance_proposals 
+                     SET status = 'executed', 
+                         executed_at = NOW(), 
+                         executed_by = (SELECT id FROM users WHERE LOWER(wallet_address) = $1 LIMIT 1), 
+                         execution_tx_hash = $2 
+                     WHERE id = $3`,
+                    [walletAddress.toLowerCase(), txHash, proposal.id]
+                );
+
+                // Synchronize DB user role
+                try {
+                    if (proposal.type === 'add_admin_protocol' || proposal.type === 'add_admin_governance') {
+                        await pool.query("UPDATE users SET role = 'admin' WHERE id::text = $1 OR wallet_address = $2", [proposal.target_id, proposal.target_id.toLowerCase()]);
+                    } else if (proposal.type === 'add_notary' || proposal.type === 'NOTARY_PROMOTION') {
+                        await pool.query("UPDATE users SET role = 'notary' WHERE id::text = $1 OR wallet_address = $2", [proposal.target_id, proposal.target_id.toLowerCase()]);
+                    } else if (proposal.type === 'remove_admin' || proposal.type === 'remove_notary') {
+                        await pool.query("UPDATE users SET role = 'owner' WHERE id::text = $1 OR wallet_address = $2", [proposal.target_id, proposal.target_id.toLowerCase()]);
+                    }
+                } catch (roleErr) {
+                    console.warn(`[SELF_HEAL_ROLE_ERR] Failed to sync role for proposal ${proposal.id}:`, roleErr.message);
+                }
+
+                // Write audit log
+                try {
+                    await pool.query(
+                        `INSERT INTO audit_logs (action, details, created_at) 
+                         VALUES ('GOVERNANCE_EXECUTED', $1, NOW())`,
+                        [JSON.stringify({ proposalId: proposal.id, type: proposal.type, target_id: proposal.target_id, executedBy: walletAddress, txHash })]
+                    );
+                    
+                    const { logAction } = require('../utils/logger');
+                    logAction(
+                        'MULTISIG_EXECUTE',
+                        `MultiSig Transaction executed on-chain by Genesis Admin (Tx Index: ${expectedTxIndex}, Proposal ID: ${proposal.id}).`,
+                        walletAddress.toLowerCase(),
+                        { proposal_id: proposal.id, tx_index: expectedTxIndex, tx_hash: txHash, type: 'sync_manual' }
+                    );
+                } catch (auditErr) {
+                    console.warn(`[REMOTE_EXECUTE_AUDIT_WARN] Audit log write failed:`, auditErr.message);
+                }
+            }
+        } catch (dbErr) {
+            console.error('[REMOTE_EXECUTE_SYNC_DB_ERR]', dbErr.message);
+        }
+
+        // 5. Update DB Session status
+        await pool.query(
+            "UPDATE remote_gov_sessions SET status = 'authorized', wallet_address = $1, tx_hash = $2, authorized_at = NOW() WHERE id = $3",
+            [walletAddress.toLowerCase(), txHash, sessionId]
+        );
+
+        res.json({ success: true, txIndex: expectedTxIndex, txHash });
+    } catch (error) {
+        console.error('Remote execute manual sync error:', error);
+        res.status(500).json({ error: error.message || 'Internal server error' });
+    }
+});
+
+
 
 // POST /api/governance/proposals/:id/execute
 // Blockchain-First Atomic Execution with Idempotency and Confirmed-Receipt DB Sync
@@ -1030,12 +1621,7 @@ router.post(
 
         const { type, target_id } = proposal;
 
-        // ─── STEP 2: Classify Action & Encode On-Chain Call Data ─────────────────
-        // The BBSNSMultiSig enforces that addSigner/removeSigner/changeThreshold
-        // can ONLY be called by the contract itself (self-call guard).
-        // Therefore: we submit a MultiSig transaction whose `data` encodes the
-        // privileged call, then executeTransaction() triggers the self-call.
-
+        // ─── STEP 2: Setup Blockchain Connection and Interfaces ─────────────────
         const artifactPath = path.join(__dirname, "../artifacts/BBSNSMultiSig.json");
         const artifact = require(artifactPath);
 
@@ -1053,30 +1639,82 @@ router.post(
             return res.status(503).json({ error: `Blockchain connection failed: ${connErr.message}` });
         }
 
-        // ─── STEP 3: Build Encoded Call Data Per Proposal Type ───────────────────
         const multisigIface = new ethers.Interface(artifact.abi);
-        let encodedData;
+
+        // ─── STEP 3: Build Encoded Call Data Per Proposal Type ───────────────────
+        const operations = [];
         let isOffChainOnly = false;
 
         try {
             switch (type) {
-                case 'add_admin':
+                case 'add_admin_protocol': {
+                    const notaryRegistryArtifact = require(path.join(__dirname, "../artifacts/NotaryRegistry.json"));
+                    const notaryRegistryIface = new ethers.Interface(notaryRegistryArtifact.abi);
+                    operations.push({
+                        target: config.contracts.notaryRegistry,
+                        data: notaryRegistryIface.encodeFunctionData("promoteToAdmin", [target_id]),
+                        description: `NotaryRegistry.promoteToAdmin(${target_id})`
+                    });
+                    break;
+                }
+                
+                case 'add_admin_governance': {
+                    operations.push({
+                        target: multisigAddress,
+                        data: multisigIface.encodeFunctionData("addSigner", [target_id]),
+                        description: `BBSNSMultiSig.addSigner(${target_id})`
+                    });
+                    break;
+                }
+
+                case 'remove_admin_protocol': {
+                    const notaryRegistryArtifact = require(path.join(__dirname, "../artifacts/NotaryRegistry.json"));
+                    const notaryRegistryIface = new ethers.Interface(notaryRegistryArtifact.abi);
+                    operations.push({
+                        target: config.contracts.notaryRegistry,
+                        data: notaryRegistryIface.encodeFunctionData("removeRole", [target_id]),
+                        description: `NotaryRegistry.removeRole(${target_id})`
+                    });
+                    break;
+                }
+                
+                case 'remove_admin_governance': {
+                    operations.push({
+                        target: multisigAddress,
+                        data: multisigIface.encodeFunctionData("removeSigner", [target_id]),
+                        description: `BBSNSMultiSig.removeSigner(${target_id})`
+                    });
+                    break;
+                }
+
                 case 'add_notary':
-                    // Encode addSigner(address) call to be executed via the multisig self-call
-                    encodedData = multisigIface.encodeFunctionData("addSigner", [target_id]);
+                case 'NOTARY_PROMOTION': // BUG-C fix: legacy uppercase alias
+                    operations.push({
+                        target: multisigAddress,
+                        data: multisigIface.encodeFunctionData("addSigner", [target_id]),
+                        description: `BBSNSMultiSig.addSigner(${target_id})`
+                    });
                     break;
 
-                case 'remove_admin':
                 case 'remove_notary':
-                    encodedData = multisigIface.encodeFunctionData("removeSigner", [target_id]);
+                    operations.push({
+                        target: multisigAddress,
+                        data: multisigIface.encodeFunctionData("removeSigner", [target_id]),
+                        description: `BBSNSMultiSig.removeSigner(${target_id})`
+                    });
                     break;
 
-                case 'change_threshold':
+                case 'change_threshold': {
                     const newThreshold = parseInt(target_id, 10);
                     if (isNaN(newThreshold) || newThreshold < 1)
                         return res.status(400).json({ error: "Invalid threshold value in target_id." });
-                    encodedData = multisigIface.encodeFunctionData("changeThreshold", [newThreshold]);
+                    operations.push({
+                        target: multisigAddress,
+                        data: multisigIface.encodeFunctionData("changeThreshold", [newThreshold]),
+                        description: `BBSNSMultiSig.changeThreshold(${newThreshold})`
+                    });
                     break;
+                }
 
                 case 'ban_user':
                 case 'unban_user':
@@ -1097,73 +1735,77 @@ router.post(
         let onChainSuccess = false;
 
         if (!isOffChainOnly) {
-            console.log(`[GOV_EXECUTE] Submitting on-chain tx for proposal ${proposalId}, type=${type}`);
+            console.log(`[GOV_EXECUTE] Submitting ${operations.length} on-chain txs for proposal ${proposalId}, type=${type}`);
             try {
                 const proposalHash = ethers.id(`${proposal.title}-${proposal.created_at}`);
 
-                // Submit the encoded call as a multisig transaction targeting the multisig itself
-                const submitTx = await multisigContract.submitTransaction(
-                    multisigAddress,   // target: the multisig itself (self-call)
-                    0,                 // value: 0 ETH
-                    encodedData,       // encoded function call
-                    proposalHash       // governance reference hash
-                );
+                for (let index = 0; index < operations.length; index++) {
+                    const op = operations[index];
+                    console.log(`[GOV_EXECUTE] Running dual-tx step ${index + 1}/${operations.length}: ${op.description}`);
 
-                console.log(`[GOV_EXECUTE] submitTransaction sent, waiting for receipt... txHash=${submitTx.hash}`);
-                const submitReceipt = await submitTx.wait(); // Wait for confirmation
-                txHash = submitReceipt.hash;
+                    const submitTx = await multisigContract.submitTransaction(
+                        op.target,
+                        0,
+                        op.data,
+                        proposalHash
+                    );
 
-                // Parse the TransactionSubmitted event to get the txIndex
-                let txIndex;
-                for (const log of submitReceipt.logs) {
-                    try {
-                        const parsed = multisigIface.parseLog(log);
-                        if (parsed && parsed.name === 'TransactionSubmitted') {
-                            txIndex = Number(parsed.args.txIndex);
-                            break;
-                        }
-                    } catch (_) {}
+                    console.log(`[GOV_EXECUTE] submitTransaction sent, waiting for receipt... txHash=${submitTx.hash}`);
+                    const submitReceipt = await submitTx.wait();
+                    txHash = submitReceipt.hash;
+
+                    // Parse the TransactionSubmitted event to get the txIndex
+                    let txIndex;
+                    for (const log of submitReceipt.logs) {
+                        try {
+                            const parsed = multisigIface.parseLog(log);
+                            if (parsed && parsed.name === 'TransactionSubmitted') {
+                                txIndex = Number(parsed.args.txIndex);
+                                break;
+                            }
+                        } catch (_) {}
+                    }
+
+                    if (txIndex === undefined)
+                        throw new Error(`TransactionSubmitted event not found in receipt for step ${index + 1}.`);
+
+                    console.log(`[GOV_EXECUTE] Submitted at txIndex=${txIndex}. Now executing...`);
+
+                    const execTx = await multisigContract.executeTransaction(txIndex);
+                    console.log(`[GOV_EXECUTE] executeTransaction sent, waiting for receipt... txHash=${execTx.hash}`);
+                    const execReceipt = await execTx.wait();
+                    txHash = execReceipt.hash;
                 }
 
-                if (txIndex === undefined)
-                    throw new Error("TransactionSubmitted event not found in receipt. Cannot get txIndex.");
-
-                console.log(`[GOV_EXECUTE] Submitted at txIndex=${txIndex}. Now executing...`);
-
-                // Execute the transaction (this triggers the self-call inside the contract)
-                const execTx = await multisigContract.executeTransaction(txIndex);
-                console.log(`[GOV_EXECUTE] executeTransaction sent, waiting for receipt... txHash=${execTx.hash}`);
-                const execReceipt = await execTx.wait(); // ← CONFIRMED RECEIPT REQUIRED
-                txHash = execReceipt.hash;
-
                 onChainSuccess = true;
-                console.log(`[GOV_EXECUTE] ✅ On-chain execution confirmed. txHash=${txHash}`);
+                console.log(`[GOV_EXECUTE] ✅ All ${operations.length} on-chain executions confirmed. txHash=${txHash}`);
 
                 // 🛡️ [Hardening] VERIFY_PROTOCOL_REALITY - Do not return success until role is truly changed on-chain
-                if (type === 'NOTARY_PROMOTION' || type === 'add_notary') {
+                if (type === 'NOTARY_PROMOTION' || type === 'add_notary' || type === 'add_admin') {
                     const targetWallet = (target_id || "").startsWith('0x') ? target_id : null;
                     if (targetWallet) {
-                        console.log(`[GOV_EXECUTE] 🔍 Polling for protocol role update for ${targetWallet}...`);
-                        const ConfigService = require('../services/config.service');
-                        const config = await ConfigService.getConfig();
+                        const expectedRole = type === 'add_admin' ? 3 : 2;
+                        console.log(`[GOV_EXECUTE] 🔍 Polling for protocol role update for ${targetWallet}... Expected: ${expectedRole}`);
+                        const verifyProvider = await ProviderService.getProvider();
+                        const verifyConfig = await ConfigService.getConfig();
                         const registry = new ethers.Contract(
-                            config.contracts.notaryRegistry,
+                            verifyConfig.contracts.notaryRegistry,
                             ["function getUserRole(address) view returns (uint8)"],
-                            provider
+                            verifyProvider
                         );
 
                         let verified = false;
                         for (let i = 0; i < 10; i++) { // Max 30 seconds (10 * 3s)
                             const role = await registry.getUserRole(targetWallet);
-                            if (Number(role) === 2) {
+                            if (Number(role) === expectedRole) {
                                 verified = true;
-                                console.log(`[GOV_EXECUTE] 📡 Protocol role verified: NOTARY (2) ✅`);
+                                console.log(`[GOV_EXECUTE] 📡 Protocol role verified: ${type === 'add_admin' ? 'ADMIN (3)' : 'NOTARY (2)'} ✅`);
                                 break;
                             }
                             console.log(`[GOV_EXECUTE] ... Attempt ${i+1}: Role is ${role}. Waiting...`);
                             await new Promise(resolve => setTimeout(resolve, 3000));
                         }
-                        
+
                         if (!verified) {
                             console.warn(`[GOV_EXECUTE] ⚠️ Execution confirmed but protocol state still lagging after 30s.`);
                         }
@@ -1171,8 +1813,16 @@ router.post(
                 }
 
             } catch (chainErr) {
-                // TX FAILED: Leave proposal status as 'passed', do NOT update DB
                 console.error(`[GOV_EXECUTE] ❌ On-chain execution failed for proposal ${proposalId}:`, chainErr.message);
+                try {
+                    const { logAction } = require('../utils/logger');
+                    logAction(
+                        'MULTISIG_EXECUTE_FAIL',
+                        `MultiSig Proposal execution failed on-chain: ${chainErr.message}`,
+                        req.actor?.email || 'admin',
+                        { proposal_id: proposalId, type: type, error: chainErr.message }
+                    );
+                } catch (e) {}
                 return res.status(500).json({
                     error: `On-chain execution failed. Proposal remains in 'passed' state and can be retried.`,
                     details: chainErr.message,
@@ -1195,9 +1845,10 @@ router.post(
 
                     // Apply DB mutation based on type
                     switch (type) {
-                        case 'add_admin':
+                        case 'add_admin_protocol':
+                        case 'add_admin_governance':
                             await dbClient.query(
-                                "UPDATE users SET role = 'admin' WHERE id = $1 OR wallet_address = $2",
+                                "UPDATE users SET role = 'admin' WHERE id::text = $1 OR wallet_address = $2",
                                 [target_id, target_id.toLowerCase()]
                             );
                             break;
@@ -1210,13 +1861,13 @@ router.post(
                             break;
                         case 'remove_admin':
                             await dbClient.query(
-                                "UPDATE users SET role = 'owner' WHERE id = $1 OR wallet_address = $2",
+                                "UPDATE users SET role = 'owner' WHERE id::text = $1 OR wallet_address = $2",
                                 [target_id, target_id.toLowerCase()]
                             );
                             break;
                         case 'remove_notary':
                             await dbClient.query(
-                                "UPDATE users SET role = 'owner', identity_state = 'INACTIVE' WHERE id = $1 OR wallet_address = $2",
+                                "UPDATE users SET role = 'owner', identity_state = 'INACTIVE' WHERE id::text = $1 OR wallet_address = $2",
                                 [target_id, target_id.toLowerCase()]
                             );
                             break;
@@ -1289,6 +1940,18 @@ router.post(
                     status: "confirmed",
                     txHash
                 });
+            }
+
+            try {
+                const { logAction } = require('../utils/logger');
+                logAction(
+                    'MULTISIG_EXECUTE',
+                    `MultiSig Proposal executed successfully on-chain: "${proposal.title}" (Prop ID: ${proposalId}).`,
+                    req.actor?.email || 'admin',
+                    { proposal_id: proposalId, type, tx_hash: txHash }
+                );
+            } catch (e) {
+                console.error("Failed to log multisig execute action:", e.message);
             }
 
             return res.json({

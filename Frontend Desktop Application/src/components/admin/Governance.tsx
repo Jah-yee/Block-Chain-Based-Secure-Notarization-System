@@ -34,6 +34,7 @@ import { Textarea } from "../ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { toast } from "sonner"
 import api from "../../services/api";
+import { ethers } from "ethers";
 
 interface Proposal {
     id: number
@@ -43,7 +44,7 @@ interface Proposal {
     target_id: string
     proposer_id: number
     proposer_name: string
-    status: 'active' | 'passed' | 'rejected' | 'executed' | 'cancelled'
+    status: 'active' | 'passed' | 'rejected' | 'executed' | 'cancelled' | 'expired'
     approvals: number
     rejections: number
     my_vote: 'approve' | 'reject' | null
@@ -136,6 +137,7 @@ interface SystemSettings {
     threshold: number
     timelockDelay: number
     signers: string[]
+    signerNames?: Record<string, string>
     adminCount?: number
 }
 
@@ -288,16 +290,24 @@ export function Governance({ role, user }: GovernanceProps) {
                 
                 const enriched = proposalsArray.map((p: any) => {
                     if (!p) return p;
+                    let newStatus = p.status;
+                    const ageMs = Date.now() - new Date(p.created_at).getTime();
+                    const durationMs = (p.duration_hours || 168) * 3600000;
+                    if (p.status === 'active' && ageMs > durationMs) {
+                        newStatus = 'unsettled';
+                    }
+                    
                     const tx = txArray.find((t: any) => t.index === p.on_chain_tx_index)
                     if (tx) {
                         return {
                             ...p,
+                            status: newStatus,
                             on_chain_submission_time: tx.submissionTime,
                             on_chain_confirmations: tx.numConfirmations,
                             on_chain_executed: tx.executed
                         }
                     }
-                    return p
+                    return { ...p, status: newStatus }
                 })
                 setProposals(enriched)
             } catch (e) {
@@ -346,58 +356,20 @@ export function Governance({ role, user }: GovernanceProps) {
         }
     }
 
-    const handleCreateProposal = async () => {
-        if (!formData.title || !formData.target_id) {
-            toast.error("Please provide a title and target ID for the proposal.")
-            return
-        }
-
-        setIsCreating(true)
+    const submitSingleProposal = async (proposalData: any) => {
+        let cleanId: number | null = null;
         try {
-            // 1. Create DB Proposal
             const proposal = await api.createProposal({
-                ...formData,
+                ...proposalData,
                 target_notaries: targetNotaries
-            })
-            toast.success("Proposal drafted! Initializing on-chain submission...")
+            });
+            cleanId = proposal.id;
 
-            const cleanId = proposal.id; // DB ID
+            const session = await api.request('/api/governance/remote/submit/session', {
+                method: 'POST',
+                body: JSON.stringify({ proposalId: cleanId })
+            });
 
-            // 2. Prepare On-Chain Data & Handle Signing
-            // @ts-ignore
-            if (window.ethereum) {
-                const prepData = await api.prepareProposalOnChain(cleanId);
-
-                // 3. User Sign (EIP-712 Submit)
-                // @ts-ignore
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                // @ts-ignore
-                const signature = await window.ethereum.request({
-                    method: "eth_signTypedData_v4",
-                    params: [accounts[0], JSON.stringify({
-                        domain: prepData.domain,
-                        types: prepData.types,
-                        primaryType: "Submit",
-                        message: prepData.message
-                    })],
-                });
-
-                // 4. Relay Signature
-                await api.submitProposalOnChain(cleanId, signature);
-                toast.success("Proposal submitted to Multi-Sig On-Chain!");
-                setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
-                fetchProposals()
-            } else {
-                // 🛡️ [REMOTE_FALLBACK] Handle creation via remote handshake
-                console.log("[GOV] No local wallet. Starting Remote Submit Handshake...");
-                toast.info("Wallet audit required. Opening secure bridge...");
-
-                const session = await api.request('/api/governance/remote/submit/session', {
-                    method: 'POST',
-                    body: JSON.stringify({ proposalId: cleanId })
-                });
-
-                // Get Config and Open Browser
                 const configRes = await api.getSystemConfig();
                 const baseAuthUrl = (configRes.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
                 const webAppUrl = `${baseAuthUrl}/?mode=gov-submit&sessionId=${session.sessionId}`;
@@ -410,65 +382,112 @@ export function Governance({ role, user }: GovernanceProps) {
                     window.open(webAppUrl, '_blank');
                 }
 
-                // Poll for completion
-                let pollCount = 0;
-                const pollInterval = setInterval(async () => {
-                    pollCount++;
-                    try {
-                        const status = await api.request(`/api/governance/remote/submit/status/${session.sessionId}`);
-                        if (status.status === 'authorized') {
-                            clearInterval(pollInterval);
-                            toast.success("Governance submission authorized!");
-                            setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
-                            fetchProposals();
-                            setIsCreating(false);
-                        } else if (status.status === 'failed' || pollCount > 60) {
-                            clearInterval(pollInterval);
-                            toast.error("Submission handshake failed or timed out.");
-                            setIsCreating(false);
+                return new Promise((resolve, reject) => {
+                    let pollCount = 0;
+                    const pollInterval = setInterval(async () => {
+                        pollCount++;
+                        try {
+                            const status = await api.request(`/api/governance/remote/submit/status/${session.sessionId}`);
+                            if (status.status === 'authorized') {
+                                clearInterval(pollInterval);
+                                resolve({ success: true });
+                            } else if (status.status === 'failed' || status.status === 'expired' || pollCount > 60) {
+                                clearInterval(pollInterval);
+                                reject(new Error("Submission handshake failed or timed out."));
+                            }
+                        } catch (e) {
+                            console.error("Submit Poll Error:", e);
                         }
-                    } catch (e) {
-                        console.error("Submit Poll Error:", e);
+                    }, 2000);
+                }).catch(async (e) => {
+                    if (cleanId) {
+                        try { await api.request(`/api/governance/proposals/${cleanId}`, { method: 'DELETE' }); } catch (cleanupErr) {}
                     }
-                }, 2000);
-                
-                // Return early so finally doesn't set isCreating(false) immediately
-                return;
+                    throw e;
+                });
+        } catch (err: any) {
+            if (cleanId) {
+                try { await api.request(`/api/governance/proposals/${cleanId}`, { method: 'DELETE' }); } catch (cleanupErr) {}
             }
+            throw err;
+        }
+    }
+
+    const handleCreateProposal = async () => {
+        if (!formData.title || !formData.target_id) {
+            toast.error("Please provide a title and target ID for the proposal.")
+            return
+        }
+
+        setIsCreating(true)
+        try {
+            toast.success("Proposal drafted! Initializing on-chain submission...");
+            await submitSingleProposal(formData);
+            toast.success("Proposal submitted to Multi-Sig On-Chain!");
+            
+            setFormData({ ...formData, title: "", description: "", target_id: "", duration_hours: "168" })
+            fetchProposals()
         } catch (err: any) {
             console.error(err);
             toast.error(err.message || "Failed to submit proposal chain-side")
         } finally {
             // @ts-ignore
             if (window.ethereum) setIsCreating(false)
+            else setIsCreating(false)
         }
     }
 
     const handleVote = async (proposalId: number, decision: 'approve' | 'reject') => {
         setIsVoting(proposalId)
         try {
+            if (decision === 'reject') {
+                // Gasless off-chain rejection
+                await api.request(`/api/governance/proposals/${proposalId}/reject`, {
+                    method: 'POST'
+                });
+                toast.success("Rejection vote registered off-chain successfully.");
+                fetchProposals();
+                setIsVoting(null);
+                return;
+            }
+
+            // Find the proposal
+            const prop = proposals.find(p => p.id === proposalId);
+            if (!prop) {
+                throw new Error("Proposal not found.");
+            }
+
             // 1. Check for Local Wallet (MetaMask)
             // @ts-ignore
             if (window.ethereum) {
-                const now = Date.now();
-                const message = `BBSNS Governance Vote\nProposal ID: ${proposalId}\nDecision: ${decision}\nTimestamp: ${now}`
-                // @ts-ignore
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
-                // @ts-ignore
-                const signature = await window.ethereum.request({
-                    method: 'personal_sign',
-                    params: [message, accounts[0]]
-                })
-
-                // Submit to Backend
-                const data = await api.voteOnProposal(proposalId, decision, signature, now)
-                if (data.executed) {
-                    toast.success("Proposal Executed! The threshold was met.")
-                } else {
-                    toast.success("Vote recorded successfully")
+                if (prop.on_chain_tx_index === null || prop.on_chain_tx_index === undefined) {
+                    throw new Error("This proposal does not have an on-chain transaction index.");
                 }
-                fetchProposals()
-                setIsVoting(null)
+
+                const contractAddress = systemSettings?.address || "";
+                if (!contractAddress) {
+                    throw new Error("Multi-Sig contract address is not configured.");
+                }
+
+                // @ts-ignore
+                const provider = new ethers.BrowserProvider(window.ethereum);
+                const signer = await provider.getSigner();
+                const contract = new ethers.Contract(contractAddress, ["function confirmTransaction(uint256 txIndex)"], signer);
+
+                toast.info("Submitting transaction on-chain via MetaMask...");
+                const txCall = await contract.confirmTransaction(prop.on_chain_tx_index);
+                toast.info("Transaction submitted. Waiting for on-chain block confirmation...");
+                await txCall.wait();
+
+                // Synchronize database
+                await api.request(`/api/governance/proposals/${proposalId}/approve`, {
+                    method: 'POST',
+                    body: JSON.stringify({ txHash: txCall.hash })
+                });
+
+                toast.success("Approval cast and synchronized on-chain successfully!");
+                fetchProposals();
+                setIsVoting(null);
                 return;
             }
 
@@ -495,10 +514,12 @@ export function Governance({ role, user }: GovernanceProps) {
             // 3. Polling for Completion
             let pollCount = 0;
             const pollMax = 60; // 2 minutes max
+            let consecutiveErrors = 0;
             const pollInterval = setInterval(async () => {
                 pollCount++;
                 try {
                     const status = await api.request(`/api/governance/remote/vote/status/${session.sessionId}`);
+                    consecutiveErrors = 0;
                     if (status.status === 'authorized') {
                         clearInterval(pollInterval);
                         toast.success("Audit handshake complete. Vote recorded.");
@@ -515,8 +536,17 @@ export function Governance({ role, user }: GovernanceProps) {
                     }
                 } catch (e) {
                     console.error("Poll Error:", e);
+                    consecutiveErrors++;
+                    if (consecutiveErrors >= 5) {
+                        clearInterval(pollInterval);
+                        toast.error("Network communication lost. Handshake terminated.");
+                        setIsVoting(null);
+                    }
                 }
             }, 2000);
+
+            // Stop polling after 10 minutes (safety)
+            setTimeout(() => clearInterval(pollInterval), 10 * 60 * 1000);
 
         } catch (err: any) {
             toast.error(err.message || "Failed to submit vote")
@@ -566,7 +596,7 @@ export function Governance({ role, user }: GovernanceProps) {
     if (selectedProposal) {
 
         return (
-            <div className="flex-1 flex flex-col min-h-0 bg-background">
+            <div className="flex-1 flex flex-col min-h-0 h-full bg-background overflow-hidden">
                 <div className="flex-none p-8 pt-12 pb-2">
                     <Button
                         variant="ghost"
@@ -597,7 +627,8 @@ export function Governance({ role, user }: GovernanceProps) {
                                 <div className="flex gap-2">
                                     <Badge variant="outline" className={`capitalize py-1 px-3 rounded-md font-bold text-[10px] tracking-widest ${selectedProposal.status === 'executed' ? 'bg-primary/10 text-primary border-primary/20' :
                                         selectedProposal.status === 'active' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                                            'bg-muted text-muted-foreground border-border'
+                                            selectedProposal.status === 'expired' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse' :
+                                                'bg-muted text-muted-foreground border-border'
                                         }`}>
                                         {selectedProposal.status}
                                     </Badge>
@@ -652,18 +683,27 @@ export function Governance({ role, user }: GovernanceProps) {
                                 <p className="text-sm text-muted-foreground leading-relaxed italic">
                                     "{selectedProposal.description}"
                                 </p>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="bg-primary/5 border border-primary/10 p-6 rounded-2xl text-center">
-                                    <div className="text-4xl font-black text-primary">
-                                        {selectedProposal.approvals} <span className="text-sm text-primary/40">/ {selectedProposal.threshold || 2}</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
+                                    <div className="bg-primary/5 border border-primary/10 p-6 rounded-2xl text-center">
+                                        <div className="text-4xl font-black text-primary">
+                                            {isSingleAdmin ? "100%" : (
+                                                (() => {
+                                                    const actualApprovals = selectedProposal.participation_scope === 'admin' ? Math.max(selectedProposal.approvals || 0, selectedProposal.on_chain_confirmations || 0) : (selectedProposal.approvals || 0);
+                                                    const totalVotes = actualApprovals + (selectedProposal.rejections || 0);
+                                                    return totalVotes === 0
+                                                        ? <span className="text-muted-foreground text-2xl">No Votes</span>
+                                                        : `${actualApprovals} / ${totalVotes}`;
+                                                })()
+                                            )}
+                                        </div>
+                                        <div className="text-[10px] uppercase tracking-widest text-primary/40 font-black mt-1">
+                                            {isSingleAdmin ? "Authoritative Quorum" : "Voted for Approval"}
+                                        </div>
                                     </div>
-                                    <div className="text-[10px] uppercase tracking-widest text-primary/40 font-black mt-1">Confirmed Approvals</div>
-                                </div>
-                                <div className="bg-rose-500/5 border border-rose-500/10 p-6 rounded-2xl text-center">
-                                    <div className="text-4xl font-black text-rose-400">{selectedProposal.rejections}</div>
-                                    <div className="text-[10px] uppercase tracking-widest text-rose-500/40 font-black mt-1">Network Rejections</div>
+                                    <div className="bg-rose-500/5 border border-rose-500/10 p-6 rounded-2xl text-center">
+                                        <div className="text-4xl font-black text-rose-400">{selectedProposal.rejections || 0}</div>
+                                        <div className="text-[10px] uppercase tracking-widest text-rose-500/40 font-black mt-1">Voted for Rejection</div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -707,7 +747,19 @@ export function Governance({ role, user }: GovernanceProps) {
                         <CardFooter className="flex flex-col gap-4 pt-4 pb-8 px-8 border-t border-border/50 mt-4">
                             {selectedProposal.status === 'active' ? (
                                 <>
-                                    {selectedProposal.my_vote ? (
+                                    {user?.id && selectedProposal.proposer_id === user.id && selectedProposal.on_chain_tx_index !== null && selectedProposal.on_chain_tx_index !== undefined ? (
+                                        <div className="w-full p-4 rounded-2xl border border-primary/20 bg-primary/5 flex flex-col items-center justify-center space-y-2 animate-in zoom-in-95 duration-300">
+                                            <div className="flex items-center space-x-2">
+                                                <CheckCircle2 className="h-5 w-5 text-primary" />
+                                                <span className="font-black uppercase tracking-widest text-sm text-primary">
+                                                    Approval Implied
+                                                </span>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground uppercase font-bold opacity-60 text-center">
+                                                You proposed this action. Your signature is authoritative and implied.
+                                            </p>
+                                        </div>
+                                    ) : selectedProposal.my_vote ? (
                                         <div className={`w-full p-4 rounded-2xl border flex flex-col items-center justify-center space-y-2 animate-in zoom-in-95 duration-300 ${selectedProposal.my_vote === 'approve'
                                             ? 'bg-primary/10 border-primary/30'
                                             : 'bg-rose-500/10 border-rose-500/30'
@@ -842,7 +894,7 @@ export function Governance({ role, user }: GovernanceProps) {
                         {/* LEFT COLUMN: Status and Proposals */}
                         <div className="lg:col-span-2 space-y-8">
                             {systemSettings ? (
-                                <>
+                                <div className="space-y-8 flex flex-col">
                                     <GovernanceHealthWidget settings={systemSettings} />
                                     <div className="bg-card border border-border/50 rounded-2xl p-6 shadow-sm">
                                         <div className="flex items-center justify-between mb-6">
@@ -853,25 +905,40 @@ export function Governance({ role, user }: GovernanceProps) {
                                                 Immutable Governance Truth
                                             </Badge>
                                         </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => (
-                                                <Badge 
-                                                    key={i} 
-                                                    variant="secondary" 
-                                                    className="bg-primary/10 text-[10px] font-mono border-white/5 text-primary/70 selectable px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-all cursor-pointer relative"
-                                                    onClick={() => handleCopy(s, `signer-${i}`)}
-                                                >
-                                                    {(s || "").slice(0, 14)}...{(s || "").slice(-12)}
-                                                    {copiedId === `signer-${i}` && (
-                                                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-1.5 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded shadow-lg z-50">
-                                                            COPIED!
-                                                        </span>
-                                                    )}
-                                                </Badge>
-                                            ))}
+                                        <div className="space-y-3">
+                                            {(Array.isArray(systemSettings.signers) ? systemSettings.signers : []).map((s, i) => {
+                                                const signerName = (systemSettings.signerNames && systemSettings.signerNames[s.toLowerCase()]) || `${s.slice(0, 8)}...${s.slice(-6)}`;
+                                                return (
+                                                    <div 
+                                                        key={i} 
+                                                        className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-primary/5 border border-primary/10 hover:border-primary/20 rounded-xl transition-all duration-300 gap-3 group/signer cursor-pointer relative"
+                                                        onClick={() => handleCopy(s, `signer-${i}`)}
+                                                    >
+                                                        <div className="flex items-center space-x-3">
+                                                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary group-hover/signer:bg-primary group-hover/signer:text-white transition-all duration-300">
+                                                                <span className="text-xs font-black">{(i + 1)}</span>
+                                                            </div>
+                                                            <div>
+                                                                <h5 className="text-xs font-bold text-foreground group-hover/signer:text-primary transition-colors">{signerName}</h5>
+                                                                <code className="text-[10px] font-mono text-muted-foreground/60 select-all">{s.slice(0, 10)}...{s.slice(-8)}</code>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center space-x-2 shrink-0">
+                                                            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/10 text-[9px] font-black uppercase tracking-widest py-0.5 px-2">
+                                                                {i === 0 ? "Primary Signer" : `Co-Signer #${i}`}
+                                                            </Badge>
+                                                            {copiedId === `signer-${i}` ? (
+                                                                <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest animate-pulse">COPIED!</span>
+                                                            ) : (
+                                                                <span className="text-[9px] font-bold text-muted-foreground/30 opacity-0 group-hover/signer:opacity-100 transition-opacity">Click to copy</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
-                                </>
+                                </div>
                             ) : (
                                 <div className="bg-card border border-border/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center animate-pulse">
                                     <Loader2 className="h-8 w-8 animate-spin text-primary/40 mb-3" />
@@ -886,9 +953,9 @@ export function Governance({ role, user }: GovernanceProps) {
                                         <Gavel className="h-5 w-5 mr-3 text-primary" />
                                         Active Governance Quorum
                                     </h3>
-                                    {!isLoading && proposals.length > 0 && (
+                                    {!isLoading && proposals.filter(p => (p.status as string) !== 'expired' && (p.status as string) !== 'executed' && (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected').length > 0 && (
                                         <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px] font-black px-3">
-                                            {proposals.length} PENDING
+                                            {proposals.filter(p => (p.status as string) !== 'expired' && (p.status as string) !== 'executed' && (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected').length} PENDING
                                         </Badge>
                                     )}
                                 </div>
@@ -923,10 +990,10 @@ export function Governance({ role, user }: GovernanceProps) {
                                 <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground hidden sm:block">Approvals</span>
                             </div>
                             {/* Scrollable list */}
-                            <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: '400px' }}>
+                            <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: '250px' }}>
                                 <div className="divide-y divide-border/30">
                                     {proposals
-                                        .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected')
+                                        .filter(p => (p.status as string) !== 'cancelled' && (p.status as string) !== 'rejected' && (p.status as string) !== 'expired' && p.on_chain_tx_index !== null && p.on_chain_tx_index !== undefined)
                                         .map((prop) => (
                                         <div
                                             key={prop.id}
@@ -936,7 +1003,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                                 }`}
                                             onClick={() => setSelectedProposalId(prop.id)}
                                         >
-                                            <div className="flex items-center space-x-4 min-w-0">
+                                            <div className="flex items-center gap-4 min-w-0">
                                                 <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${selectedProposalId === prop.id
                                                     ? 'bg-primary/20 border-primary/30 text-primary'
                                                     : 'bg-muted/30 border-border/50 text-muted-foreground'
@@ -944,15 +1011,15 @@ export function Governance({ role, user }: GovernanceProps) {
                                                     <Gavel className="h-5 w-5" />
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="flex items-center space-x-2">
-                                                        <span className="text-[10px] font-black text-primary/40 shrink-0">#P{prop.id}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-[10px] font-black text-primary/40 shrink-0 mr-1.5">#P{prop.id}</span>
                                                         <h4 className="text-sm font-bold text-foreground truncate max-w-[300px] tracking-tight">{prop.title}</h4>
                                                     </div>
-                                                    <div className="flex items-center space-x-3 mt-1">
-                                                        <span className="text-[10px] font-bold text-muted-foreground/60 uppercase">
+                                                    <div className="flex items-center gap-3 mt-1">
+                                                        <span className="text-[10px] font-bold text-muted-foreground/60 uppercase mr-1.5">
                                                             {prop.type.replace('_', ' ')}
                                                         </span>
-                                                        <span className="h-1 w-1 rounded-full bg-border" />
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-border shrink-0 mr-1.5" />
                                                         <span className="text-[10px] font-medium text-muted-foreground/40">
                                                             {new Date(prop.created_at).toLocaleDateString()}
                                                         </span>
@@ -962,17 +1029,38 @@ export function Governance({ role, user }: GovernanceProps) {
 
                                             <div className="flex items-center space-x-6 shrink-0">
                                                 <div className="hidden sm:flex flex-col items-end space-y-1">
-                                                    <div className="flex items-center text-[11px] font-black text-foreground/80">
-                                                        <Users2 className="h-3 w-3 mr-1.5 text-primary/60" />
-                                                        {prop.approvals} <span className="mx-1 text-muted-foreground/30">/</span> {systemSettings?.threshold || prop.threshold || 2}
-                                                    </div>
-                                                    {prop.status === 'active' && (
-                                                        <div className="h-1 w-12 bg-muted rounded-full overflow-hidden">
-                                                            <div 
-                                                                className="h-full bg-primary transition-all duration-500" 
-                                                                style={{ width: `${Math.min(100, (prop.approvals / (systemSettings?.threshold || prop.threshold || 2)) * 100)}%` }}
-                                                            />
-                                                        </div>
+                                                    {isSingleAdmin ? (
+                                                        <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] font-black uppercase tracking-[0.1em] px-2 py-0.5">
+                                                            Authoritative
+                                                        </Badge>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex items-center text-[11px] font-black text-foreground/80">
+                                                                <Users2 className="h-3 w-3 mr-1.5 text-primary/60" />
+                                                                {(() => {
+                                                                    const actualApprovals = prop.participation_scope === 'admin' ? Math.max(prop.approvals || 0, prop.on_chain_confirmations || 0) : (prop.approvals || 0);
+                                                                    const tv = actualApprovals + (prop.rejections || 0);
+                                                                    return tv === 0
+                                                                        ? <span className="text-muted-foreground/40">No votes yet</span>
+                                                                        : <>{actualApprovals}<span className="mx-1 text-muted-foreground/30">/</span>{tv} approved</>;
+                                                                })()
+                                                                }
+                                                            </div>
+                                                            {prop.status === 'active' && (
+                                                                <div className="h-1 w-12 bg-muted rounded-full overflow-hidden">
+                                                                    {(() => {
+                                                                        const actualApprovals = prop.participation_scope === 'admin' ? Math.max(prop.approvals || 0, prop.on_chain_confirmations || 0) : (prop.approvals || 0);
+                                                                        const tv = actualApprovals + (prop.rejections || 0);
+                                                                        return (
+                                                                            <div 
+                                                                                className="h-full bg-primary transition-all duration-500" 
+                                                                                style={{ width: `${Math.min(100, (actualApprovals / Math.max(1, tv)) * 100)}%` }}
+                                                                            />
+                                                                        );
+                                                                    })()}
+                                                                </div>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
 
@@ -989,7 +1077,7 @@ export function Governance({ role, user }: GovernanceProps) {
 
             {/* RIGHT COLUMN: Action Panel */}
             {role === 'admin' && (
-                <div className="lg:col-span-1 sticky top-8">
+                <div className="lg:col-span-1 sticky top-8 mt-8 lg:mt-0" style={{ marginTop: '24px' }}>
                     <Card className="bg-card border border-border/50 shadow-2xl rounded-2xl overflow-hidden">
                         <CardHeader className="bg-muted/30 border-b border-border/50 pb-6">
                             <div className="flex items-center space-x-3">
@@ -1140,7 +1228,7 @@ export function Governance({ role, user }: GovernanceProps) {
                                 </div>
                             )}
                         </CardContent>
-                        <CardFooter className="pb-8">
+                        <CardFooter className="pb-8" style={{ marginTop: '20px' }}>
                             <Button
                                 className="w-full bg-primary hover:bg-emerald-400 !text-zinc-950 font-black h-14 shadow-2xl shadow-primary/20 rounded-xl transition-all uppercase tracking-widest text-xs"
                                 onClick={handleCreateProposal}

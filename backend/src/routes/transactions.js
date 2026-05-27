@@ -56,8 +56,8 @@ router.post('/', withDomain('TRANSACTIONS'), requirePrivilege({ capability: 'TX_
         const dbState = status === 'rejected' ? 'rejected' : 'submitted_to_blockchain';
 
         await pool.query(
-            'UPDATE documents SET submission_state = $1, approval_tx_hash = $2, updated_at = NOW() WHERE id = $3',
-            [dbState, insertRes.rows[0].tx_hash, document_id]
+            'UPDATE documents SET submission_state = $1, updated_at = NOW() WHERE id = $2',
+            [dbState, document_id]
         );
 
         res.status(201).json({

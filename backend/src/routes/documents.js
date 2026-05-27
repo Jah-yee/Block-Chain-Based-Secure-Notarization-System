@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
 const UX_CODES = require('../constants/ux-codes');
-const { requirePrivilege, ROLES, RISK_LEVELS, withGuestContext } = require('../middleware/actor');
+const { requirePrivilege, ROLES, RISK_LEVELS, allowPublic } = require('../middleware/actor');
 const { withDomain, withAction, withMutation } = require('../middleware/policy');
 const { uploadLimiter } = require('../middleware/rate-limit');
 // requireSystemActivated purged
@@ -528,9 +528,11 @@ router.get('/:id/certificate', withDomain('DOCS'), requirePrivilege({ capability
       SELECT d.id, d.filename, d.title, d.file_hash, d.submission_state, d.chain_confirmed,
              d.approval_tx_hash, d.tx_hash, d.tx_status, d.notary_id, d.created_at,
              d.status_updated_at, d.updated_at,
-             u.wallet_address as notary_wallet, u.name as notary_name
+             u.wallet_address as notary_wallet, u.name as notary_name,
+             u2.wallet_address as owner_wallet
       FROM documents d
       LEFT JOIN users u ON d.notary_id = u.id
+      LEFT JOIN users u2 ON d.user_id = u2.id
       WHERE d.id = $1 AND d.user_id = $2 AND d.is_deleted = false
     `;
 
@@ -939,10 +941,9 @@ async function handleDocumentPatch(req, res) {
       );
 
       if (statusResult.error === 'STATE_CONFLICT') {
-        return res.status(200).json({ 
-          message: 'Document already being processed or confirmed.', 
-          document: sanitizeDocument(doc, actor),
-          status: 'success'
+        return res.status(409).json({ 
+          error: 'STATE_CONFLICT', 
+          message: 'Document already being processed or confirmed by another notary.'
         });
       }
 
@@ -967,8 +968,9 @@ async function handleDocumentPatch(req, res) {
         logger.info('DUPLICATE_PREVENTED', { id, correlation_id: correlationId, reason: 'Already on-chain' });
         const targetSyncState = Number(onChainData.status) === 2 ? 'rejected' : 'submitted_to_blockchain';
         
-        // 🛡️ [Fix] Attempt to recover tx_hash from blockchain logs for certificate display
-        let recoveredTxHash = doc.tx_hash || doc.approval_tx_hash || null;
+        // 🛡️ [Fix] Attempt to recover tx_hash from blockchain logs for certificate display (ensuring strict valid tx hash format)
+        const isValidTxHash = (hash) => typeof hash === 'string' && /^0x[a-fA-F0-9]{64}$/.test(hash);
+        let recoveredTxHash = isValidTxHash(doc.tx_hash) ? doc.tx_hash : (isValidTxHash(doc.approval_tx_hash) ? doc.approval_tx_hash : null);
         if (!recoveredTxHash) {
             try {
                 const currentBlock = await provider.getBlockNumber();
@@ -1073,7 +1075,7 @@ async function handleDocumentPatch(req, res) {
           txResult = await sendApprovalTx(
             docHashBytes,
             ownerAddress,
-            status,
+            statusInt,
             signature,
             parseInt(timestamp),
             summaryHash,
@@ -1101,8 +1103,9 @@ async function handleDocumentPatch(req, res) {
           dbStatus,
           {
             tx_hash: txResult.txHash,
+            approval_tx_hash: txResult.txHash,  // ✅ FIX: Write receipt hash immediately so certificate shows it without waiting for reconciliation worker
             tx_status: 'pending',
-            needs_cleanup: 'true',
+            needs_cleanup: dbStatus === 'rejected',
             updated_at: 'NOW()',
             status_updated_at: 'NOW()'
           }
@@ -1116,6 +1119,23 @@ async function handleDocumentPatch(req, res) {
                 current_state: statusResult.currentState,
                 revision: statusResult.currentRevision
             });
+        }
+
+        // Write system log for notarization action
+        try {
+            const { logAction } = require('../utils/logger');
+            const actionMsg = dbStatus === 'submitted_to_blockchain' 
+                ? `Notary approved document (ID: ${id}) on-chain.`
+                : `Notary rejected document (ID: ${id}) on-chain.`;
+            
+            logAction(
+                dbStatus === 'submitted_to_blockchain' ? 'DOCUMENT_APPROVE' : 'DOCUMENT_REJECT',
+                actionMsg,
+                actor.email || 'notary',
+                { id, tx_hash: txResult.txHash, db_status: dbStatus, notary_id: actor.id }
+            );
+        } catch (logErr) {
+            console.error("Failed to log document action:", logErr.message);
         }
 
         const updateRes = statusResult.document;
@@ -1277,6 +1297,68 @@ router.delete('/:id', withDomain('DOCS'), requirePrivilege({ capability: 'DOC_DE
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
+// ─── GET /api/documents/public/verify/:hash ───────────────────────────────
+// NEW: Public Verification Endpoint (Unauthenticated)
+router.get('/public/verify/:hash', allowPublic, async (req, res) => {
+  try {
+    const { hash } = req.params;
+    
+    if (!/^[a-fA-F0-9]{64}$/.test(hash)) {
+      return res.status(400).json({ error: 'Invalid SHA-256 hash format' });
+    }
+
+    const query = `
+      SELECT d.id, d.filename, d.title, d.file_hash, d.status, d.submission_state, d.chain_confirmed,
+             d.approval_tx_hash, d.tx_hash, d.created_at, d.updated_at, d.status_updated_at,
+             u.wallet_address as notary_wallet, u.name as notary_name
+      FROM documents d
+      LEFT JOIN users u ON d.notary_id = u.id
+      WHERE d.file_hash = $1 AND d.is_deleted = false
+    `;
+
+    const r = await pool.query(query, [hash]);
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const doc = r.rows[0];
+    const isNotarized = doc.submission_state === 'completed' ||
+                        doc.submission_state === 'submitted_to_blockchain' ||
+                        doc.chain_confirmed === true ||
+                        doc.status === 'APPROVED' || 
+                        doc.status === 'approved';
+
+    // Only reveal full details for notarized documents to prevent probing pending documents
+    if (!isNotarized) {
+      return res.status(403).json({ error: 'Document has not been notarized or is pending.' });
+    }
+
+    const config = await ConfigService.getConfig();
+    const chainId = Number(config.chainId);
+    const contractAddress = config.contracts.documentRegistry;
+    const approvalTxHash = doc.approval_tx_hash || doc.tx_hash || null;
+
+    res.json({
+      document_id: doc.id,
+      filename: doc.filename,
+      title: doc.title || doc.filename,
+      file_hash: doc.file_hash,
+      status: 'VERIFIED',
+      chain_confirmed: doc.chain_confirmed,
+      approval_tx_hash: approvalTxHash,
+      notarized_at: doc.status_updated_at || doc.updated_at,
+      notary_wallet: doc.notary_wallet || null,
+      notary_name: doc.notary_name || null,
+      contract_address: contractAddress,
+      chain_id: chainId
+    });
+
+  } catch (err) {
+    console.error('[PUBLIC_VERIFY_ERROR]', err);
+    res.status(500).json({ error: 'Failed to verify document' });
   }
 });
 

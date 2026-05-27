@@ -93,7 +93,7 @@ export function SystemLogs() {
   return (
     <div className="flex-1 flex flex-col h-full bg-background overflow-hidden min-h-0" style={{ height: '100%' }}>
       {/* Header */}
-      <div className="flex-none p-8 pt-12 pb-8 border-b border-border/50 bg-background">
+      <div className="flex-none p-8 pt-8 pb-8 border-b border-border/50 bg-background">
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
@@ -118,7 +118,8 @@ export function SystemLogs() {
                 placeholder="Search actor, details, or tx hash..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-12 bg-input border-border text-foreground rounded-xl h-12 w-full focus:border-primary/50 shadow-inner"
+                className="bg-input border-border text-foreground rounded-xl h-12 w-full focus:border-primary/50 shadow-inner"
+                style={{ paddingLeft: "3rem" }}
               />
             </div>
             <div className="flex bg-muted/30 p-1 rounded-xl border border-border/50">
@@ -249,6 +250,82 @@ export function SystemLogs() {
                     "{selectedLog.details}"
                   </p>
                 </div>
+
+                {(() => {
+                  const getFriendlyTranslation = (actionStr: string, detailsStr: string) => {
+                    const lowerAction = (actionStr || '').toLowerCase();
+                    const lowerDetails = (detailsStr || '').toLowerCase();
+
+                    if (lowerAction.includes('notary_status_change') || lowerAction.includes('notary_promotion') || lowerDetails.includes('notary status_change') || lowerDetails.includes('on-chain promotion')) {
+                      return {
+                        title: "Blockchain Notary Promotion",
+                        description: "This administrative action promotes a verified applicant to an official on-chain Notary, enabling them to witness, sign, and securely notarize documents within the legal framework.",
+                        color: "border-emerald-500/20 bg-emerald-500/5 text-emerald-400"
+                      };
+                    }
+                    if (lowerAction.includes('token_mint') || lowerDetails.includes('mint')) {
+                      return {
+                        title: "Utility Token Bridge/Issuance (MINT)",
+                        description: "This transaction issues new NTK/NTKR tokens into system circulation. These tokens represent active network credits necessary for notaries and owners to execute core platform functions.",
+                        color: "border-blue-500/20 bg-blue-500/5 text-blue-400"
+                      };
+                    }
+                    if (lowerAction.includes('token_burn') || lowerDetails.includes('burn')) {
+                      return {
+                        title: "Transaction Fee Destruction (BURN)",
+                        description: "This action permanently destroys NTK tokens from active circulation as an execution fee. This controls the system token supply, aligning with the platform's anti-spam cryptographic policies.",
+                        color: "border-amber-500/20 bg-amber-500/5 text-amber-400"
+                      };
+                    }
+                    if (lowerAction.includes('multisig_submit') || lowerDetails.includes('multisig_submit') || lowerDetails.includes('proposed')) {
+                      return {
+                        title: "Governance Proposal Initiation",
+                        description: "An administrator initiated an authoritative system proposal. This requires co-signature agreement from a consensus threshold of active MultiSig administrators before taking effect.",
+                        color: "border-purple-500/20 bg-purple-500/5 text-purple-400"
+                      };
+                    }
+                    if (lowerAction.includes('multisig_confirm') || lowerDetails.includes('confirmed') || lowerDetails.includes('vote')) {
+                      return {
+                        title: "MultiSig Consensus Confirmation",
+                        description: "An administrator signed a confirmation vote for a pending governance proposal, contributing towards the required consensus threshold.",
+                        color: "border-indigo-500/20 bg-indigo-500/5 text-indigo-400"
+                      };
+                    }
+                    if (lowerAction.includes('multisig_execute') || lowerDetails.includes('executed')) {
+                      return {
+                        title: "Authoritative Governance Execution",
+                        description: "The proposal has successfully achieved the required MultiSig confirmation threshold. The administrative state changes are now officially executed on the blockchain.",
+                        color: "border-rose-500/20 bg-rose-500/5 text-rose-400"
+                      };
+                    }
+                    if (lowerDetails.includes('verified identity')) {
+                      return {
+                        title: "Zero-Trust Identity Verification",
+                        description: "The platform's cryptographic identity provider verified the applicant's credentials, paving the way for their administrative or notary onboarding flow.",
+                        color: "border-teal-500/20 bg-teal-500/5 text-teal-400"
+                      };
+                    }
+
+                    return {
+                      title: "System Telemetry Event",
+                      description: "An authoritative system operation was recorded in the chronological audit database to maintain forensic operational traceability.",
+                      color: "border-border/50 bg-muted/20 text-muted-foreground"
+                    };
+                  };
+
+                  const translation = getFriendlyTranslation(selectedLog.action, selectedLog.details);
+                  return (
+                    <div className={`p-6 rounded-2xl border ${translation.color} space-y-2`}>
+                      <p className="text-[10px] uppercase font-black tracking-widest opacity-80">
+                        Human Translation & Impact Analysis
+                      </p>
+                      <h4 className="text-sm font-black">{translation.title}</h4>
+                      <p className="text-xs leading-relaxed opacity-90">
+                        {translation.description}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {selectedLog.tx_hash && (
                   <div className="bg-muted/50 border border-border p-6 rounded-2xl">

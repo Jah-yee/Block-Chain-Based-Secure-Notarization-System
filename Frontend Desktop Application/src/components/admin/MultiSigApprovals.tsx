@@ -30,6 +30,8 @@ import { ethers } from "ethers";
 const ABI_INTERFACES = [
   "function addSigner(address signer)",
   "function removeSigner(address signer)",
+  "function promoteAdmin(address newAdmin, address registry)",
+  "function demoteAdmin(address admin, address registry)",
   "function changeThreshold(uint256 threshold)",
   "function setTimelock(uint256 delay)",
   "function recordAction(bytes32 docHash, uint8 status)",
@@ -54,8 +56,8 @@ function decodeMethod(data: string) {
       args: decoded.args.map(a => a.toString()),
       inputs: decoded.fragment.inputs.map(input => input.name || "param")
     };
-  } catch (e) {
-    return { name: "Unknown Operation", args: [data.slice(0, 10) + "..."], inputs: [] };
+  } catch (e: any) {
+    return { name: `Unknown Operation (${e.message})`, args: [data.slice(0, 10) + "..."], inputs: [] };
   }
 }
 
@@ -66,6 +68,10 @@ function getImpactMessage(data: string) {
       return `This will grant administrative powers to ${method.args[0]}. They will be able to propose and sign protocol changes.`;
     case "remove Signer":
       return `This will revoke administrative powers from ${method.args[0]}. They will no longer be able to authorize protocol actions.`;
+    case "promote Admin":
+      return `This will grant Protocol Admin and Multi-Sig powers to ${method.args[0]} in one single transaction (V2 Auto-Coordinator).`;
+    case "demote Admin":
+      return `This will revoke Protocol Admin and Multi-Sig powers from ${method.args[0]} in one single transaction (V2 Auto-Coordinator).`;
     case "change Threshold":
       return `This will change the security rule to require ${method.args[0]} separate signatures before any action can be executed on-chain.`;
     case "set Timelock":
@@ -83,10 +89,12 @@ function getImpactMessage(data: string) {
 export function MultiSigApprovals() {
   const { config } = useConfig();
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [signerNames, setSignerNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [contractAddress, setContractAddress] = useState("");
   const [threshold, setThreshold] = useState(2);
   const [processing, setProcessing] = useState<number | null>(null);
+  const isSingleAdmin = threshold === 1;
 
   const [detailsDialog, setDetailsDialog] = useState<{
     open: boolean;
@@ -145,14 +153,33 @@ export function MultiSigApprovals() {
       
       // 🛡️ [SECURITY] Hardened object and array extraction
       const txArray = Array.isArray(res?.transactions) ? res.transactions : [];
-      setTransactions(txArray);
+      
+      // 🛡️ [COMPATIBILITY] Normalize JSON encoded data arrays
+      const cleanedTxArray = txArray.map((tx: any) => {
+          let payload = tx.data;
+          if (Array.isArray(payload)) {
+              if (payload.length > 0 && payload[0].data) payload = payload[0].data;
+              else if (payload.length > 0 && typeof payload[0] === 'string') payload = payload[0];
+          } else if (typeof payload === 'string' && payload.startsWith('[')) {
+              try {
+                  const parsed = JSON.parse(payload);
+                  if (Array.isArray(parsed) && parsed.length > 0) payload = parsed[0].data || parsed[0] || "0x";
+              } catch(e) {}
+          }
+          return { ...tx, data: payload, originalData: tx.data };
+      });
+
+      setTransactions(cleanedTxArray);
       setContractAddress(res?.address || "");
       setThreshold(res?.threshold || 2);
       setTimelockDelay(res?.timelockDelay || 0);
+      if (res?.signerNames) {
+        setSignerNames(res.signerNames);
+      }
 
       // If dialog is open, update the active tx data
       if (detailsDialog.open && detailsDialog.tx) {
-        const updatedTx = txArray.find((t: any) => t.index === detailsDialog.tx.index);
+        const updatedTx = cleanedTxArray.find((t: any) => t.index === detailsDialog.tx.index);
         if (updatedTx) setDetailsDialog(prev => ({ ...prev, tx: updatedTx }));
       }
     } catch (err: any) {
@@ -197,16 +224,22 @@ export function MultiSigApprovals() {
         // --- REMOTE SIGNING FLOW ---
         const session = await api.initRemoteMultiSigSession(tx.index);
         const baseAuthUrl = (config?.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
-        const link = `${baseAuthUrl}/governance/remote-sign?sessionId=${session.sessionId}`;
+        const link = `${baseAuthUrl}/?mode=multisig&sessionId=${session.sessionId}`;
         setRemoteSessionLink(link);
 
         // Open automatically if possible
-        window.open(link, '_blank');
+        if ((window as any).electronAPI) {
+          (window as any).electronAPI.openExternal(link);
+        } else {
+          window.open(link, '_blank');
+        }
 
         // Poll for completion
+        let consecutiveErrors = 0;
         const pollInterval = setInterval(async () => {
           try {
             const statusRes = await api.checkRemoteMultiSigStatus(session.sessionId);
+            consecutiveErrors = 0;
             if (statusRes.status === 'authorized' || statusRes.status === 'executed') {
               clearInterval(pollInterval);
               toast.success("Remote Confirmation Received!");
@@ -219,7 +252,13 @@ export function MultiSigApprovals() {
               setProcessing(null);
             }
           } catch (e) {
-            // ignore polling errors
+            console.error("Poll Error:", e);
+            consecutiveErrors++;
+            if (consecutiveErrors >= 5) {
+              clearInterval(pollInterval);
+              toast.error("Network communication lost. Handshake terminated.");
+              setProcessing(null);
+            }
           }
         }, 2000);
 
@@ -230,40 +269,15 @@ export function MultiSigApprovals() {
 
       // --- LOCAL METAMASK FLOW ---
       // @ts-ignore
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const wallet = accounts[0];
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(contractAddress, ["function confirmTransaction(uint256 txIndex)"], signer);
 
-      // EIP-712 Domain
-      // @ts-ignore
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      const txCall = await contract.confirmTransaction(tx.index);
+      toast.info("Confirmation transaction submitted. Waiting for confirmation...");
+      await txCall.wait();
 
-      const domain = {
-        name: "BBSNS_Protocol",
-        version: "2",
-        chainId: parseInt(chainId, 16),
-        verifyingContract: contractAddress,
-      };
-
-      const types = {
-        Confirm: [
-          { name: "txIndex", type: "uint256" },
-          { name: "version", type: "uint256" },
-        ],
-      };
-
-      const value = {
-        txIndex: tx.index,
-        version: tx.signerVersion,
-      };
-
-      // @ts-ignore
-      const signature = await window.ethereum.request({
-        method: "eth_signTypedData_v4",
-        params: [wallet, JSON.stringify({ domain, types, primaryType: "Confirm", message: value })],
-      });
-
-      await api.confirmMultiSigApprove(tx.index, signature);
-      toast.success("Confirmation submitted successfully!");
+      toast.success("Confirmation transaction finalized on-chain!");
       loadTransactions();
     } catch (err: any) {
       console.error(err);
@@ -285,7 +299,7 @@ export function MultiSigApprovals() {
   };
 
   const executeAction = async () => {
-    if (!detailsDialog.tx) return;
+    if (!detailsDialog.tx || !contractAddress) return;
     const tx = detailsDialog.tx;
 
     // Safety check for timelock
@@ -297,15 +311,83 @@ export function MultiSigApprovals() {
 
     setProcessing(tx.index);
     try {
-      await api.executeMultiSigTransaction(tx.index);
-      toast.success("Transaction execution triggered!");
-      setDetailsDialog({ open: false, tx: null });
-      loadTransactions();
+      // @ts-ignore
+      if (window.ethereum) {
+        // --- LOCAL METAMASK FLOW ---
+        // @ts-ignore
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        const contract = new ethers.Contract(contractAddress, ["function executeTransaction(uint256 txIndex)"], signer);
+
+        toast.info("Submitting execution transaction via MetaMask...");
+        const txCall = await contract.executeTransaction(tx.index);
+        toast.info("Execution transaction submitted. Waiting for blockchain confirmation...");
+        await txCall.wait();
+
+        // Sync with the backend manually after successful on-chain execution so that the status is updated to 'executed' off-chain too
+        try {
+          await api.executeMultiSigTransaction(tx.index, txCall.hash);
+        } catch (syncErr) {
+          console.warn("Failed to notify backend of execution:", syncErr);
+        }
+
+        toast.success("Transaction executed successfully on-chain!");
+        setDetailsDialog({ open: false, tx: null });
+        loadTransactions();
+      } else {
+        // --- REMOTE EXECUTION FLOW ---
+        const session = await api.initRemoteMultiSigExecuteSession(tx.index);
+        const baseAuthUrl = (config?.remoteAuthUrl || "https://auth.bbsns.online").replace(/\/$/, "");
+        const link = `${baseAuthUrl}/?mode=gov-execute&sessionId=${session.sessionId}`;
+        setRemoteSessionLink(link);
+
+        // Open automatically if possible
+        if ((window as any).electronAPI) {
+          (window as any).electronAPI.openExternal(link);
+        } else {
+          window.open(link, '_blank');
+        }
+
+        // Poll for completion
+        let consecutiveErrors = 0;
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await api.checkRemoteMultiSigExecuteStatus(session.sessionId);
+            consecutiveErrors = 0;
+            if (statusRes.status === 'authorized' || statusRes.status === 'executed') {
+              clearInterval(pollInterval);
+              toast.success("Remote Execution Confirmed!");
+              setProcessing(null);
+              setDetailsDialog({ open: false, tx: null });
+              loadTransactions();
+            } else if (statusRes.status === 'expired' || statusRes.status === 'error') {
+              clearInterval(pollInterval);
+              toast.error("Remote session expired or failed.");
+              setProcessing(null);
+            }
+          } catch (e) {
+            console.error("Poll Error:", e);
+            consecutiveErrors++;
+            if (consecutiveErrors >= 5) {
+              clearInterval(pollInterval);
+              toast.error("Network communication lost. Handshake terminated.");
+              setProcessing(null);
+            }
+          }
+        }, 2000);
+
+        // Stop polling after 10 minutes (safety)
+        setTimeout(() => clearInterval(pollInterval), 10 * 60 * 1000);
+        return;
+      }
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || "Failed to execute transaction");
     } finally {
-      setProcessing(null);
+      // @ts-ignore
+      if (window.ethereum) {
+        setProcessing(null);
+      }
     }
   };
 
@@ -355,7 +437,7 @@ export function MultiSigApprovals() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+      <div className="flex-1 overflow-y-auto custom-scrollbar relative" style={{ maxHeight: '60vh' }}>
         <div className="p-8 pb-32">
         {loading && transactions.length === 0 ? (
           <div className="flex justify-center p-12">
@@ -363,7 +445,7 @@ export function MultiSigApprovals() {
           </div>
         ) : transactions.length === 0 ? (
           <div className="text-center p-12 border border-dashed border-border rounded-xl bg-muted/20">
-            <Shield className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
+            <Shield className="h-8 w-8 text-muted-foreground/30 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground">No Pending Transactions</h3>
             <p className="text-muted-foreground text-sm">The protocol is currently in a settled state.</p>
           </div>
@@ -391,7 +473,7 @@ export function MultiSigApprovals() {
                       <TableCell>
                         <div className="flex items-center space-x-3">
                           <div className={`p-2 rounded-lg ${tx.executed ? 'bg-emerald-500/10 text-emerald-400' : 'bg-primary/10 text-primary'}`}>
-                            {decoded.name.includes("Signer") ? <UserPlus className="h-4 w-4" /> :
+                            {(decoded.name.includes("Signer") || decoded.name.includes("Admin")) ? <UserPlus className="h-4 w-4" /> :
                               decoded.name.includes("Threshold") ? <Settings className="h-4 w-4" /> :
                                 decoded.name.includes("Timelock") ? <Clock className="h-4 w-4" /> :
                                   decoded.name.includes("Action") ? <FileText className="h-4 w-4" /> :
@@ -420,25 +502,41 @@ export function MultiSigApprovals() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className={`text-[10px] font-black ${isQuorumReached ? 'text-emerald-400' : 'text-foreground'}`}>
-                              {tx.numConfirmations} <span className="text-muted-foreground/50">/ {threshold}</span>
+                        {isSingleAdmin ? (
+                          <div className="flex flex-col space-y-1.5">
+                            <span className={`text-[10px] font-black uppercase tracking-wider ${isQuorumReached ? 'text-emerald-400' : (tx.expired ? 'text-muted-foreground' : 'text-amber-500')}`}>
+                              {isQuorumReached ? 'Confirmed' : (tx.expired ? 'Unsettled' : 'Awaiting Sign')}
                             </span>
-                            {isQuorumReached && !tx.executed && (
-                              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                            )}
+                            <div className="w-full h-1.5 bg-muted/50 rounded-full overflow-hidden border border-border/5">
+                              <div
+                                className={`h-full transition-all duration-700 ease-out ${isQuorumReached ? 'bg-emerald-500' : (tx.expired ? 'bg-muted-foreground' : 'bg-amber-500')}`}
+                                style={{ width: isQuorumReached ? '100%' : '0%' }}
+                              />
+                            </div>
                           </div>
-                          <div className="w-full h-1.5 bg-muted/50 rounded-full overflow-hidden border border-border/5">
-                            <div
-                              className={`h-full transition-all duration-700 ease-out ${isQuorumReached ? 'bg-emerald-500' : 'bg-primary'}`}
-                              style={{ width: `${Math.min((tx.numConfirmations / threshold) * 100, 100)}%` }}
-                            />
+                        ) : (
+                          <div className="flex flex-col space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className={`text-[10px] font-black ${isQuorumReached ? 'text-emerald-400' : (tx.expired ? 'text-muted-foreground' : 'text-foreground')}`}>
+                                {tx.expired && !isQuorumReached ? <span className="uppercase tracking-wider">Unsettled</span> : (
+                                  <>{tx.numConfirmations} <span className="text-muted-foreground/50">/ {threshold}</span></>
+                                )}
+                              </span>
+                              {isQuorumReached && !tx.executed && !tx.expired && (
+                                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                              )}
+                            </div>
+                            <div className="w-full h-1.5 bg-muted/50 rounded-full overflow-hidden border border-border/5">
+                              <div
+                                className={`h-full transition-all duration-700 ease-out ${isQuorumReached ? 'bg-emerald-500' : (tx.expired ? 'bg-muted-foreground' : 'bg-primary')}`}
+                                style={{ width: `${Math.min((tx.numConfirmations / threshold) * 100, 100)}%` }}
+                              />
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </TableCell>
                       <TableCell>
-                        {tx.executed ? (
+                        {tx.executed || tx.expired ? (
                           <span className="text-[10px] font-black text-muted-foreground uppercase opacity-50">Settled</span>
                         ) : (
                           <div className="flex items-center gap-2">
@@ -457,8 +555,12 @@ export function MultiSigApprovals() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {tx.executed ? (
-                          <Badge variant="default" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px] font-black uppercase tracking-tighter shadow-none">
+                        {tx.expired ? (
+                          <Badge variant="default" className="bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[9px] font-black uppercase tracking-tighter shadow-none">
+                            <Clock className="h-3 w-3 mr-1" /> Expired
+                          </Badge>
+                        ) : tx.executed ? (
+                          <Badge variant="default" className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black uppercase tracking-tighter shadow-none">
                             <CheckCircle className="h-3 w-3 mr-1" /> Executed
                           </Badge>
                         ) : (
@@ -488,12 +590,17 @@ export function MultiSigApprovals() {
     </div>
 
       <Dialog open={detailsDialog.open} onOpenChange={(open) => setDetailsDialog({ ...detailsDialog, open })}>
-        <DialogContent className="max-w-7xl w-[98vw] bg-[#0b101f] border-border shadow-2xl overflow-hidden p-0 rounded-3xl flex flex-col max-h-[65vh] select-none outline-none !opacity-100">
-          <DialogHeader className="bg-primary/5 p-4 border-b border-border/50 text-left">
+        <DialogContent 
+          className="max-w-7xl w-[98vw] bg-background border-border shadow-2xl overflow-hidden p-0 rounded-3xl flex flex-col select-none outline-none !opacity-100"
+          style={{ maxHeight: 'calc(100vh - 4rem)' }}
+        >
+          <DialogHeader className="bg-primary/5 p-4 border-b border-border/50 text-left shrink-0">
             <div className="space-y-1.5 pr-8">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge className="bg-primary/20 text-primary text-[10px] font-black">TRANSACTION #{detailsDialog.tx?.index}</Badge>
-                {detailsDialog.tx?.executed ? (
+                {detailsDialog.tx?.expired ? (
+                  <Badge className="bg-rose-500/10 text-rose-400 text-[10px] font-black uppercase">Expired</Badge>
+                ) : detailsDialog.tx?.executed ? (
                   <Badge className="bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase">Finalized</Badge>
                 ) : (
                   <Badge className="bg-amber-500/10 text-amber-500 text-[10px] font-black uppercase animate-pulse">Awaiting Approval</Badge>
@@ -506,41 +613,46 @@ export function MultiSigApprovals() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
-            {/* Remote Signing Overlay */}
-            {processing === detailsDialog.tx?.index && !(window as any).ethereum && remoteSessionLink && (
-              <div className="absolute inset-0 bg-background/95 backdrop-blur z-50 flex flex-col items-center justify-center text-center p-8 space-y-6">
-                <div className="p-4 bg-primary/10 rounded-full animate-pulse">
+          <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar relative">
+            {processing === detailsDialog.tx?.index && !(window as any).ethereum && remoteSessionLink ? (
+              <div className="flex flex-col items-center justify-center text-center p-8 py-16 space-y-6 bg-background/95 min-h-[350px]">
+                <div className="p-4 bg-primary/10 rounded-full animate-pulse border border-primary/20">
                   <Shield className="h-12 w-12 text-primary" />
                 </div>
                 <div className="space-y-2">
-                  <h3 className="text-xl font-bold">Remote Signing Session Active</h3>
-                  <p className="text-muted-foreground text-sm max-w-sm">
-                    Please complete the signature process in your web browser.
+                  <h3 className="text-xl font-bold tracking-tight text-foreground">Remote Signing Session Active</h3>
+                  <p className="text-muted-foreground text-xs max-w-sm mx-auto leading-relaxed">
+                    A secure signing handshake has been established. Please complete the signature authorization in your system web browser.
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-3 w-full max-w-xs">
                   <Button
                     variant="outline"
-                    className="gap-2 w-full"
-                    onClick={() => window.open(remoteSessionLink, '_blank')}
+                    className="gap-2.5 w-full h-11 rounded-xl bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 hover:text-primary transition-all font-bold text-xs"
+                    onClick={() => {
+                      if ((window as any).electronAPI) {
+                        (window as any).electronAPI.openExternal(remoteSessionLink);
+                      } else {
+                        window.open(remoteSessionLink, '_blank');
+                      }
+                    }}
                   >
-                    <ExternalLink className="h-4 w-4" /> Open Signing Page
+                    <ExternalLink className="h-3.5 w-3.5" /> Open External Signing Page
                   </Button>
-                  <div className="bg-muted p-2 rounded text-[10px] font-mono break-all border border-border/50 text-muted-foreground">
+                  <div className="bg-[#07090e] p-2.5 rounded-xl text-[10px] font-mono break-all border border-border/50 text-muted-foreground text-left leading-normal select-text">
                     {remoteSessionLink}
                   </div>
                 </div>
 
-                <p className="text-xs text-muted-foreground/50 animate-pulse">
-                  Waiting for signature...
-                </p>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span className="animate-pulse">Waiting for secure signature from browser...</span>
+                </div>
               </div>
-            )}
-
-            <div className="p-3">
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+            ) : (
+              <div className="p-3">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                 {/* Left Column - Main Content */}
                 <div className="md:col-span-8 space-y-2.5">
                   {/* Target Contract - Full Width */}
@@ -634,96 +746,119 @@ export function MultiSigApprovals() {
                     <div className="bg-muted/30 p-2.5 rounded-xl border border-border/50 space-y-2.5">
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-bold text-muted-foreground">Collected</span>
-                        <span className="text-lg font-black text-foreground">
-                          {detailsDialog.tx?.numConfirmations} / {threshold}
-                        </span>
+                        {isSingleAdmin ? (
+                          <span className={`text-xs font-black uppercase tracking-wider ${detailsDialog.tx?.numConfirmations >= threshold ? 'text-emerald-400' : 'text-amber-500'}`}>
+                            {detailsDialog.tx?.numConfirmations >= threshold ? 'Authoritative' : 'Awaiting Sign'}
+                          </span>
+                        ) : (
+                          <span className="text-lg font-black text-foreground">
+                            {detailsDialog.tx?.numConfirmations} / {threshold}
+                          </span>
+                        )}
                       </div>
                       <div className="w-full h-2.5 bg-background/50 rounded-full overflow-hidden border border-border/10">
                         <div
-                          className="h-full bg-primary transition-all duration-1000 ease-in-out"
+                          className={`h-full transition-all duration-1000 ease-in-out ${isSingleAdmin && detailsDialog.tx?.numConfirmations < threshold ? 'bg-amber-500' : 'bg-primary'}`}
                           style={{ width: `${(detailsDialog.tx?.numConfirmations / threshold) * 100}%` }}
                         />
                       </div>
 
                       <div className="pt-1 space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
-                        {detailsDialog.tx?.confirmations?.map((conf: any, i: number) => (
-                          <div key={i} className="flex items-center justify-between text-[11px] bg-background/30 p-2 rounded-lg">
-                            <code className="text-muted-foreground truncate flex-1 mr-2 selectable" title={conf.address}>
-                              {conf.address.slice(0, 10)}...{conf.address.slice(-8)}
-                            </code>
-                            {conf.confirmed ? (
-                              <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
-                            ) : (
-                              <Clock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
-                            )}
-                          </div>
-                        ))}
+                        {detailsDialog.tx?.confirmations?.filter((conf: any) => !detailsDialog.tx?.executed || conf.confirmed).map((conf: any, i: number) => {
+                          const name = signerNames[conf.address.toLowerCase()] || "Genesis Administrator";
+                          return (
+                            <div key={i} className="flex items-center justify-between text-[11px] bg-background/30 p-2 rounded-lg gap-2">
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="font-bold text-foreground truncate">{name}</span>
+                                <code className="text-muted-foreground/60 text-[9px] font-mono truncate selectable" title={conf.address}>
+                                  {conf.address.slice(0, 10)}...{conf.address.slice(-8)}
+                                </code>
+                              </div>
+                              {conf.confirmed ? (
+                                <CheckCircle className="h-4 w-4 text-emerald-500 shrink-0" />
+                              ) : (
+                                <Clock className="h-4 w-4 text-muted-foreground/30 shrink-0" />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          <div className="p-3 bg-muted/50 border-t border-border flex justify-end items-center">
+          <div className="p-3 bg-muted/50 border-t border-border flex justify-end items-center shrink-0">
             <div className="flex space-x-3">
-              {!detailsDialog.tx?.executed && (
-                <>
-                  {userAddress && detailsDialog.tx?.confirmations?.some((c: any) => c.address.toLowerCase() === userAddress && c.confirmed) ? (
-                    <Button
-                      variant="outline"
-                      onClick={revokeAction}
-                      disabled={processing === detailsDialog.tx?.index}
-                      className="border-red-500/30 text-red-500 hover:bg-red-500/10 font-black rounded-xl px-6 h-12"
-                    >
-                      {processing === detailsDialog.tx?.index ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Revoke Signature"
-                      )}
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={confirmAction}
-                      disabled={processing === detailsDialog.tx?.index}
-                      className="bg-primary text-primary-foreground hover:bg-primary/90 font-black rounded-xl px-6 h-12 shadow-lg shadow-black/20 group"
-                    >
-                      {processing === detailsDialog.tx?.index ? (
-                        <div className="flex items-center gap-2">
+              {processing === detailsDialog.tx?.index && !(window as any).ethereum && remoteSessionLink ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => setProcessing(null)}
+                  className="rounded-xl px-6 h-12 text-sm font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  Cancel Handshake
+                </Button>
+              ) : (
+                !detailsDialog.tx?.executed && (
+                  <>
+                    {userAddress && detailsDialog.tx?.confirmations?.some((c: any) => c.address.toLowerCase() === userAddress && c.confirmed) ? (
+                      <Button
+                        variant="outline"
+                        onClick={revokeAction}
+                        disabled={processing === detailsDialog.tx?.index}
+                        className="border-red-500/30 text-red-500 hover:bg-red-500/10 font-black rounded-xl px-6 h-12"
+                      >
+                        {processing === detailsDialog.tx?.index ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          {/* @ts-ignore */}
-                          {!window.ethereum && <span className="text-xs">Remote Signing...</span>}
-                        </div>
-                      ) : (
-                        <>
-                          Approve Transaction <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
-                    </Button>
-                  )}
-
-                  {detailsDialog.tx?.numConfirmations >= threshold && (
-                    <Button
-                      onClick={executeAction}
-                      disabled={processing === detailsDialog.tx?.index || getTimelockInfo(detailsDialog.tx).active}
-                      className={`font-black rounded-xl px-6 h-12 shadow-lg transition-all ${getTimelockInfo(detailsDialog.tx).active ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'}`}
-                    >
-                      {processing === detailsDialog.tx?.index ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        getTimelockInfo(detailsDialog.tx).active ? (
+                        ) : (
+                          "Revoke Signature"
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={confirmAction}
+                        disabled={processing === detailsDialog.tx?.index}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 font-black rounded-xl px-6 h-12 shadow-lg shadow-black/20 group"
+                      >
+                        {processing === detailsDialog.tx?.index ? (
                           <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4" />
-                            Timelock: {formatRemaining(getTimelockInfo(detailsDialog.tx).remaining)}
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {/* @ts-ignore */}
+                            {!window.ethereum && <span className="text-xs">Remote Signing...</span>}
                           </div>
                         ) : (
-                          "Execute On-Chain"
-                        )
-                      )}
-                    </Button>
-                  )}
-                </>
+                          <>
+                            Approve Transaction <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                          </>
+                        )}
+                      </Button>
+                    )}
+
+                    {detailsDialog.tx?.numConfirmations >= threshold && !detailsDialog.tx?.expired && !detailsDialog.tx?.executed && (
+                      <Button
+                        onClick={executeAction}
+                        disabled={processing === detailsDialog.tx?.index || getTimelockInfo(detailsDialog.tx).active}
+                        className={`font-black rounded-xl px-6 h-12 shadow-lg transition-all ${getTimelockInfo(detailsDialog.tx).active ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20'}`}
+                      >
+                        {processing === detailsDialog.tx?.index ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          getTimelockInfo(detailsDialog.tx).active ? (
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              Timelock: {formatRemaining(getTimelockInfo(detailsDialog.tx).remaining)}
+                            </div>
+                          ) : (
+                            "Execute On-Chain"
+                          )
+                        )}
+                      </Button>
+                    )}
+                  </>
+                )
               )}
             </div>
           </div>

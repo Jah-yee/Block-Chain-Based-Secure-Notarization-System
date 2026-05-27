@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogTrigger, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { importNotaryPrivateKey, unwrapKeyForNotary, decryptFile } from '@/lib/encryption';
 
 interface NotaryVerifyProps {
@@ -15,7 +15,7 @@ export function NotaryVerify({ doc, onAction }: NotaryVerifyProps) {
     const [status, setStatus] = useState('idle'); // idle, decrypting, verified, failed
     const [error, setError] = useState('');
     const [hashMatch, setHashMatch] = useState<boolean | null>(null);
-
+    const [rejectionReason, setRejectionReason] = useState('');
     const handleDecrypt = async () => {
         setStatus('decrypting');
         setError('');
@@ -101,6 +101,7 @@ export function NotaryVerify({ doc, onAction }: NotaryVerifyProps) {
         setPrivateKeyPem('');
         setDecryptedText(null);
         setStatus('idle');
+        setRejectionReason('');
     }
 
     return (
@@ -152,19 +153,33 @@ export function NotaryVerify({ doc, onAction }: NotaryVerifyProps) {
                                 {decryptedText}
                             </div>
 
-                            <div className="flex gap-2 justify-end">
-                                <Button variant="destructive" onClick={() => {
-                                    onAction('rejected');
-                                    cleanMemory();
-                                }}>
-                                    Reject & Destroy Key
-                                </Button>
-                                <Button variant="default" className="bg-green-600 hover:bg-green-700" onClick={() => {
-                                    onAction('approved');
-                                    cleanMemory();
-                                }}>
-                                    Approve & Unpin
-                                </Button>
+                            <div className="space-y-2 mt-4 border-t pt-4">
+                                <label className="text-sm font-medium">Rejection Reason (if rejecting)</label>
+                                <Textarea
+                                    value={rejectionReason}
+                                    onChange={e => setRejectionReason(e.target.value)}
+                                    placeholder="State why this document is being rejected..."
+                                    className="h-20"
+                                />
+                                <div className="flex gap-2 justify-end mt-2">
+                                    <Button variant="destructive" onClick={() => {
+                                        if (!rejectionReason.trim()) {
+                                            setError('Please provide a rejection reason');
+                                            setStatus('failed');
+                                            return;
+                                        }
+                                        onAction('rejected', rejectionReason);
+                                        cleanMemory();
+                                    }}>
+                                        Reject & Destroy Key
+                                    </Button>
+                                    <Button variant="default" className="bg-green-600 hover:bg-green-700" onClick={() => {
+                                        onAction('approved');
+                                        cleanMemory();
+                                    }}>
+                                        Approve & Unpin
+                                    </Button>
+                                </div>
                             </div>
                         </div>
                     )}

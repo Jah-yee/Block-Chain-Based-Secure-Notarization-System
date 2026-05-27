@@ -13,19 +13,19 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
  */
 contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
     using ECDSA for bytes32;
-    event TransactionSubmitted(uint256 indexed txIndex, address indexed proposer, address indexed to, uint256 value, bytes data, bytes32 proposalHash);
+    event TransactionSubmitted(uint256 indexed txIndex, address indexed proposer, address[] to, uint256[] value, bytes[] data, bytes32 proposalHash);
     event TransactionConfirmed(uint256 indexed txIndex, address indexed confirmer);
     event TransactionRevoked(uint256 indexed txIndex, address indexed revoker);
-    event TransactionExecuted(uint256 indexed txIndex, address indexed executor, address indexed to, uint256 value);
+    event TransactionExecuted(uint256 indexed txIndex, address indexed executor, address to, uint256 value);
     event SignerAdded(address indexed newSigner);
     event SignerRemoved(address indexed oldSigner);
     event ThresholdChanged(uint256 newThreshold);
     event TimelockChanged(uint256 newDelay);
 
     struct Transaction {
-        address to;
-        uint256 value;
-        bytes data;
+        address[] to;
+        uint256[] value;
+        bytes[] data;
         bool executed;
         uint256 numConfirmations;
         uint256 submissionTime;
@@ -89,8 +89,9 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
     /**
      * @notice Submits a new transaction for approval.
      */
-    function submitTransaction(address _to, uint256 _value, bytes memory _data, bytes32 _proposalHash) public onlySigner {
-        require(_to != address(0), "MultiSig: Invalid target address");
+    function submitTransaction(address[] memory _to, uint256[] memory _value, bytes[] memory _data, bytes32 _proposalHash) public onlySigner {
+        require(_to.length == _value.length && _to.length == _data.length, "MultiSig: Array lengths mismatch");
+        require(_to.length > 0, "MultiSig: Empty execution arrays");
         uint256 txIndex = transactions.length;
 
         transactions.push(Transaction({
@@ -111,50 +112,6 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
     }
 
     /**
-     * @notice Submits a transaction via EIP-712 signature (Relayer-friendly).
-     */
-    function submitWithSignature(
-        address _to, 
-        uint256 _value, 
-        bytes calldata _data, 
-        bytes calldata _signature,
-        bytes32 _proposalHash
-    ) 
-        external 
-    {
-        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(
-            keccak256("Submit(address to,uint256 value,bytes data,bytes32 proposalHash,uint256 version)"),
-            _to,
-            _value,
-            keccak256(_data),
-            _proposalHash,
-            signerVersion
-        )));
-        
-        address signer = digest.recover(_signature);
-        require(isSigner[signer], "MultiSig: Invalid signer");
-
-        uint256 txIndex = transactions.length;
-        transactions.push(Transaction({
-            to: _to,
-            value: _value,
-            data: _data,
-            executed: false,
-            numConfirmations: 0,
-            submissionTime: block.timestamp,
-            signerVersion: signerVersion,
-            proposalHash: _proposalHash
-        }));
-
-        emit TransactionSubmitted(txIndex, signer, _to, _value, _data, _proposalHash);
-        
-        // Auto-confirm for the proposer
-        isConfirmed[txIndex][signer] = true;
-        transactions[txIndex].numConfirmations = 1;
-        emit TransactionConfirmed(txIndex, signer);
-    }
-
-    /**
      * @notice Confirms a pending transaction.
      */
     function confirmTransaction(uint256 _txIndex) 
@@ -163,6 +120,7 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
         txExists(_txIndex) 
         notExecuted(_txIndex) 
         notConfirmed(_txIndex) 
+        nonReentrant
     {
         Transaction storage transaction = transactions[_txIndex];
         require(transaction.signerVersion == signerVersion, "MultiSig: Signer set rotated since submission");
@@ -171,6 +129,15 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
         isConfirmed[_txIndex][msg.sender] = true;
 
         emit TransactionConfirmed(_txIndex, msg.sender);
+
+        if (transaction.numConfirmations >= threshold && block.timestamp >= transaction.submissionTime + timelockDelay) {
+            transaction.executed = true;
+            for (uint256 i = 0; i < transaction.to.length; i++) {
+                (bool success, ) = transaction.to[i].call{value: transaction.value[i]}(transaction.data[i]);
+                require(success, "MultiSig: Transaction execution failed");
+                emit TransactionExecuted(_txIndex, msg.sender, transaction.to[i], transaction.value[i]);
+            }
+        }
     }
 
     /**
@@ -191,32 +158,7 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
         emit TransactionRevoked(_txIndex, msg.sender);
     }
 
-    /**
-     * @notice Confirms a transaction via EIP-712 signature (Relayer-friendly).
-     */
-    function confirmWithSignature(uint256 _txIndex, bytes calldata _signature) 
-        external 
-        txExists(_txIndex) 
-        notExecuted(_txIndex) 
-    {
-        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(
-            keccak256("Confirm(uint256 txIndex,uint256 version)"),
-            _txIndex,
-            signerVersion
-        )));
-        
-        address signer = digest.recover(_signature);
-        require(isSigner[signer], "MultiSig: Invalid signer");
-        require(!isConfirmed[_txIndex][signer], "MultiSig: Already confirmed");
-        
-        Transaction storage transaction = transactions[_txIndex];
-        require(transaction.signerVersion == signerVersion, "MultiSig: Signer rotated");
 
-        transaction.numConfirmations += 1;
-        isConfirmed[_txIndex][signer] = true;
-
-        emit TransactionConfirmed(_txIndex, signer);
-    }
 
     /**
      * @notice Executes a transaction once threshold and timelock are met.
@@ -236,16 +178,17 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
 
         transaction.executed = true;
 
-        (bool success, ) = transaction.to.call{value: transaction.value}(transaction.data);
-        require(success, "MultiSig: Transaction execution failed");
-
-        emit TransactionExecuted(_txIndex, msg.sender, transaction.to, transaction.value);
+        for (uint256 i = 0; i < transaction.to.length; i++) {
+            (bool success, ) = transaction.to[i].call{value: transaction.value[i]}(transaction.data[i]);
+            require(success, "MultiSig: Transaction execution failed");
+            emit TransactionExecuted(_txIndex, msg.sender, transaction.to[i], transaction.value[i]);
+        }
     }
 
     /**
      * @notice Rotates signers or changes threshold (Only via self-execution).
      */
-    function addSigner(address _newSigner) public onlySelf {
+    function _addSigner(address _newSigner) internal {
         require(_newSigner != address(0), "MultiSig: Invalid address");
         require(!isSigner[_newSigner], "MultiSig: Address is already a signer");
 
@@ -253,12 +196,13 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
         signers.push(_newSigner);
         signerVersion++;
 
+        threshold = (signers.length / 2) + 1;
+        emit ThresholdChanged(threshold);
         emit SignerAdded(_newSigner);
     }
 
-    function removeSigner(address _oldSigner) public onlySelf {
+    function _removeSigner(address _oldSigner) internal {
         require(isSigner[_oldSigner], "MultiSig: Not a signer");
-        require(signers.length - 1 >= threshold, "MultiSig: Breaking threshold guardrail");
 
         isSigner[_oldSigner] = false;
         for (uint256 i = 0; i < signers.length; i++) {
@@ -270,17 +214,37 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
         }
         signerVersion++;
 
+        if (signers.length > 0) {
+            threshold = (signers.length / 2) + 1;
+        } else {
+            threshold = 0;
+        }
+        emit ThresholdChanged(threshold);
         emit SignerRemoved(_oldSigner);
     }
 
-    function changeThreshold(uint256 _newThreshold) public onlySelf {
-        require(_newThreshold > 0, "MultiSig: Threshold must be > 0");
-        require(_newThreshold <= signers.length, "MultiSig: Threshold exceeds signer count");
-        
-        threshold = _newThreshold;
-        signerVersion++;
+    function addSigner(address _newSigner) public onlySelf {
+        _addSigner(_newSigner);
+    }
 
-        emit ThresholdChanged(_newThreshold);
+    function removeSigner(address _oldSigner) public onlySelf {
+        _removeSigner(_oldSigner);
+    }
+
+    function promoteAdmin(address _newAdmin, address _registry) public onlySelf {
+        _addSigner(_newAdmin);
+        if (_registry != address(0)) {
+            (bool success, ) = _registry.call(abi.encodeWithSignature("promoteToAdmin(address)", _newAdmin));
+            require(success, "Registry call failed");
+        }
+    }
+
+    function demoteAdmin(address _admin, address _registry) public onlySelf {
+        _removeSigner(_admin);
+        if (_registry != address(0)) {
+            (bool success, ) = _registry.call(abi.encodeWithSignature("removeRole(address)", _admin));
+            require(success, "Registry call failed");
+        }
     }
 
     function setTimelockDelay(uint256 _newDelay) public onlySelf {
@@ -300,9 +264,9 @@ contract BBSNSMultiSig is ReentrancyGuard, EIP712 {
     }
 
     function getTransaction(uint256 _txIndex) public view returns (
-        address to, 
-        uint256 value, 
-        bytes memory data, 
+        address[] memory to, 
+        uint256[] memory value, 
+        bytes[] memory data, 
         bool executed, 
         uint256 numConfirmations, 
         uint256 submissionTime,

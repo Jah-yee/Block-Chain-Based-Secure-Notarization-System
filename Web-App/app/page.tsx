@@ -12,17 +12,8 @@ function HomeContent() {
   const router = useRouter()
 
   useEffect(() => {
-    const mode = searchParams.get("mode")
-    const sessionId = searchParams.get("sessionId")
-
-    if (mode && sessionId) {
-      console.log(`[ROUTE] Redirecting remote session: ${mode}`);
-      if (mode === "gov-submit" || mode === "gov-vote") {
-        router.push(`/governance/remote-sign?sessionId=${sessionId}`)
-      } else if (mode === "notarize") {
-        router.push(`/auth/remote-login?sessionId=${sessionId}`)
-      }
-    }
+    // 🛡️ [CONSOLIDATION] Remote auth logic migrated to auth.bbsns.online
+    // No legacy redirects needed in Web-App home content.
   }, [searchParams, router])
 
   return (

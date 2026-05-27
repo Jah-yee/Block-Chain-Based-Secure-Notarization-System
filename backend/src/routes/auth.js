@@ -230,7 +230,20 @@ router.post('/verify-password', withDomain('AUTH'), allowPublic, withAction('AUT
 
     const user = result.rows[0];
 
-    // 🛡️ [SECURITY] Verification Gate
+    // 🛡️ [WEB3-ONLY] Detect accounts promoted via on-chain governance (no real password set).
+    // These accounts authenticate purely via wallet signature — skip bcrypt entirely.
+    const WEB3_ONLY_MARKERS = ['NOTARY_WEB3_ONLY', 'ADMIN_WEB3_ONLY'];
+    if (WEB3_ONLY_MARKERS.includes(user.password_hash)) {
+      console.log(`[AUTH] Web3-only account detected for ${normalizedEmail}. Bypassing password gate.`);
+      return res.json({
+        success: true,
+        role: user.role,
+        web3_only: true, // 🔑 Signal frontend to skip Steps 1 & 2, jump to wallet signing
+        message: 'Web3 wallet authentication required'
+      });
+    }
+
+    // 🛡️ [SECURITY] Standard password verification for email-activated accounts
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       return res.status(401).json({ 
@@ -242,6 +255,7 @@ router.post('/verify-password', withDomain('AUTH'), allowPublic, withAction('AUT
     res.json({ 
       success: true, 
       role: user.role,
+      web3_only: false,
       message: 'Password verified' 
     });
   } catch (error) {
@@ -592,8 +606,7 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
       }
     } catch (chainErr) {
       console.error("[CHAIN_FETCH_ERROR]", chainErr.message);
-      // Fallback: If we can't reach the chain, we can only proceed if the user already exists in DB.
-      // However, for high-security login, we fail if the chain is unreachable and user is missing.
+      return res.status(503).json({ error: 'Service Unavailable: Blockchain network is unreachable. Login is temporarily disabled to enforce security policies.', code: 'RPC_UNREACHABLE' });
     }
 
     const result = await pool.runWithContext({
@@ -633,11 +646,27 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
               return { error: 'User profile not found. Please register first.', status: 404 };
             }
 
+            // 🛡️ [Hardening] Sync Blockchain Role to Database
+            if (user) {
+              let expectedRole = user.role;
+              if (Number(liveRoleValue) === 3) expectedRole = 'admin';
+              else if (Number(liveRoleValue) === 2) expectedRole = 'notary';
+              else if (Number(liveRoleValue) === 1) expectedRole = 'user';
+              else if (Number(liveRoleValue) === 0) expectedRole = 'user';
+
+              if (user.role !== expectedRole) {
+                console.log(`[AUTH_SYNC] Syncing DB role for ${normalizedWalletAddress} from ${user.role} to ${expectedRole}`);
+                await auditClient.query('UPDATE users SET role = $1 WHERE id = $2', [expectedRole, user.id]);
+                user.role = expectedRole;
+              }
+            }
+
             // 🛡️ [Hardening 2.9C-A] Activation Guard for Notaries (Uses pre-fetched liveRoleValue)
-            if (Number(liveRoleValue) === 2 || user.role === 'notary') {
+            // Enforce RULE_6: If identity_state is set to ACTIVE, bypass activation guards.
+            if ((Number(liveRoleValue) === 2 || user.role === 'notary') && user.identity_state !== 'ACTIVE') {
               const appCheck = await auditClient.query(
                 "SELECT status, is_activated FROM notary_applications WHERE LOWER(wallet_address) = $1",
-                [user.wallet_address]
+                [user.wallet_address.toLowerCase()]
               );
               if (appCheck.rows.length === 0 || appCheck.rows[0].status !== 'activated' || !appCheck.rows[0].is_activated) {
                 await auditClient.query('ROLLBACK');
@@ -651,10 +680,17 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
 
             // 2. Password Check (Non-Admin)
             // 3. National ID Match
-            if (Number(liveRoleValue) !== 3 && Number(liveRoleValue) !== 2) {
+            // 🛡️ [Hardening] Password & ID check bypass for Web3 Co-signers (Admins & Notaries)
+            // Fallback to database user.role in case blockchain RPC is temporarily degraded/lagging.
+            const isNotaryOrAdmin = (Number(liveRoleValue) === 3 || user.role === 'admin' || Number(liveRoleValue) === 2 || user.role === 'notary');
+            if (!isNotaryOrAdmin) {
               // 🛡️ [Hardening] Restore strict enforcement for Non-Admins now that middleware is relaxed
               if (!password || !nationalId) {
                 await auditClient.query('ROLLBACK');
+                // Detect Remote Auth flow (signature provided but no password)
+                if (signature && !password) {
+                   return { error: 'Access Denied: You do not have the required on-chain privileges for Remote Auth.', status: 403 };
+                }
                 return { error: 'Password and National ID are required for secure login', status: 400 };
               }
 
@@ -688,13 +724,18 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
                 // If standard protocol fails, check if the nonce is a literal challenge from an active session.
                 const fallbackNonce = signature_nonce || nonce;
                 const sessionCheck = await auditClient.query(
-                  'SELECT challenge FROM remote_auth_sessions WHERE challenge = $1 AND expires_at > NOW()',
+                  'SELECT challenge, requested_role FROM remote_auth_sessions WHERE challenge = $1 AND expires_at > NOW()',
                   [fallbackNonce]
                 );
 
                 if (sessionCheck.rows.length > 0) {
                   // Valid session found. Perform direct verification against the challenge string.
                   try {
+                    const sessionRequestedRole = sessionCheck.rows[0].requested_role;
+                    if (Number(liveRoleValue) === 2 && sessionRequestedRole === 'admin') {
+                        throw new Error('Access Denied: You are attempting to log in via the Admin portal to bypass security checks. Please use the Notary Login portal.');
+                    }
+
                     const recoveredAddress = ethers.verifyMessage(fallbackNonce, signature);
                     if (recoveredAddress.toLowerCase() !== normalizedWalletAddress) {
                       throw authErr; // Rethrow original mismatch if even the fallback fails
@@ -702,7 +743,7 @@ router.post('/login', validateBody(loginSchema), withDomain('AUTH'), withGuestCo
                     console.log(`[AUTH_FALLBACK_SUCCESS] Authorized via Remote Session: ${fallbackNonce.substring(0,12)}...`);
                   } catch (e) {
                     await auditClient.query('ROLLBACK');
-                    return { error: authErr.message, status: 401 };
+                    return { error: e.message || authErr.message, status: 401 };
                   }
                 } else {
                   await auditClient.query('ROLLBACK');
@@ -841,7 +882,9 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
         );
 
         if (appRes.rowCount === 0) {
-          throw new Error('Invalid or already used activation token.');
+          const err = new Error('Invalid or already used activation token.');
+          err.status = 404;
+          throw err;
         }
 
         const application = appRes.rows[0];
@@ -885,7 +928,9 @@ router.post('/activate', withDomain('NOTARY'), allowPublic, withAction('NOTARY_A
           
           // 🛡️ [Hardening] Safety Check: Ensure we only activate PENDING notaries
           if (user.role !== 'notary' || user.identity_state !== 'PENDING') {
-            throw new Error(`Invalid account state for activation: ${user.role} (${user.identity_state})`);
+            const err = new Error(`Invalid account state for activation: ${user.role} (${user.identity_state})`);
+            err.status = 409;
+            throw err;
           }
 
           await auditClient.query(
@@ -1089,7 +1134,7 @@ const { requireUnpaused } = require('../middleware/circuit-breaker');
 // POST /auth/remote/session - Creation for desktop app
 router.post('/remote/session', withGuestContext, requirePrivilege({ capability: 'AUTH_REMOTE_SESSION', allowPublic: true }), async (req, res) => {
   try {
-    const { device_id } = req.body;
+    const { device_id, requested_role } = req.body;
     if (!device_id) return res.status(400).json({ error: 'device_id is required' });
 
     const challenge = `BBSNS-LOGIN-${crypto.randomBytes(16).toString('hex')}`;
@@ -1097,8 +1142,8 @@ router.post('/remote/session', withGuestContext, requirePrivilege({ capability: 
     const expires_at = new Date(Date.now() + 10 * 60 * 1000); 
 
     const result = await pool.query(
-      'INSERT INTO remote_auth_sessions (challenge, device_id, session_secret, expires_at) VALUES ($1, $2, $3, $4) RETURNING id',
-      [challenge, device_id, session_secret, expires_at]
+      'INSERT INTO remote_auth_sessions (challenge, device_id, session_secret, expires_at, requested_role) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [challenge, device_id, session_secret, expires_at, requested_role]
     );
 
     res.json({ sessionId: result.rows[0].id, sessionSecret: session_secret });
@@ -1345,6 +1390,16 @@ router.post('/remote/complete', allowPublic, requirePrivilege({ capability: 'REM
                 return { error: 'Identity Binding Mismatch: Wallet does not match handshake request.', status: 403 };
             }
 
+            // 🛡️ [Hardening] Enforce session requested_role constraints
+            if (session.requested_role) {
+                const completingUserRes = await auditClient.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
+                if (completingUserRes.rows.length === 0 || completingUserRes.rows[0].role !== session.requested_role) {
+                    await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                    await auditClient.query('COMMIT');
+                    return { error: `Authentication Rejected: Session requires '${session.requested_role}' role, but your account role is '${completingUserRes.rows[0]?.role || 'none'}'.`, status: 403 };
+                }
+            }
+
             // [SUCCESS] Complete the Binding
             await auditClient.query(
                 "UPDATE remote_auth_sessions SET status = 'completed', user_id = $1, wallet_address = $2, authorized_at = NOW() WHERE id = $3",
@@ -1487,7 +1542,7 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
 
             // 3. Resolve Database User
             const userRes = await auditClient.query(
-                'SELECT id FROM users WHERE LOWER(wallet_address) = $1 AND identity_state = $2',
+                'SELECT id, role FROM users WHERE LOWER(wallet_address) = $1 AND identity_state = $2',
                 [walletAddress.toLowerCase(), 'ACTIVE']
             );
 
@@ -1496,7 +1551,15 @@ router.post('/remote/atomic-bind', allowPublic, requirePrivilege({ capability: '
                 return { error: 'Account not found or inactive. Please register on the web app first.', status: 404 };
             }
 
-            const userId = userRes.rows[0].id;
+            const user = userRes.rows[0];
+            const userId = user.id;
+
+            // 🛡️ [Hardening] Enforce session requested_role constraints
+            if (session.requested_role && user.role !== session.requested_role) {
+                await auditClient.query("UPDATE remote_auth_sessions SET status = 'failed' WHERE id = $1", [sessionId]);
+                await auditClient.query('COMMIT');
+                return { error: `Authentication Rejected: Session requires '${session.requested_role}' role, but your account role is '${user.role}'.`, status: 403 };
+            }
 
             // 4. [ATOMIC UPDATE] Complete the Handshake
             const oneTimeCode = crypto.randomBytes(32).toString('hex');
@@ -1663,7 +1726,7 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), r
       try {
         // 1. [VALIDATE FIRST] SELECT FOR UPDATE: Lock the session row to prevent micro-races
         const sessionRes = await auditClient.query(
-          `SELECT wallet_address, code_consumed, code_expires_at 
+          `SELECT wallet_address, code_consumed, code_expires_at, requested_role 
            FROM remote_auth_sessions 
            WHERE id::text = $1 AND one_time_code = $2 AND device_id = $3
            FOR UPDATE`,
@@ -1676,7 +1739,7 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), r
           return { error: 'Invalid exchange code', status: 403 };
         }
 
-        const { wallet_address, code_consumed, code_expires_at } = sessionRes.rows[0];
+        const { wallet_address, code_consumed, code_expires_at, requested_role } = sessionRes.rows[0];
 
         // 2. Validate session state
         if (code_consumed) {
@@ -1748,6 +1811,22 @@ router.post('/remote/exchange', withGuestContext, simpleRateLimiter(5, 60000), r
         if (!user) {
           await auditClient.query('ROLLBACK');
           return { error: 'Account not found', status: 404 };
+        }
+
+        // 🛡️ [Hardening] Enforce session requested_role constraints
+        if (requested_role) {
+          const ROLE_MAP = { 'none': 0, 'user': 1, 'notary': 2, 'admin': 3 };
+          const expectedRoleNum = ROLE_MAP[requested_role];
+          if (
+            (user && user.role !== requested_role) ||
+            (roleData !== null && Number(roleData) !== expectedRoleNum)
+          ) {
+            await auditClient.query('ROLLBACK');
+            return { 
+              error: `Authentication Rejected: Session requires '${requested_role}' role, but your account is not authorized for this role.`, 
+              status: 403 
+            };
+          }
         }
 
         // 4. [MUTATE SECOND] Consume code

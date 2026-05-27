@@ -354,8 +354,10 @@ router.get("/applications", requirePrivilege({ capability: 'NOTARY_APP_LIST' }),
         na.experience,
         na.national_id_number as national_id,
         na.status,
-        na.created_at as application_date
+        na.created_at as application_date,
+        u.role as current_role
       FROM notary_applications na
+      LEFT JOIN users u ON LOWER(na.wallet_address) = LOWER(u.wallet_address)
       WHERE na.status IN ('KYC_VERIFIED', 'approved', 'activated', 'rejected')
       ORDER BY na.created_at DESC
     `);
@@ -552,11 +554,12 @@ router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({
   try {
     const isReference = (id || "").startsWith('BBSNS-REG-');
     const lookupField = isReference ? "reference_id" : "id";
-    const appCheck = await pool.query(`SELECT status FROM notary_applications WHERE ${lookupField} = $1`, [id]);
+    const appCheck = await pool.query(`SELECT status, user_id, email, wallet_address FROM notary_applications WHERE ${lookupField} = $1`, [id]);
     if (appCheck.rows.length === 0) {
       return res.status(404).json({ status: "error", error: "Application not found" });
     }
     const currentStatus = appCheck.rows[0].status;
+    const appData = appCheck.rows[0];
 
     if (currentStatus === 'rejected') {
       return res.status(409).json({ status: "error", error: "ALREADY_PROCESSED: Application already rejected" });
@@ -569,12 +572,64 @@ router.post("/applications/:id/reject", withDomain('NOTARY'), requirePrivilege({
       });
     }
 
-    const result = await pool.query(
-      `UPDATE notary_applications SET status = 'rejected', updated_at = NOW() WHERE ${lookupField} = $1 RETURNING *`,
-      [id]
-    );
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      
+      result = await client.query(
+        `UPDATE notary_applications SET 
+          status = 'rejected', 
+          phone = NULL,
+          license_number = NULL,
+          experience = NULL,
+          national_id_number = NULL,
+          national_id_hash = NULL,
+          nationality = NULL,
+          face_descriptor = NULL,
+          updated_at = NOW() 
+        WHERE ${lookupField} = $1 RETURNING *`,
+        [id]
+      );
+      
+      if (appData.user_id) {
+         await client.query(`
+            UPDATE users SET
+              role = CASE WHEN role = 'notary' THEN 'user' ELSE role END,
+              identity_state = 'REJECTED',
+              national_id_hash = NULL,
+              is_human_verified = false,
+              kyc_verified = false
+            WHERE id = $1
+         `, [appData.user_id]);
+      } else if (appData.wallet_address) {
+         await client.query(`
+            UPDATE users SET
+              role = CASE WHEN role = 'notary' THEN 'user' ELSE role END,
+              identity_state = 'REJECTED',
+              national_id_hash = NULL,
+              is_human_verified = false,
+              kyc_verified = false
+            WHERE LOWER(wallet_address) = LOWER($1)
+         `, [appData.wallet_address]);
+      }
+      
+      await client.query('COMMIT');
+    } catch(e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
     logAction('NOTARY_STATUS_CHANGE', `Admin rejected app ${id}`, req.actor?.email || 'admin', { id, from: currentStatus, to: 'rejected' });
+
+    try {
+        const emailService = require("../services/EmailService");
+        await emailService.sendRejectionEmail(appData.email);
+    } catch(e) {
+        console.warn("Could not send rejection email:", e.message);
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ status: "error", data: null, error: "Application not found" });

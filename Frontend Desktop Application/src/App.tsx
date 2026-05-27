@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Shield, Loader2, AlertCircle, Sun, Moon, CheckCircle2,
   ShieldAlert, RefreshCw, WifiOff, Copy, ExternalLink,
-  Info, AlertTriangle, CheckCircle, Lock, Clock
+  Info, AlertTriangle, CheckCircle, Lock, Clock, ArrowRight
 } from "lucide-react";
 import { RoleSelection } from "./components/RoleSelection";
 import { AdminLogin } from "./components/admin/AdminLogin";
@@ -50,21 +50,27 @@ interface SystemConfig {
 function DeploymentChecklist({ config }: { config: SystemConfig }) {
   const [copied, setCopied] = useState<string | null>(null);
 
-  const checks = [
-    { name: "Registry NFT", address: config.contracts.genesisNft },
-    { name: "Activation Hook", address: config.contracts.genesisActivation },
-    { name: "Notary Database", address: config.contracts.notaryRegistry },
-    { name: "Document Vault", address: config.contracts.documentRegistry },
-    { name: "Protocol Token", address: config.contracts.ntk },
-  ].map(check => ({
-    ...check,
-    status: check.address ? "Confirmed" : "Pending"
+  // Map contract keys to readable labels dynamically
+  const labelMap: Record<string, string> = {
+    genesisNft: "Registry Authority",
+    genesisActivation: "Activation Hook",
+    notaryRegistry: "Notary Ledger",
+    documentRegistry: "Document Vault",
+    ntk: "Protocol Token",
+    ntkr: "Reputation Engine",
+    multisig: "Governance MultiSig"
+  };
+
+  const checks = Object.entries(config.contracts).map(([key, address]) => ({
+    name: labelMap[key] || key.replace(/([A-Z])/g, ' $1').trim(),
+    address,
+    status: address && address !== "0x0000000000000000000000000000000000000000" ? "Confirmed" : "Pending"
   }));
 
-  const truncate = (addr: string) => addr ? `${addr.slice(0, 10)}...${addr.slice(-8)}` : "UNASSIGNED";
+  const truncate = (addr: string) => addr ? `${addr.slice(0, 14)}...${addr.slice(-12)}` : "NOT_DEPLOYED";
 
   const copyToClipboard = (text: string) => {
-    if (!text) return;
+    if (!text || text === "0x0000000000000000000000000000000000000000") return;
     navigator.clipboard.writeText(text);
     setCopied(text);
     setTimeout(() => setCopied(null), 2000);
@@ -74,44 +80,45 @@ function DeploymentChecklist({ config }: { config: SystemConfig }) {
     <div className="w-full">
       <table className="w-full text-left border-collapse">
         <thead>
-          <tr>
-            <th className="px-4 py-8 text-[11px] font-black text-slate-700 uppercase tracking-[0.5em]">Resource Name</th>
-            <th className="px-4 py-8 text-[11px] font-black text-slate-700 uppercase tracking-[0.5em]">
-              <div className="flex items-center gap-2">
-                Network Identity <Info size={14} className="text-slate-800" />
-              </div>
-            </th>
-            <th className="px-4 py-8 text-[11px] font-black text-slate-700 uppercase tracking-[0.5em] text-right">State</th>
+          <tr className="border-b border-[#1e2433]">
+            <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Resource Module</th>
+            <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Verification State</th>
+            <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Contract Address</th>
           </tr>
         </thead>
         <tbody>
           {checks.map((check, idx) => (
-            <tr key={idx} className="hover:bg-white/[0.01] transition-all group">
-              <td className="px-4 py-8">
-                <span className="text-[14px] font-black text-slate-300 uppercase tracking-tight">{check.name}</span>
-              </td>
-              <td className="px-4 py-8">
-                <div className="flex items-center gap-6">
-                  <code className="text-[14px] text-slate-500 font-mono tracking-[0.1em] group-hover:text-blue-400 transition-colors">
-                    {truncate(check.address)}
-                  </code>
-                  {check.address && (
-                    <button
-                      onClick={() => copyToClipboard(check.address)}
-                      className="p-2 text-slate-700 hover:text-white hover:bg-white/5 rounded-xl transition-all relative"
-                    >
-                      {copied === check.address ? <CheckCircle size={18} className="text-emerald-500" /> : <Copy size={18} />}
-                    </button>
-                  )}
+            <tr key={idx} className={`border-b border-[#12151c] hover:bg-white/[0.03] transition-colors group ${idx % 2 === 0 ? 'bg-transparent' : 'bg-white/[0.01]'}`}>
+              <td className="px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-1 h-8 rounded-full ${check.status === 'Confirmed' ? 'bg-emerald-500' : 'bg-slate-700'}`} />
+                  <span className="text-[13px] font-semibold text-slate-200">{check.name}</span>
                 </div>
               </td>
-              <td className="px-4 py-8 text-right">
-                <div className={`inline-flex items-center gap-3 text-[11px] font-black tracking-[0.2em] ${check.status === 'Confirmed'
-                    ? 'text-emerald-500'
-                    : 'text-slate-700'
-                  }`}>
-                  {check.status === 'Confirmed' && <CheckCircle2 size={16} />}
-                  <span className="uppercase">{check.status}</span>
+              <td className="px-6 py-4">
+                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold ${
+                  check.status === 'Confirmed' 
+                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' 
+                    : 'bg-slate-800/60 text-slate-500 border border-slate-700/60'
+                }`}>
+                  <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${check.status === 'Confirmed' ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                  {check.status}
+                </div>
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <code className="text-[11px] text-slate-400 font-mono bg-[#0d0f14] px-3 py-1.5 rounded-lg border border-[#1e2433]">
+                    {truncate(check.address)}
+                  </code>
+                  {check.address && check.address !== "0x0000000000000000000000000000000000000000" && (
+                    <button
+                      onClick={() => copyToClipboard(check.address)}
+                      className="p-1.5 text-slate-600 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      title="Copy full address"
+                    >
+                      {copied === check.address ? <CheckCircle size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>
@@ -149,7 +156,7 @@ export default function App() {
       const systemStatus = await api.request("/api/auth/system-status");
       console.log("[STARTUP] System Status:", systemStatus);
 
-      const canProceed = systemStatus.activated === true || systemStatus.hasUsers === true;
+      const canProceed = systemStatus.activated === true && systemStatus.hasUsers === true;
 
       if (!canProceed) {
           console.log("[STARTUP] System not initialized. Redirecting to Genesis...");
@@ -284,146 +291,217 @@ export default function App() {
       </div>
       
       <div className="flex-1 overflow-hidden flex flex-col">
-      {appState === "initialize-system" && (
-        <div className="flex-1 flex overflow-hidden bg-[#020408] p-12 gap-12 justify-center">
-          <div className="flex w-full max-w-[1400px] gap-12 h-full">
-            {/* 🕹️ LEFT: STATUS SIDEBAR */}
-            <aside className="w-[400px] bg-[#0f172a] rounded-[4rem] flex flex-col p-16 shrink-0 shadow-2xl border border-white/5">
-              <div className="flex flex-col h-full">
-                {/* 🛡️ System Identity */}
-                <div className="flex items-center gap-7 mb-24">
-                  <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center shadow-[0_0_50px_rgba(37,99,235,0.3)]">
-                    <Shield className="w-10 h-10 text-white" />
-                  </div>
-                  <div className="space-y-1">
-                    <h1 className="text-[22px] font-black text-white tracking-tight leading-none uppercase">Security Suite</h1>
-                    <p className="text-[14px] font-bold text-slate-500 uppercase tracking-widest">Genesis Controller</p>
+        {appState === "initialize-system" && (
+          <div className="flex-1 bg-[#080b12] flex font-sans overflow-hidden">
+            <aside className="w-72 border-r border-[#1a1f2e] bg-[#0c0f18] p-8 flex flex-col gap-0 shrink-0">
+              {/* Brand — top section */}
+              <div className="flex items-center gap-3 pb-7">
+                <div className="w-11 h-11 bg-blue-600/20 rounded-xl flex items-center justify-center border border-blue-500/30">
+                  <Shield size={22} className="text-blue-400" />
+                </div>
+                <div>
+                  <h1 className="text-[13px] font-black text-white tracking-wider uppercase leading-none">Security Suite</h1>
+                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-widest mt-0.5">Genesis Controller</p>
+                </div>
+              </div>
+
+              {/* Hard separator */}
+              <div className="h-px bg-[#1a1f2e] mb-7" />
+
+              {/* Network Status Card */}
+              <div className="bg-[#111520] rounded-xl p-4 border border-[#1e2436] mb-7">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Active Network</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase">Live</span>
                   </div>
                 </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Chain ID</span>
+                  <span className="text-[24px] font-black text-white font-mono leading-none">{config?.chainId}</span>
+                </div>
+                <p className="text-[10px] text-slate-600 uppercase tracking-widest mt-2">BBSNS Genesis Root</p>
+              </div>
 
-                {/* 📝 Deployment Stepper (High Spacing) */}
-                <div className="flex-1 flex flex-col min-h-0 pt-10">
-                  <div className="mb-16">
-                    <p className="text-[12px] font-black text-slate-600 uppercase tracking-[0.4em] mb-6">Network Node</p>
-                    <div className="bg-black/40 border border-white/5 p-6 rounded-[2rem] flex items-center justify-between shadow-inner">
-                      <span className="text-[14px] text-blue-400 font-mono font-black tracking-widest uppercase">ID: {config.chainId}</span>
-                      <div className="flex items-center gap-3">
-                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
-                        <span className="text-[11px] font-black text-emerald-500 uppercase tracking-tighter">Synced</span>
-                      </div>
+              {/* Hard separator */}
+              <div className="h-px bg-[#1a1f2e] mb-7" />
+
+              {/* Sequence Steps */}
+              <div className="flex-1 flex flex-col gap-7">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">Initialization Sequence</p>
+                <div className="flex flex-col gap-6">
+                  {/* Step 1: Done */}
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0"
+                      style={{ backgroundColor: 'rgba(16,185,129,0.15)', borderColor: 'rgba(16,185,129,0.5)', color: '#34d399' }}>
+                      <CheckCircle2 size={16} />
+                    </div>
+                    <div>
+                      <p className="text-[12px] font-bold uppercase tracking-wide" style={{ color: '#e2e8f0' }}>Registry Synthesis</p>
+                      <p className="text-[10px] font-medium mt-0.5" style={{ color: '#10b981' }}>Confirmed</p>
                     </div>
                   </div>
-
-                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-4">
-                    <p className="text-[12px] font-black text-slate-600 uppercase tracking-[0.4em] mb-10">Initialization Phase</p>
-                    <div className="space-y-0 relative">
-                      <div className="absolute left-[23px] top-5 bottom-5 w-0.5 bg-white/5" />
-                      {[
-                        { id: 1, t: "Registry Synthesis", state: "done" },
-                        { id: 2, t: "Gateway Connection", state: "active" },
-                        { id: 3, t: "Genesis Sign-Off", state: "pending" }
-                      ].map((phase, i) => (
-                        <div key={i} className="flex gap-12 pb-20 relative last:pb-0">
-                          <div className="relative z-10">
-                             <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center text-[13px] font-black transition-all duration-500 ${
-                               phase.state === 'done' ? 'bg-emerald-500 border-emerald-500 text-white shadow-[0_0_30px_rgba(16,185,129,0.3)]' :
-                               phase.state === 'active' ? 'bg-blue-600 border-blue-600 text-white shadow-[0_0_50px_rgba(37,99,235,0.6)]' :
-                               'bg-[#020408] border-white/10 text-slate-800'
-                             }`}>
-                               {phase.state === 'done' ? <CheckCircle2 size={24} /> : phase.id}
-                             </div>
-                          </div>
-                          <div className="flex flex-col pt-2">
-                            <p className={`text-[16px] font-black tracking-tight uppercase ${phase.state === 'pending' ? 'text-slate-800' : 'text-white'}`}>{phase.t}</p>
-                            {phase.state === 'active' && <span className="text-[11px] font-black text-blue-500 uppercase tracking-[0.2em] mt-3 animate-pulse">Awaiting Signature</span>}
-                          </div>
-                        </div>
-                      ))}
+                  {/* Step 2: Active */}
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0"
+                      style={{ backgroundColor: 'rgba(37,99,235,0.2)', borderColor: 'rgba(59,130,246,0.5)', color: '#60a5fa' }}>
+                      <span className="text-[12px] font-black">2</span>
+                    </div>
+                    <div>
+                      <p className="text-[12px] font-bold uppercase tracking-wide" style={{ color: '#e2e8f0' }}>Gateway Connection</p>
+                      <p className="text-[10px] font-medium mt-0.5" style={{ color: '#60a5fa' }}>Awaiting Signature</p>
+                    </div>
+                  </div>
+                  {/* Step 3: Locked */}
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center border-2 shrink-0"
+                      style={{ backgroundColor: '#111520', borderColor: '#252d40', color: '#475569' }}>
+                      <span className="text-[12px] font-black">3</span>
+                    </div>
+                    <div>
+                      <p className="text-[12px] font-bold uppercase tracking-wide" style={{ color: '#475569' }}>Genesis Sign-Off</p>
+                      <p className="text-[10px] font-medium mt-0.5" style={{ color: '#334155' }}>Locked</p>
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Hard separator */}
+              <div className="h-px bg-[#1a1f2e] mt-7 mb-7" />
+
+              {/* Protocol Note */}
+              <div className="p-4 bg-[#111520] border border-[#1e2436] rounded-xl">
+                <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Protocol Note</p>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Establish Root of Trust via the Genesis Authority Hook.
+                </p>
               </div>
             </aside>
 
-            {/* 📊 RIGHT: INTEGRATED WORKSPACE */}
-            <main className="flex-1 flex flex-col min-w-0 py-8 h-full overflow-y-auto custom-scrollbar pr-4">
-              <div className="flex flex-col gap-16 min-h-full">
-                {/* 🏆 Refined Header */}
-                <div className="flex items-center justify-between px-4">
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-4 text-blue-500 font-black uppercase text-[12px] tracking-[0.5em]">
-                       <div className="w-3 h-3 bg-blue-600 rounded-full animate-pulse shadow-[0_0_20px_rgba(37,99,235,0.5)]" />
-                       Root Identity Verified
+            {/* MAIN WORKSPACE */}
+            <main className="flex-1 flex flex-col min-w-0 bg-[#080b12]">
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-10 lg:p-14">
+                <div className="max-w-5xl mx-auto flex flex-col gap-10">
+
+                  {/* HEADER */}
+                  <header className="flex flex-col gap-10 pb-10 border-b border-[#1a1f2e]">
+                    {/* Title Row */}
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                        <span className="text-blue-400 text-[10px] font-bold uppercase tracking-[0.5em] no-underline">Network Identity Authenticated</span>
+                      </div>
+                      <h2 className="text-5xl font-black text-white tracking-tight uppercase leading-none">
+                        Genesis Console
+                      </h2>
+                      <p className="text-[13px] text-slate-500 font-normal">
+                        Blockchain registry verification and initialization dashboard
+                      </p>
                     </div>
-                    <h2 className="text-[48px] font-black text-white tracking-tighter uppercase leading-none">Resource Dashboard</h2>
-                  </div>
-                  
-                  <div className="flex items-center gap-8">
-                     {[
-                       { l: "Authority Hash", v: "Verified", c: "text-blue-500", bg: "bg-blue-500/5" },
-                       { l: "Network Sync", v: "Stabilized", c: "text-emerald-500", bg: "bg-emerald-500/5" }
-                     ].map((stat, i) => (
-                       <div key={i} className={`flex flex-col gap-2 px-10 py-6 rounded-[2rem] border border-white/5 ${stat.bg}`}>
-                           <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em]">{stat.l}</span>
-                           <span className={`text-[18px] font-black uppercase tracking-[0.2em] ${stat.c}`}>{stat.v}</span>
-                       </div>
-                     ))}
-                  </div>
+                    {/* Stats Row — hardcoded, not dynamic (prevents Tailwind purge) */}
+                    <div className="grid grid-cols-3 gap-4">
+                      {/* Authority Hash */}
+                      <div className="px-5 py-4 rounded-xl flex flex-col gap-2"
+                        style={{ backgroundColor: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#64748b' }}>Authority Hash</span>
+                        <span className="text-[16px] font-black" style={{ color: '#34d399' }}>Verified</span>
+                      </div>
+                      {/* Network Sync */}
+                      <div className="px-5 py-4 rounded-xl flex flex-col gap-2"
+                        style={{ backgroundColor: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#64748b' }}>Network Sync</span>
+                        <span className="text-[16px] font-black" style={{ color: '#60a5fa' }}>Stabilized</span>
+                      </div>
+                      {/* Chain ID */}
+                      <div className="px-5 py-4 rounded-xl flex flex-col gap-2"
+                        style={{ backgroundColor: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#64748b' }}>Chain ID</span>
+                        <span className="text-[16px] font-black" style={{ color: '#a78bfa' }}>{config?.chainId || '—'}</span>
+                      </div>
+                    </div>
+                  </header>
+
+                  {/* REGISTRY TABLE */}
+                  <section className="flex flex-col gap-5">
+                    <div className="flex items-center gap-4">
+                      <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-[0.5em] whitespace-nowrap">Registry Integrity Audit</h3>
+                      <div className="h-px flex-1 bg-[#1a1f2e]" />
+                    </div>
+                    <div className="bg-[#0c0f18] rounded-2xl border border-[#1a1f2e] overflow-hidden">
+                      <div className="max-h-[380px] overflow-y-auto custom-scrollbar">
+                        <DeploymentChecklist config={config} />
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* ACTION PANEL — dark navy bg so blue button is unmistakably a button */}
+                  <section className="flex flex-col gap-4">
+                    <div className="bg-[#0c0f18] border border-[#1e2436] rounded-2xl p-8 flex flex-col lg:flex-row items-center justify-between gap-8">
+                      {/* Left side: info */}
+                      <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 bg-[#111520] rounded-xl flex items-center justify-center border border-[#1e2436] shrink-0">
+                          <Lock size={26} className="text-blue-400" />
+                        </div>
+                        <div>
+                          <p className="text-[20px] font-black text-white uppercase tracking-tight leading-none">Authorize Console</p>
+                          <p className="text-[12px] text-slate-400 font-normal mt-2">
+                            Genesis Handshake Protocol — Initialization Required
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Right side: clearly differentiated button — inline style to bypass CSS purge */}
+                      <button
+                        onClick={() => {
+                          if (!config) return;
+                          const url = `${config.remoteAuthUrl.replace(/\/$/, "")}/?mode=genesis`;
+                          (window as any).electronAPI ? (window as any).electronAPI.openExternal(url) : window.open(url, '_blank');
+                        }}
+                        style={{
+                          backgroundColor: '#2563eb',
+                          boxShadow: '0 4px 24px rgba(37,99,235,0.45)',
+                          border: '1px solid rgba(96,165,250,0.4)'
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#3b82f6')}
+                        onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#2563eb')}
+                        className="w-full lg:w-auto flex items-center justify-center gap-3 text-white px-10 py-4 rounded-xl font-black uppercase text-[13px] tracking-widest transition-colors duration-200 cursor-pointer"
+                      >
+                        <Lock size={15} />
+                        Launch Initialization
+                        <ArrowRight size={15} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 justify-center py-1">
+                      <Info size={13} className="text-slate-700 shrink-0" />
+                      <p className="text-[11px] text-slate-600 uppercase tracking-[0.3em]">
+                        Manual Genesis Authorization Required
+                      </p>
+                    </div>
+                  </section>
                 </div>
-
-                {/* 🛠️ Registry Table Area */}
-                <div className="flex flex-col px-4">
-                   <div className="flex flex-col items-center gap-4 mb-12">
-                      <h3 className="text-[14px] font-black text-slate-500 uppercase tracking-[0.6em]">Registry Module Integrity</h3>
-                      <div className="w-20 h-1.5 bg-blue-600/30 rounded-full shadow-[0_0_15px_rgba(37,99,235,0.2)]" />
-                   </div>
-                   <div className="flex-1 min-h-[300px] bg-black/20 rounded-[3rem] border border-white/5 p-8 shadow-2xl overflow-y-auto custom-scrollbar">
-                      <DeploymentChecklist config={config} />
-                   </div>
-                </div>
-              </div>
-
-              {/* ⚡ PRIMARY ACTION: HIGH VISIBILITY COMMAND */}
-              <div className="flex flex-col items-center gap-10 pb-10">
-                 <button 
-                   onClick={() => {
-                     if (!config) return;
-                     const url = `${config.remoteAuthUrl.replace(/\/$/, "")}/?mode=genesis`;
-                     (window as any).electronAPI ? (window as any).electronAPI.openExternal(url) : window.open(url, '_blank');
-                   }}
-                   style={{ backgroundColor: '#2563eb', borderRadius: '60px' }}
-                   className="group relative flex items-center gap-10 text-white px-24 py-10 transition-all duration-500 shadow-[0_20px_100px_rgba(37,99,235,0.6)] hover:shadow-[0_40px_150px_rgba(37,99,235,0.8)] hover:-translate-y-2 active:scale-[0.98] border-2 border-white/30 ring-4 ring-blue-400/50 cursor-pointer overflow-hidden"
-                 >
-                   <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-black/20 opacity-100" />
-                   <div className="w-20 h-20 bg-white/20 rounded-[1.8rem] flex items-center justify-center border border-white/40 shrink-0 shadow-inner group-hover:scale-110 transition-transform relative z-10">
-                     <Lock size={36} className="text-white drop-shadow-md" />
-                   </div>
-                   <div className="text-left relative z-20">
-                     <p className="text-[24px] font-black uppercase leading-none mb-2 tracking-tight drop-shadow-sm">Authorize Console</p>
-                     <p className="text-[14px] text-white/90 font-bold tracking-wider">Initialize secure protocol handshake</p>
-                   </div>
-                 </button>
-
-                 <div className="flex items-center justify-center gap-5 text-slate-800">
-                    <Info size={18} />
-                    <p className="text-[12px] font-black uppercase tracking-[0.4em]">
-                      Manual Genesis Authorization Required for System Unlock
-                    </p>
-                 </div>
               </div>
             </main>
           </div>
-        </div>
-      )}
+        )}
 
-        {appState === "role-selection" && <RoleSelection onSelectRole={(role) => setAppState(role === "admin" ? "admin-login" : "notary-login")} />}
-        {appState === "admin-login" && <AdminLogin onLogin={recoverSession} onBack={() => setAppState("role-selection")} />}
-        {appState === "notary-login" && <NotaryLogin onLogin={recoverSession} onBack={() => setAppState("role-selection")} />}
+        {appState === "role-selection" && (
+          <RoleSelection onSelectRole={(role) => setAppState(role === "admin" ? "admin-login" : "notary-login")} />
+        )}
+        
+        {appState === "admin-login" && (
+          <AdminLogin onLogin={recoverSession} onBack={() => setAppState("role-selection")} />
+        )}
+
+        {appState === "notary-login" && (
+          <NotaryLogin onLogin={recoverSession} onBack={() => setAppState("role-selection")} />
+        )}
 
         {appState === "admin-app" && (
-          <div className="flex-1 flex min-h-0 h-full overflow-hidden" style={{ height: 'calc(100vh - 48px)' }}>
+          <div className="flex-1 flex min-h-0 h-full overflow-hidden">
             <Sidebar role="admin" user={user} activeScreen={adminScreen} onNavigate={(s) => setAdminScreen(s as AdminScreen)} onLogout={() => setLogoutDialogOpen(true)} alertCount={alertCount} isCollapsed={isSidebarCollapsed} onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)} isDarkMode={isDarkMode} onToggleDarkMode={() => setIsDarkMode(!isDarkMode)} />
-            <main className="flex-1 bg-background flex flex-col h-full min-h-0" style={{ height: '100%' }}>
+            <main className="flex-1 bg-background flex flex-col h-full min-h-0 min-w-0">
               {adminScreen === "dashboard" && <AdminDashboard onNavigate={(s) => setAdminScreen(s as AdminScreen)} isDarkMode={isDarkMode} user={user} />}
               {adminScreen === "manage-notaries" && <ManageNotaries />}
               {adminScreen === "governance" && <Governance role="admin" user={user} />}

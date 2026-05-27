@@ -61,7 +61,9 @@ async function loadActor(req, res, next) {
 function requireRole(roleName) {
   return (req, res, next) => {
     if (!req.actor) return res.status(401).json({ error: 'Authentication required' });
-    if (req.actor.role === 'admin' || req.actor.role === roleName) return next();
+    const targetRoleNum = normalizeRole(roleName);
+    const actorRoleNum = normalizeRole(req.actor.role);
+    if (actorRoleNum >= 3 || actorRoleNum === targetRoleNum) return next();
     return res.status(403).json({ error: 'Insufficient role' });
   };
 }

@@ -4,7 +4,7 @@ import { Shield, ShieldAlert, CheckCircle2, Loader2, Wallet, LogIn, UserPlus, Fi
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://api.bbsns.online";
 
-type AppStatus = "loading" | "ready" | "signing" | "authorized" | "expired" | "error" | "genesis-check" | "genesis-activate" | "onboarding" | "token" | "promote";
+type AppStatus = "loading" | "ready" | "signing" | "cooldown" | "authorized" | "expired" | "error" | "genesis-check" | "genesis-activate" | "onboarding" | "token" | "promote" | "activate";
 
 function App() {
   const [status, setStatus] = useState<AppStatus>("loading");
@@ -13,6 +13,8 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [challenge, setChallenge] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [activationToken, setActivationToken] = useState<string | null>(null);
+  const [appInfo, setAppInfo] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [config, setConfig] = useState<any>(null);
   const [handshakeDomain, setHandshakeDomain] = useState<any>(null);
@@ -21,6 +23,8 @@ function App() {
   const [governanceMetadata, setGovernanceMetadata] = useState<any>(null);
   const [targetAddress, setTargetAddress] = useState<string | null>(null);
   const [isPromoting, setIsPromoting] = useState(false);
+  const [multiStepIndex, setMultiStepIndex] = useState<number>(0);
+  const [multiStepOperations, setMultiStepOperations] = useState<any[]>([]);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -69,7 +73,7 @@ function App() {
       target = params.get("targetAddress");
     }
 
-    const allowedModes = ["login", "genesis", "notarize", "promote", "gov-vote", "gov-submit", "multisig"];
+    const allowedModes = ["login", "genesis", "notarize", "promote", "gov-vote", "gov-submit", "multisig", "activate", "gov-execute"];
 
     const init = async () => {
       // 1. HARD INPUT VALIDATION
@@ -79,8 +83,8 @@ function App() {
         return;
       }
 
-      // sid is required for all modes EXCEPT genesis and promote
-      if (!sid && !["genesis", "promote"].includes(mode)) {
+      // sid is required for all modes EXCEPT genesis, promote, and activate
+      if (!sid && !["genesis", "promote", "activate"].includes(mode)) {
         setError("Missing session identifier (sessionId).");
         setStatus("error");
         return;
@@ -127,12 +131,24 @@ function App() {
         case "gov-vote":
         case "gov-submit":
         case "multisig":
+        case "gov-execute":
           if (!systemInitialized) {
             setError(`Protocol violation: ${mode} requested, but system is not yet initialized. Use Genesis first.`);
             setStatus("error");
           } else {
             setSessionId(sid);
-            fetchSession(sid!, mode);
+            fetchSession(sid!, mode, sysConfig);
+          }
+          break;
+
+        case "activate":
+          const token = params.get("token");
+          if (!token) {
+            setError("Missing activation token.");
+            setStatus("error");
+          } else {
+            setActivationToken(token);
+            fetchActivationInfo(token);
           }
           break;
 
@@ -155,7 +171,23 @@ function App() {
     init();
   }, [checkSystemStatus]);
 
-  const fetchSession = async (sid: string, currentMode: string) => {
+  const fetchActivationInfo = async (token: string) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/auth/activation-info?token=${token}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Invalid or expired activation token.");
+      }
+      const data = await res.json();
+      setAppInfo(data);
+      setStatus("activate");
+    } catch (err: any) {
+      setError(err.message);
+      setStatus("error");
+    }
+  };
+
+  const fetchSession = async (sid: string, currentMode: string, sysConfig: any) => {
     try {
       let endpointBase = `${BACKEND_URL}/api/auth/remote`;
       if (currentMode === "gov-vote") {
@@ -164,6 +196,8 @@ function App() {
         endpointBase = `${BACKEND_URL}/api/governance/remote/submit`;
       } else if (currentMode === "multisig") {
         endpointBase = `${BACKEND_URL}/api/governance/remote/confirm`;
+      } else if (currentMode === "gov-execute") {
+        endpointBase = `${BACKEND_URL}/api/governance/remote/execute`;
       }
 
       const res = await fetch(`${endpointBase}/status/${sid}`);
@@ -196,8 +230,44 @@ function App() {
         
         // Capture Governance Submission Metadata
         if (currentMode === "gov-submit" && data.proposal) {
-          setGovernanceMetadata(data.proposal);
+          let ops: any[] = [];
+          if (data.proposal.to === "MULTI_STEP") {
+            try { ops = JSON.parse(data.proposal.data); } catch (e) { console.error("MULTI_STEP parse error", e); }
+          }
+          setGovernanceMetadata({
+            ...data.proposal,
+            multisigAddress: data.multisigAddress
+          });
+          if (ops.length > 0) setMultiStepOperations(ops);
           console.log("[AUTH] Governance submission metadata detected:", data.proposal);
+        }
+
+        // Capture Governance MultiSig Confirmation Metadata
+        if (currentMode === "multisig" && data.txIndex !== undefined) {
+          setGovernanceMetadata({
+            txIndex: Number(data.txIndex),
+            multisigAddress: sysConfig?.contracts?.multisig
+          });
+          console.log("[AUTH] Governance MultiSig Confirmation metadata detected:", data.txIndex);
+        }
+
+        // Capture Governance MultiSig Execution Metadata
+        if (currentMode === "gov-execute" && data.txIndex !== undefined) {
+          setGovernanceMetadata({
+            txIndex: Number(data.txIndex),
+            multisigAddress: sysConfig?.contracts?.multisig
+          });
+          console.log("[AUTH] Governance MultiSig Execution metadata detected:", data.txIndex);
+        }
+
+        // Capture Governance Voting Metadata
+        if (currentMode === "gov-vote" && data.onChainTxIndex !== null && data.onChainTxIndex !== undefined) {
+          setGovernanceMetadata({
+            txIndex: Number(data.onChainTxIndex),
+            multisigAddress: data.multisigAddress || sysConfig?.contracts?.multisig,
+            decision: data.decision
+          });
+          console.log("[AUTH] Governance voting metadata detected:", data.onChainTxIndex, data.decision);
         }
         
         setStatus("ready");
@@ -248,21 +318,97 @@ function App() {
       setIsConnected(true);
       setError(null);
 
-      if (status === "genesis-check") {
-        const nftContract = new ethers.Contract(config.contracts.genesisNft, ["function balanceOf(address) view returns (uint256)"], provider);
-        const balance = await nftContract.balanceOf(address);
-        setHasGenesisNFT(Number(balance) > 0);
-        
-        // Re-check activation for this specific logic
-        const statusData = await checkSystemStatus();
-        if (statusData?.activated) {
-          setStatus("onboarding"); // SKIP activation if already done
-        } else {
-          setStatus("genesis-activate");
+      if (status === "genesis-check" || status === "activate") {
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const accounts = await provider.send("eth_requestAccounts", []);
+        const address = accounts[0];
+        setWalletAddress(address);
+        setIsConnected(true);
+        setError(null);
+
+        if (status === "genesis-check") {
+          const nftContract = new ethers.Contract(config.contracts.genesisNft, ["function balanceOf(address) view returns (uint256)"], provider);
+          const balance = await nftContract.balanceOf(address);
+          setHasGenesisNFT(Number(balance) > 0);
+          
+          // Re-check activation for this specific logic
+          const statusData = await checkSystemStatus();
+          if (statusData?.activated) {
+            setStatus("onboarding"); // SKIP activation if already done
+          } else {
+            setStatus("genesis-activate");
+          }
         }
       }
     } catch (err: any) {
       setError("Failed to connect wallet.");
+    }
+  };
+
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isActivating, setIsActivating] = useState(false);
+
+  const handleNotaryActivate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activationToken || !appInfo || !walletAddress) return;
+
+    if (walletAddress.toLowerCase() !== appInfo.wallet.toLowerCase()) {
+      setError(`Wallet mismatch. Please use: ${appInfo.wallet}`);
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setIsActivating(true);
+    setError(null);
+    try {
+      const provider = new ethers.BrowserProvider((window as any).ethereum);
+      const signer = await provider.getSigner();
+
+      // 1. Fetch Nonce
+      const nonceRes = await fetch(`${BACKEND_URL}/api/auth/nonce`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: walletAddress, purpose: "NOTARY_ACTIVATE" })
+      });
+      if (!nonceRes.ok) throw new Error("Failed to fetch secure nonce.");
+      const { nonce, message_template } = await nonceRes.json();
+
+      // 2. Sign Message
+      const signature = await signer.signMessage(message_template);
+
+      // 3. Submit Activation
+      const res = await fetch(`${BACKEND_URL}/api/auth/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: activationToken,
+          password,
+          signature,
+          nonce
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Activation failed.");
+      }
+
+      setStatus("authorized");
+      setTimeout(() => window.close(), 10000);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsActivating(false);
     }
   };
 
@@ -359,33 +505,141 @@ function App() {
         }
       } catch (e) { /* Not a JSON payload */ }
 
-      if (activeMode === "gov-vote" || activeMode === "gov-submit" || activeMode === "multisig") {
+      if (activeMode === "gov-vote" || activeMode === "gov-submit" || activeMode === "multisig" || activeMode === "gov-execute") {
         let authorizeEndpoint = `${BACKEND_URL}/api/governance/remote/vote/authorize`;
         
         // 🛡️ [Direct-Path] If this is a SUBMIT session and we have on-chain metadata, trigger direct transaction
         if (activeMode === "gov-submit" && governanceMetadata) {
            console.log("[AUTH] Initiating Direct MultiSig Submission...");
            try {
-              const abi = ["function submitTransaction(address,uint256,bytes) external returns (uint256)"];
+              const singularAbi = ["function submitTransaction(address[],uint256[],bytes[],bytes32) external"];
+              const singularMultisig = new ethers.Contract(governanceMetadata.multisigAddress, singularAbi, signer);
+
+              const propHash = governanceMetadata.proposalHash || "0x0000000000000000000000000000000000000000000000000000000000000000";
+              let targets = [];
+              let values = [];
+              let datas = [];
+
+              if (multiStepOperations.length > 0) {
+                  targets = multiStepOperations.map(op => op.target);
+                  values = multiStepOperations.map(op => BigInt(op.value || 0));
+                  datas = multiStepOperations.map(op => op.data || "0x");
+              } else {
+                  targets = [governanceMetadata.to];
+                  values = [BigInt(governanceMetadata.value || 0)];
+                  let dataHex = governanceMetadata.data || "0x";
+                  if (typeof dataHex === 'string' && dataHex.startsWith('[') && dataHex.endsWith(']')) {
+                      try {
+                          const parsed = JSON.parse(dataHex);
+                          if (parsed.length > 0 && parsed[0].data) dataHex = parsed[0].data;
+                      } catch(e) {}
+                  }
+                  datas = [dataHex];
+              }
+
+              const tx = await singularMultisig.submitTransaction(targets, values, datas, propHash);
+              console.log("[AUTH] MultiSig Transaction Submitted:", tx.hash);
+              await tx.wait();
+              console.log("[AUTH] Transaction Confirmed!");
+
+              const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/submit/sync-manual`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId, txHash: tx.hash, walletAddress: address })
+              });
+              if (!syncRes.ok) throw new Error("Blockchain transaction succeeded, but backend sync failed.");
+              setStatus("authorized");
+              setTimeout(() => window.close(), 10000);
+              return;
+           } catch (err: any) {
+              console.error("[AUTH_ERR] Direct submission failed:", err);
+              throw new Error(err.reason || err.message || "On-chain submission failed. Ensure you have gas and the correct wallet.");
+           }
+        }
+
+        // 🛡️ [Direct-Path] If this is a MULTISIG session and we have metadata, trigger direct transaction
+         if (activeMode === "multisig" && governanceMetadata) {
+            console.log("[AUTH] Initiating Direct MultiSig Confirmation...");
+            try {
+               const abi = [
+                  "function confirmTransaction(uint256) external",
+                  "function getTransaction(uint256) view returns (address, uint256, bytes, bool, uint256, uint256, uint256)"
+               ];
+               const multisig = new ethers.Contract(governanceMetadata.multisigAddress, abi, signer);
+               
+               // Self-healing State-Gap check: has this transaction already been executed on-chain?
+               const txData = await multisig.getTransaction(governanceMetadata.txIndex);
+               const alreadyExecuted = txData ? txData[3] : false;
+               
+               let txHashToSubmit = "";
+               if (alreadyExecuted) {
+                  console.log("[AUTH] Transaction has already been executed on-chain. Self-healing bypass triggered.");
+                  txHashToSubmit = "already_executed_onchain";
+               } else {
+                  const tx = await multisig.confirmTransaction(governanceMetadata.txIndex);
+                  console.log("[AUTH] MultiSig Confirmation Submitted:", tx.hash);
+                  const receipt = await tx.wait();
+                  console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+                  txHashToSubmit = tx.hash;
+               }
+               
+               // Step 2: Manual Sync with Backend
+               const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/confirm/sync-manual`, {
+                 method: "POST",
+                 headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify({ 
+                   sessionId, 
+                   txHash: txHashToSubmit,
+                   walletAddress: address 
+                 })
+               });
+
+               if (!syncRes.ok) {
+                  const syncData = await syncRes.json().catch(() => ({}));
+                  throw new Error(syncData.error || "Blockchain transaction succeeded, but backend sync failed.");
+               }
+
+               setStatus("authorized");
+               setTimeout(() => window.close(), 10000);
+               return;
+            } catch (err: any) {
+               console.error("[AUTH_ERR] Direct confirmation failed:", err);
+               throw new Error(err.reason || err.message || "On-chain confirmation failed. Ensure you have gas and the correct wallet.");
+            }
+         }
+
+        // 🛡️ [Direct-Path] If this is a GOV-EXECUTE session and we have metadata, trigger direct transaction
+        if (activeMode === "gov-execute" && governanceMetadata) {
+           console.log("[AUTH] Initiating Direct MultiSig Execution...");
+           try {
+              const abi = [
+                 "function executeTransaction(uint256) external",
+                 "function getTransaction(uint256) view returns (address, uint256, bytes, bool, uint256, uint256, uint256)"
+              ];
               const multisig = new ethers.Contract(governanceMetadata.multisigAddress, abi, signer);
               
-              const tx = await multisig.submitTransaction(
-                governanceMetadata.to,
-                governanceMetadata.value,
-                governanceMetadata.data
-              );
+              // Self-healing State-Gap check: has this transaction already been executed on-chain?
+              const txData = await multisig.getTransaction(governanceMetadata.txIndex);
+              const alreadyExecuted = txData ? txData[3] : false;
               
-              console.log("[AUTH] MultiSig Transaction Submitted:", tx.hash);
-              const receipt = await tx.wait();
-              console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+              let txHashToSubmit = "";
+              if (alreadyExecuted) {
+                 console.log("[AUTH] Transaction has already been executed on-chain. Self-healing bypass triggered.");
+                 txHashToSubmit = "already_executed_onchain";
+              } else {
+                 const tx = await multisig.executeTransaction(governanceMetadata.txIndex);
+                 console.log("[AUTH] MultiSig Execution Submitted:", tx.hash);
+                 const receipt = await tx.wait();
+                 console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+                 txHashToSubmit = tx.hash;
+              }
 
               // Step 2: Manual Sync with Backend
-              const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/submit/sync-manual`, {
+              const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/execute/sync-manual`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
                   sessionId, 
-                  txHash: tx.hash,
+                  txHash: txHashToSubmit,
                   walletAddress: address 
                 })
               });
@@ -399,8 +653,76 @@ function App() {
               setTimeout(() => window.close(), 10000);
               return;
            } catch (err: any) {
-              console.error("[AUTH_ERR] Direct submission failed:", err);
-              throw new Error(err.reason || err.message || "On-chain submission failed. Ensure you have gas and the correct wallet.");
+              console.error("[AUTH_ERR] Direct execution failed:", err);
+              throw new Error(err.reason || err.message || "On-chain execution failed. Ensure you have gas and the correct wallet.");
+           }
+        }
+
+        // 🛡️ [Direct-Path] If this is a VOTE session and we have metadata, trigger direct transaction
+        if (activeMode === "gov-vote" && governanceMetadata) {
+           console.log("[AUTH] Initiating Direct On-Chain Vote...");
+           try {
+              const abi = [
+                "function confirmTransaction(uint256) external",
+                "function revokeConfirmation(uint256) external",
+                "function isConfirmed(uint256,address) view returns (bool)"
+              ];
+              const multisig = new ethers.Contract(governanceMetadata.multisigAddress, abi, signer);
+              
+              // Self-healing State-Gap check: has this user already confirmed on-chain?
+              const alreadyConfirmed = await multisig.isConfirmed(governanceMetadata.txIndex, address);
+              console.log("[AUTH] On-chain confirmation status for this account:", alreadyConfirmed);
+
+              let txHashToSubmit = "";
+              
+              if (governanceMetadata.decision === "approve") {
+                 if (alreadyConfirmed) {
+                    console.log("[AUTH] Account has already confirmed this transaction on-chain. Self-healing bypass triggered.");
+                    txHashToSubmit = "already_confirmed_onchain";
+                 } else {
+                    console.log(`[AUTH] Calling confirmTransaction(${governanceMetadata.txIndex})`);
+                    const tx = await multisig.confirmTransaction(governanceMetadata.txIndex);
+                    console.log("[AUTH] Vote transaction submitted:", tx.hash);
+                    const receipt = await tx.wait();
+                    console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+                    txHashToSubmit = tx.hash;
+                 }
+              } else {
+                 if (!alreadyConfirmed) {
+                    console.log("[AUTH] Account has already revoked / not confirmed this transaction on-chain. Self-healing bypass triggered.");
+                    txHashToSubmit = "already_revoked_onchain";
+                 } else {
+                    console.log(`[AUTH] Calling revokeConfirmation(${governanceMetadata.txIndex})`);
+                    const tx = await multisig.revokeConfirmation(governanceMetadata.txIndex);
+                    console.log("[AUTH] Vote transaction submitted:", tx.hash);
+                    const receipt = await tx.wait();
+                    console.log("[AUTH] Transaction Confirmed in block:", receipt.blockNumber);
+                    txHashToSubmit = tx.hash;
+                 }
+              }
+
+              // Step 2: Authorize with Backend
+              const syncRes = await fetch(`${BACKEND_URL}/api/governance/remote/vote/authorize`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                  sessionId, 
+                  txHash: txHashToSubmit,
+                  walletAddress: address 
+                })
+              });
+
+              if (!syncRes.ok) {
+                 const syncData = await syncRes.json().catch(() => ({}));
+                 throw new Error(syncData.error || "Blockchain transaction succeeded, but backend sync failed.");
+              }
+
+              setStatus("authorized");
+              setTimeout(() => window.close(), 10000);
+              return;
+           } catch (err: any) {
+              console.error("[AUTH_ERR] Direct voting failed:", err);
+              throw new Error(err.reason || err.message || "On-chain voting failed. Ensure you have gas and the correct wallet.");
            }
         }
 
@@ -845,6 +1167,47 @@ function App() {
               </div>
             </div>
           )}
+
+          {governanceMetadata && (
+            <div className="bg-muted/50 rounded-xl p-4 mb-4" style={{ textAlign: 'left', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '8px' }}>
+                <Shield size={18} color="var(--primary)" />
+                <span style={{ fontWeight: '600', color: 'var(--primary)' }}>
+                  {activeMode === "gov-submit" ? "Submit Proposal" : activeMode === "multisig" ? "Confirm Multi-Sig Tx" : activeMode === "gov-execute" ? "Execute Multi-Sig Tx" : "Vote on Multi-Sig Tx"}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gap: '8px', fontSize: '0.8rem' }}>
+                {governanceMetadata.txIndex !== undefined && (
+                  <div>
+                    <span style={{ color: "var(--muted)", display: "block" }}>Transaction Index</span>
+                    <code style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>#{governanceMetadata.txIndex}</code>
+                  </div>
+                )}
+                {governanceMetadata.to && (
+                  <div>
+                    <span style={{ color: "var(--muted)", display: "block" }}>Target Contract</span>
+                    <code style={{ fontSize: '0.75rem', wordBreak: 'break-all' }}>{governanceMetadata.to}</code>
+                  </div>
+                )}
+                {governanceMetadata.decision && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                    <span style={{ color: "var(--muted)" }}>Vote Decision</span>
+                    <span style={{ 
+                      padding: '2px 8px', 
+                      borderRadius: '4px', 
+                      fontSize: '0.7rem',
+                      background: governanceMetadata.decision === 'approve' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                      color: governanceMetadata.decision === 'approve' ? '#10b981' : '#ef4444',
+                      border: governanceMetadata.decision === 'approve' ? '1px solid #10b98133' : '1px solid #ef444433'
+                    }}>
+                      {governanceMetadata.decision.toUpperCase()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {!isConnected ? (
             <button className="button" onClick={connectWallet}>
               <Wallet size={18} style={{ marginRight: "10px" }} />
@@ -853,13 +1216,32 @@ function App() {
           ) : (
             <>
               <div className="address-chip" style={{ marginBottom: "1rem" }}>{walletAddress}</div>
-              {challenge?.includes('"domain"') ? (
+              {activeMode === "gov-execute" ? (
+                <button className="button" onClick={() => handleAuthorize(true)}>
+                  <Shield size={18} style={{ marginRight: "10px" }} />
+                  Execute Transaction (Direct MetaMask)
+                </button>
+              ) : activeMode === "multisig" || activeMode === "gov-vote" ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
-                  <button className="button" onClick={() => handleAuthorize(false)} style={{ width: '100%' }}>
-                    <Shield size={18} style={{ marginRight: "10px" }} />
-                    Approve (Gasless)
+                  <button className="button" style={{ width: '100%' }} onClick={() => handleAuthorize(true)}>
+                    <Wallet size={18} style={{ marginRight: "10px" }} />
+                    Submit Direct Transaction (Pay Gas)
                   </button>
-                  <button className="button" style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }} onClick={() => handleAuthorize(true)}>
+                </div>
+              ) : activeMode === "gov-submit" && multiStepOperations.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                  <div className="alert alert-warning" style={{ fontSize: "0.75rem", padding: "0.5rem" }}>
+                    <ShieldAlert size={14} style={{ marginRight: "4px", display: "inline" }} />
+                    <strong>DO NOT CLOSE THIS WINDOW.</strong> This action requires two sequential signatures to grant full authority.
+                  </div>
+                  <button className="button" style={{ width: '100%' }} onClick={() => handleAuthorize(true)}>
+                    <Wallet size={18} style={{ marginRight: "10px" }} />
+                    {multiStepIndex === 0 ? "Promote Admin Role (Step 1/2)" : "Add Governance Signer (Step 2/2)"}
+                  </button>
+                </div>
+              ) : challenge?.includes('"domain"') ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                  <button className="button" style={{ width: '100%' }} onClick={() => handleAuthorize(true)}>
                     <Wallet size={18} style={{ marginRight: "10px" }} />
                     Approve & Pay Gas (Direct)
                   </button>
@@ -883,12 +1265,62 @@ function App() {
         </div>
       )}
 
+      {status === "cooldown" && (
+        <div style={{ textAlign: "center", padding: "2rem" }}>
+          <div className="status-spinner" />
+          <div style={{ color: "var(--primary)", fontWeight: "600", marginTop: "1rem" }}>
+            <span style={{ display: "inline-block", animation: "pulse 1.5s infinite" }}>{"[=======>  ]"}</span> Processing Finality...
+          </div>
+          <span style={{ fontSize: "0.85rem", color: "var(--muted)" }}>Please do not close this window. Preparing step 2/2.</span>
+        </div>
+      )}
+
       {status === "authorized" && (
         <div style={{ textAlign: "center", padding: "2rem" }}>
           <CheckCircle2 size={64} color="var(--primary)" style={{ margin: "0 auto 1.5rem" }} />
           <h2 style={{ color: "var(--primary)", marginBottom: "0.5rem" }}>Operation Successful!</h2>
           <p style={{ color: "var(--muted)" }}>You can now return to the desktop app.</p>
           <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontStyle: "italic" }}>Closing in 10 seconds...</span>
+        </div>
+      )}
+
+      {status === "activate" && (
+        <div className="view-container">
+          {!isConnected ? (
+            <div className="onboarding-form">
+              <div className="alert alert-info">
+                <strong>Professional Identity Found</strong><br/>
+                Welcome, {appInfo?.name}. Please connect the wallet authorized for your notary account.
+              </div>
+              <div className="address-chip" style={{ marginBottom: "1rem" }}>{appInfo?.wallet}</div>
+              <button className="button" onClick={connectWallet}>
+                <Wallet size={18} style={{ marginRight: "10px" }} />
+                Connect Authorized Wallet
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleNotaryActivate} className="onboarding-form">
+              <div className="alert alert-info">
+                <strong>Wallet Verified</strong><br/>
+                Set your secure password to complete activation.
+              </div>
+              <div className="address-chip" style={{ marginBottom: "1rem" }}>{walletAddress}</div>
+              
+              <div className="form-group">
+                <label>New Password</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min 8 characters" required />
+              </div>
+              <div className="form-group">
+                <label>Confirm Password</label>
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat password" required />
+              </div>
+
+              <button type="submit" className="button" disabled={isActivating} style={{ marginTop: "1rem" }}>
+                {isActivating ? <Loader2 className="animate-spin" /> : <Shield size={18} style={{ marginRight: "10px" }} />}
+                Finalize Activation
+              </button>
+            </form>
+          )}
         </div>
       )}
 

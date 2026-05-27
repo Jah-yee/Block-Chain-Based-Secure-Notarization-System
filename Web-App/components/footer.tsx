@@ -45,7 +45,7 @@ export function Footer() {
             <div className="space-y-2">
               <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                 <Mail className="h-4 w-4" />
-                <span>support@bbsns.com</span>
+                <span>support@bbsns.online</span>
               </div>
               <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                 <Phone className="h-4 w-4" />
@@ -82,7 +82,7 @@ export function Footer() {
 
         <div className="border-t mt-8 pt-8 text-center">
           <p className="text-sm text-muted-foreground">
-            © 2024 BBSNS. All rights reserved. Blockchain Based Secure Notarization System.
+            © {new Date().getFullYear()} BBSNS. All rights reserved. Blockchain Based Secure Notarization System.
           </p>
         </div>
       </div>
