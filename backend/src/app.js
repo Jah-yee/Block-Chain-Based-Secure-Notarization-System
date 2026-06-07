@@ -219,7 +219,7 @@ app.use((err, req, res, next) => {
     }
 
     // Handle Multer File Size Limits
-    if (err.code === ' LIMIT_FILE_SIZE') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).json({
             error: 'File too large',
             message: 'The uploaded file exceeds the maximum allowed size for this endpoint.',
